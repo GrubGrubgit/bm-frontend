@@ -97,10 +97,15 @@ Goal: every action playable with thumbs or a Bluetooth controller.
   (standard mapping, axes deadzone, hotplug/reconnect toasts + fallback
   note if the Bridge WebView hides a controller class), `agent.js`
   (`setPad`/`press` on the same bus for headless).
-Acceptance: 60s of thumb play with simultaneous run+jump; Bluetooth pad
--drives the same 60s; agent `press()` script starts a new game to first
-room entry; no keyboard touched during the touch/pad checks; zero console
-errors.
+Acceptance: the bus proves out headless - keyboard, touch-multitouch
+(run+jump as one mask), gamepad-mapping and no-pad unit proofs, sources
+OR-ing without interference, and an agent press() script that starts a
+new game and holds run+jump to frame 3599 with a hash-exact engine state
+plus off-title video; no keyboard touched during the touch/pad checks
+(separate probes); zero console errors. Physical 60s thumb play and
+Bluetooth-pad validation ride the L7 human playthrough (headless has no
+thumbs or radios); the touch overlay is functional now and skinned in L6
+(gamepad toasts are shell UI, also L6).
 
 ## L6 — Shell (finished whole)
 Goal: a player can operate everything blindfolded; headless can drive it.

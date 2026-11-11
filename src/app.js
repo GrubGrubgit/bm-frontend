@@ -300,9 +300,9 @@ async function selfTestL3() {
       }
     }
     const ctn = document.getElementById("playCtn");
-    statusEl.textContent = "L3: tap canvas for fullscreen";
+    statusEl.textContent = "L3: tap for fullscreen";
     document.title = "BM-L3-NEEDS-TAP";
-    await new Promise(res => ctn.addEventListener("pointerdown", res, { once: true }));
+    await new Promise(res => window.addEventListener("pointerdown", res, { once: true }));
     document.title = "BM-L3-RUNNING";
     statusEl.textContent = "L3: fullscreen";
     try {
@@ -460,4 +460,88 @@ async function selfTestL4() {
 if (qs.has("headless")) {
   const t4 = qs.get("test");
   if (t4 === "l4") selfTestL4();
+}
+
+// ---- L5: one virtual-pad bus (SPEC section 6 src/input, section 7). ----
+// Four named sources (keyboard/touch/gamepad/agent) OR into a single NES
+// mask ($01=A $02=B $04=Select $08=Start $10=Up $20=Down $40=Left $80=Right)
+// that every engine step reads. Thumb controls are a fixed bottom overlay
+// (L6 skins it); keyboard is dev convenience; gamepad uses the standard
+// mapping with stick deadzone; agent drives the same bus headless.
+import { PadBus } from "./input/bus.js";
+import { attachKeyboard } from "./input/keyboard.js";
+import { mountTouch } from "./input/touch.js";
+import { pollGamepad, attachGamepad } from "./input/gamepad.js";
+import { AgentPad } from "./input/agent.js";
+const padBus = new PadBus();
+const agentPad = new AgentPad(padBus, l2host);
+attachKeyboard(padBus);
+const touchUI = mountTouch(padBus);
+attachGamepad(padBus);
+window.BM.setPad = function (m) { return agentPad.setPad(m); };
+window.BM.press = function (frames, mask) { return agentPad.press(frames, mask); };
+window.BM.frame = function () { return l2host.frame(); };
+window.BM.busMask = function () { return padBus.getMask(); };
+const fail5 = s => { document.title = "BM-L5-FAIL:" + s; };
+function kd(code) { window.dispatchEvent(new KeyboardEvent("keydown", { code: code })); }
+function ku(code) { window.dispatchEvent(new KeyboardEvent("keyup", { code: code })); }
+function pdown(el, id) { el.dispatchEvent(new PointerEvent("pointerdown", { pointerId: id, bubbles: true, cancelable: true })); }
+function pup(el, id) { el.dispatchEvent(new PointerEvent("pointerup", { pointerId: id, bubbles: true, cancelable: true })); }
+function fakeNav(btns, axes) {
+  const b = [];
+  for (let i = 0; i < 16; i++) b.push({ pressed: !!btns[i] });
+  return { getGamepads: () => [{ connected: true, buttons: b, axes: axes || [0, 0] }] };
+}
+async function selfTestL5() {
+  document.title = "BM-L5-RUNNING";
+  try {
+    statusEl.textContent = "L5: source mapping proofs";
+    kd("ArrowRight"); kd("KeyX");
+    if (padBus.getMask() !== 0x81) return fail5("kbd:" + padBus.getMask().toString(16));
+    ku("ArrowRight"); ku("KeyX");
+    if (padBus.getMask() !== 0) return fail5("kbd-clear:" + padBus.getMask().toString(16));
+    pdown(touchUI.buttons.left, 11); pdown(touchUI.buttons.a, 12);
+    if (padBus.getMask() !== 0x41) return fail5("touch-multitouch:" + padBus.getMask().toString(16));
+    pup(touchUI.buttons.left, 11); pup(touchUI.buttons.a, 12);
+    if (padBus.getMask() !== 0) return fail5("touch-clear:" + padBus.getMask().toString(16));
+    if (pollGamepad(fakeNav({ 0: true, 14: true })) !== 0x41) return fail5("pad-map");
+    if (pollGamepad(fakeNav({}, [0.9, -0.9])) !== 0x90) return fail5("pad-stick");
+    if (pollGamepad({ getGamepads: () => [null] }) !== 0) return fail5("pad-null");
+    if (pollGamepad(null) !== 0) return fail5("pad-nonull");
+    kd("ArrowRight");
+    agentPad.setPad(0x01);
+    if (padBus.getMask() !== 0x81) return fail5("combine:" + padBus.getMask().toString(16));
+    ku("ArrowRight");
+    agentPad.setPad(0);
+    if (padBus.getMask() !== 0) return fail5("combine-clear:" + padBus.getMask().toString(16));
+    statusEl.textContent = "L5: agent 60s run (start@2700, hold L+A)";
+    const pack = await l2ensurePack();
+    await l2host.spawn(pack, "build/game.wasm");
+    for (let f = 1; f < 2700; f++) {
+      agentPad.setPad(0);
+      await l2host.go(1, padBus.getMask());
+      if ((f & 1023) === 0) statusEl.textContent = "L5: capture " + f + "/3600";
+    }
+    await agentPad.press(5, 8);
+    if (l2host.frame() !== 2704) return fail5("press-frame:" + l2host.frame());
+    for (let f = 2705; f < 3600; f++) {
+      agentPad.setPad(f >= 2800 ? 0x41 : 0);
+      await l2host.go(1, padBus.getMask());
+      if ((f & 1023) === 0) statusEl.textContent = "L5: capture " + f + "/3600";
+    }
+    if (l2host.frame() !== 3599) return fail5("survive:" + l2host.frame());
+    if ((l2host.ctl[6] >>> 0) !== 0xb31cbf03) return fail5("hash:" + (l2host.ctl[6] >>> 0).toString(16));
+    const v = l2host.videoBytes();
+    let nz = 0;
+    for (let i = 0; i < v.length; i++) if (v[i] !== 0) nz++;
+    if (nz < 1000) return fail5("video-blank");
+    const O = await loadOraclePixels("work/oracle.png");
+    if (eqB(v, O.px)) return fail5("still-on-title");
+    statusEl.textContent = "L5 bus proven: mappings + 60s agent run exact";
+    document.title = "BM-L5-PASS";
+  } catch (e) { fail5("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+if (qs.has("headless")) {
+  const t5 = qs.get("test");
+  if (t5 === "l5") selfTestL5();
 }

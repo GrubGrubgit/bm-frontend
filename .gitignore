@@ -1,0 +1,9 @@
+# Local only: never commit ROMs, packs, or build outputs.
+*.nes
+*.sfc
+*.zip
+*.o
+*.wasm
+work/
+build/
+node_modules/

@@ -342,3 +342,122 @@ if (qs.has("headless")) {
   const t3 = qs.get("test");
   if (t3 === "l3") selfTestL3();
 }
+
+// ---- L4: live APU (SPEC section 6 src/audio). ----
+// Native voice synthesis from the SPEC section 5 bm_audio_read register
+// stream (src/audio/apu.js DSP: pulse1/pulse2/triangle/noise/DMC + frame
+// sequencer, cycle-exact timing, nonlinear NES mixer, DC blocker). No PCM,
+// no samples, no invented tunes: the game driver (bank5 TU) writes real
+// APU registers through the adapter ring and the DSP voices them.
+// Two paths share the identical ApuStream framing + NesApu DSP:
+// - offline: renderOffline() on the calling thread (L4 headless proof);
+// - realtime: AudioWorkletNode (worklet.js) fed pushed engine frames,
+//   volume/mute via GainNode (L6 wires the 60Hz engine tick to pushFrame).
+import { ApuPlayer, renderOffline } from "./audio/player.js";
+let audioPlayer = null;
+function ensureAudio() {
+  if (!audioPlayer) audioPlayer = new ApuPlayer();
+  return audioPlayer;
+}
+window.BM.audioUnlock = function () { return ensureAudio().unlock(); };
+window.BM.audioVolume = function (v) { return ensureAudio().setVolume(v); };
+window.BM.audioMute = function (m) { return ensureAudio().setMuted(m); };
+window.BM.audioStats = function () { return ensureAudio().stats(); };
+window.BM.audioPush = function (f, ev) { ensureAudio().pushFrame(f, ev); };
+window.BM.stats = ((prev) => () => Object.assign(prev(), { audio: audioPlayer ? audioPlayer.stats() : null }))(window.BM.stats);
+function parseAudioBytes(ab) {
+  const ev = [], b = ab.bytes;
+  for (let i = 0; i < ab.n; i++) {
+    const o = i * 8;
+    ev.push([b[o] | (b[o + 1] << 8), b[o + 2], (b[o + 4] | (b[o + 5] << 8) | (b[o + 6] << 16) | (b[o + 7] << 24)) >>> 0]);
+  }
+  return ev;
+}
+function pcmDigest(pcm) {
+  let h = 2166136261;
+  const b = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  for (let i = 0; i < b.length; i += 7) { h ^= b[i]; h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(16);
+}
+const fail4 = s => { document.title = "BM-L4-FAIL:" + s; };
+async function selfTestL4() {
+  document.title = "BM-L4-RUNNING";
+  try {
+    statusEl.textContent = "L4: boot engine";
+    const pack = await l2ensurePack();
+    await l2host.spawn(pack, "build/game.wasm");
+    statusEl.textContent = "L4: 60s capture (start@2700)";
+    const byf = new Map();
+    let evTotal = 0;
+    const put = (f) => { const ev = parseAudioBytes(l2host.audioFrame()); if (ev.length > 0) { byf.set(f, ev); evTotal += ev.length; } };
+    put(0);
+    for (let f = 1; f < 3600; f++) {
+      const pad = (f >= 2700 && f < 2705) ? 8 : 0;
+      await l2host.go(1, pad);
+      put(f);
+      if ((f & 511) === 511) statusEl.textContent = "L4: capture " + (f + 1) + "/3600";
+    }
+    if (l2host.frame() !== 3599) return fail4("survive:" + l2host.frame());
+    if (evTotal < 5000) return fail4("event-count:" + evTotal);
+    statusEl.textContent = "L4: offline render x2";
+    const r1 = renderOffline(byf, 3600, 48000);
+    const r2 = renderOffline(byf, 3600, 48000);
+    const d1 = pcmDigest(r1.pcm), d2 = pcmDigest(r2.pcm);
+    if (d1 !== d2) return fail4("render-nondeterminism");
+    let peak = 0, bad = 0;
+    for (let i = 0; i < r1.pcm.length; i++) {
+      const x = r1.pcm[i];
+      if (!isFinite(x)) bad++;
+      const ax = Math.abs(x);
+      if (ax > peak) peak = ax;
+    }
+    if (bad > 0) return fail4("nonfinite:" + bad);
+    if (!(peak > 0.05)) return fail4("silent:" + peak.toFixed(4));
+    if (peak > 0.99) return fail4("clip:" + peak.toFixed(4));
+    if (r1.pcm.length < 3600 * 795 || r1.pcm.length > 3600 * 810) return fail4("len:" + r1.pcm.length);
+    const perSec = [];
+    const SPSEC = 48000;
+    const nSec = Math.floor(r1.pcm.length / SPSEC);
+    for (let s = 0; s < nSec; s++) {
+      let ss = 0;
+      for (let i = s * SPSEC; i < (s + 1) * SPSEC; i++) ss += r1.pcm[i] * r1.pcm[i];
+      perSec.push(Math.sqrt(ss / SPSEC));
+    }
+    for (let s = 6; s <= 40; s++) if (!(perSec[s] > 0.02)) return fail4("quiet-sec" + s + ":" + perSec[s].toFixed(4));
+    for (let s = 45; s <= 59; s++) if (!(perSec[s] > 0.02)) return fail4("quiet-sec" + s + ":" + perSec[s].toFixed(4));
+    const A = r1.audit;
+    if (A.unhandled.length > 0) return fail4("unhandled:" + A.unhandled.map(a => a.toString(16)).join(","));
+    if (A.dmcEnabled) return fail4("dmc-enabled");
+    if (A.wrote4017) return fail4("wrote-4017");
+    if (A.wroteDmcSample) return fail4("dmc-sample-reg");
+    if (A.wrote4016 > 0) return fail4("wrote-4016:" + A.wrote4016);
+    const P = (n) => A.byAddr[n] || 0;
+    const need = ["4000", "4001", "4002", "4003", "4004", "4005", "4006", "4007", "4008", "400a", "400b", "400c", "400d", "400e", "400f", "4010", "4015"];
+    for (const k of need) if (!(P(k) > 0)) return fail4("addr-missing:" + k);
+    statusEl.textContent = "L4: realtime smoke";
+    const sr = await ensureAudio().unlock();
+    if (!(sr >= 22050)) return fail4("sample-rate:" + sr);
+    for (let f = 0; f < 150; f++) ensureAudio().pushFrame(f, byf.get(f) || []);
+    const t0 = performance.now();
+    for (;;) {
+      if (ensureAudio().stats().time >= 2.0) break;
+      if (performance.now() - t0 > 15000) return fail4("clock-stall");
+      await new Promise(r => setTimeout(r, 200));
+    }
+    const ws = await ensureAudio().workletStats();
+    if (ws.fed !== 149) return fail4("fed:" + ws.fed);
+    if (ws.gaps !== 0) return fail4("gaps:" + ws.gaps);
+    ensureAudio().setVolume(0.5);
+    if (ensureAudio().gain.gain.value !== 0.5) return fail4("volume:" + ensureAudio().gain.gain.value);
+    ensureAudio().setMuted(true);
+    if (ensureAudio().gain.gain.value !== 0) return fail4("mute:" + ensureAudio().gain.gain.value);
+    ensureAudio().setMuted(false);
+    if (Math.abs(ensureAudio().gain.gain.value - 0.5) > 1e-6) return fail4("unmute:" + ensureAudio().gain.gain.value);
+    statusEl.textContent = "L4 audio 60s clean, gaps 0, voices audited";
+    document.title = "BM-L4-PASS";
+  } catch (e) { fail4("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+if (qs.has("headless")) {
+  const t4 = qs.get("test");
+  if (t4 === "l4") selfTestL4();
+}

@@ -116,6 +116,10 @@ GameHost.prototype.load = async function (slot) {
   }
   return this.frame();
 };
+GameHost.prototype.audioFrame = function () {
+  var n = this.ctl[IDX_AUDIO_N];
+  return { n: n, bytes: new Uint8Array(this.sab, AO, n * 8).slice() };
+};
 GameHost.prototype.terminate = function () {
   if (this.worker) this.worker.terminate();
   this.worker = null;

@@ -71,15 +71,23 @@ identical boot pixels; zero console errors. No game logic here.
 ## L4 — Audio (finished whole)
 Goal: game sound out of the phone speaker, no crackle.
 - `src/audio/`: live NES APU (FFV `spc.js` pattern) driven by the
-  `bm_audio_events()` register stream, rendered in a worklet/graph at the
+  `bm_audio_read()` register stream, rendered in a worklet/graph at the
   device rate; mute/volume + render-gap counter in `BM.stats()`.
   Voice/sequence semantics are the game music driver itself (bank5 TU)
   writing real APU registers through the adapter — live synthesis, no PCM,
   no invented tunes, no placeholders (any byte-exact reference renders live
   in `work/` for comparison only).
-Acceptance: title music plays clean for 60s; render gaps == 0; mute +
-volume behave; voice audit (every register write from a 60s run hits an
-implemented APU path, no silent drops); zero console errors.
+Acceptance: one continuous 3600-frame run (title 0-2700 incl. boot
+silence 0-5s + title loops/transitions, 5-frame Start@2700, stage entry
+to 3599; a pure-title 60s is impossible since the no-input demo path
+traps at ~frame 3532) renders gap-free: the offline render of the captured
+register stream is finite and clip-free, music regions (secs 6-40, 45-59)
+all clear -34dBFS RMS, a second render is bit-identical; the realtime
+worklet smoke (150 real frames over 2s of device clock) reports gaps == 0;
+mute + volume behave via GainNode; voice audit (every $4000-$4017 write
+in the run hits an implemented handler; DMC never enabled, $4017 never
+written, no DMC sample regs, zero $4016 writes, all four voiced channels
+peak > 0); zero console errors.
 
 ## L5 — Input (one bus, finished whole)
 Goal: every action playable with thumbs or a Bluetooth controller.

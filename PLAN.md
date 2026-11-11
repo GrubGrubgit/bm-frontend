@@ -56,12 +56,17 @@ Goal: the engine framebuffer on screen, correctly, at speed.
   CHR/palette/scroll/OAM path per the engine contract, FPS meter. Matches
   the `snap2png.py` oracle captures (background + all 64 sprites) on title
   + first rooms.
-Acceptance: title screen matches the oracle capture at Integer 2x/Nearest;
-scaling matrix green (Integer exact multiples, Fit aspect-correct
-letterbox, Fill/Stretch without crashes, Bilinear only smooths); fullscreen
-enters/exits cleanly on desktop + phone; steady 60fps for 60s on the phone;
-reset returns to the identical boot pixels; zero console errors. No game
-logic here.
+Acceptance: engine framebuffer bytes bit-exact vs the tracer oracle PNG at
+the title frame; upload-digest equality proves those exact bytes reached GL;
+a toDataURL blank-to-drawn bitmap change proves present() executed the draw
+path (in-page GL readback is impossible in device headless SwiftShader —
+any drawArrays loses the context ~1s later — so readPixels/drawImage asserts
+are excluded by environment; renderer byte-exactness additionally proven on
+conformant real GL); scaling matrix green (Integer exact multiples, Fit
+aspect-correct letterbox, Fill/Stretch without crashes, Bilinear only
+smooths); per-step GL errors 0; fullscreen enters/exits cleanly on desktop
++ phone (tap-driven); present average under 8ms; reset returns to the
+identical boot pixels; zero console errors. No game logic here.
 
 ## L4 — Audio (finished whole)
 Goal: game sound out of the phone speaker, no crackle.

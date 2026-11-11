@@ -19,7 +19,7 @@ async function api(method, path, body) {
   const drv = spawn("chromedriver", args, { stdio: "ignore" });
   await sleep(1500);
   try {
-    const chromeArgs = ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=800,600"];
+    const chromeArgs = ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=" + (process.env.WINSIZE || "800,600")].concat((process.env.GLFLAGS || "").split(" ").filter(s => s.length > 0));
     if (process.env.PROFILE) chromeArgs.push("--user-data-dir=" + process.env.PROFILE);
     const s = await api("POST", "/session", { capabilities: { alwaysMatch: { browserName: "chrome", "goog:chromeOptions": { args: chromeArgs }, "goog:loggingPrefs": { browser: "ALL" } } } });
     const sid = s.sessionId;
@@ -27,10 +27,23 @@ async function api(method, path, body) {
       await api("POST", "/session/" + sid + "/url", { url });
       const t0 = Date.now();
       let title = "";
+      let clicked = false;
+      const tapMarker = process.env.TAP_MARKER || "";
+      const clickSel = process.env.CLICK_SEL || "#playCtn";
       for (;;) {
         title = await api("GET", "/session/" + sid + "/title");
         if (title.indexOf(marker) !== -1) break;
         if (Date.now() - t0 > tmo) throw new Error("TIMEOUT want=" + marker + " last=" + title);
+        if (tapMarker && !clicked && title.indexOf(tapMarker) !== -1) {
+          const el = await api("POST", "/session/" + sid + "/element", { using: "css selector", value: clickSel });
+          const eid = el["element-6066-11e4-a52e-4f735466cecf"] || el.ELEMENT;
+          await api("POST", "/session/" + sid + "/actions", { actions: [{ type: "pointer", id: "m", parameters: { pointerType: "mouse" }, actions: [
+            { type: "pointerMove", duration: 0, origin: { "element-6066-11e4-a52e-4f735466cecf": eid }, x: 4, y: 4 },
+            { type: "pointerDown", button: 0 }, { type: "pointerUp", button: 0 }
+          ] }] });
+          await api("DELETE", "/session/" + sid + "/actions");
+          clicked = true;
+        }
         await sleep(500);
       }
       const logs = await api("POST", "/session/" + sid + "/log", { type: "browser" });

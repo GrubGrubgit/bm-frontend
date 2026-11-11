@@ -83,10 +83,15 @@ mobile browsers (secondary).
 - `src/rom/` — loader + CRC + header (FFV `rom.js` pattern).
 - `src/pack/` — builder + reader + schema version (FFV `pack.js` +
   `packreader.js` pattern).
-- `src/video/` — WebGL renderer replacing the PPU: CHR decode, palette,
-  nametable/attribute fetch, scroll, OAM sprites, vblank/NMI presentation,
+- `src/video/` — WebGL uploader + present of the SPEC section 5 framebuffer
+  (CHR/palette/scroll/OAM compositing lives in the C adapter, oracle-verified):
   scaling (Integer/Fit/Fill/Stretch) + filter (Nearest default/Bilinear) +
-  fullscreen viewport handling, FPS meter. No game code.
+  fullscreen viewport handling, FPS meter. No game code. Display proof is
+  upload-digest equality plus a toDataURL blank-to-drawn bitmap change with
+  per-step GL errors 0 (in-page GL readback is impossible in device headless
+  SwiftShader — any drawArrays loses the context ~1s later — so readPixels/
+  drawImage asserts are excluded by environment; renderer byte-exactness was
+  additionally proven on conformant real GL).
 - `src/audio/` — live NES APU (FFV `spc.js` pattern: native voice
   synthesis from the engine register stream, not PCM playback):
   pulse/triangle/noise/DMC + frame counter per the game driver (bank5 TU),

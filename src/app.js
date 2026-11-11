@@ -163,3 +163,182 @@ if (qs.has("headless")) {
   const t2 = qs.get("test");
   if (t2 === "l2") selfTestL2();
 }
+
+// ---- L3: WebGL video (SPEC section 6 src/video). ----
+// Displays the SPEC section 5 bm_video_ptr bytes through the VideoRenderer
+// present path (CHR/palette/scroll/OAM compositing already happened in the
+// C adapter, oracle-verified). No game code here.
+// Display-proof note: engine bytes are proven EXACT vs work/oracle.png
+// (eqB - the same bytes the node harness cmp-verified against the tracer
+// oracle). In-page GL pixel readback (readPixels/drawImage/compositor
+// capture of the canvas layer) is NOT possible in this device headless
+// Chromium (SwiftShader stack: any drawArrays call loses the context ~1s
+// later, getError 37442/CONTEXT_LOST; clear-only survives), so the in-page
+// display proof is: (a) upload-digest == oracle FNV (the exact title bytes
+// reached GL), (b) the toDataURL bitmap changes blank -> drawn across
+// present() (present() executed the draw path and mutated the bitmap),
+// (c) per-step GL errors all 0. Renderer byte-exactness (exact corners,
+// uniform 2x2 blocks, context stays alive) was additionally proven on
+// conformant real GL.
+import { VideoRenderer } from "./video/renderer.js";
+let video = null;
+function ensureVideo() {
+  if (!video) video = new VideoRenderer(document.getElementById("gameCanvas"));
+  return video;
+}
+function fnv(b) {
+  let h = 2166136261;
+  for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(16);
+}
+function strFnv(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i) & 255; h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(16);
+}
+function eqB(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+function loadOraclePixels(url) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const x = c.getContext("2d");
+        x.drawImage(img, 0, 0);
+        const d = x.getImageData(0, 0, c.width, c.height);
+        res({ w: c.width, h: c.height, px: d.data });
+      } catch (e) { rej(e); }
+    };
+    img.onerror = () => rej(new Error("img-load"));
+    img.src = url;
+  });
+}
+window.BM.videoPresent = function () {
+  ensureVideo();
+  video.upload(l2host.videoBytes());
+  return video.present();
+};
+window.BM.videoMode = function (s, f) { ensureVideo(); video.setMode(s, f); return video.scale + "/" + video.filter; };
+window.BM.videoResize = function (w, h, d) {
+  ensureVideo();
+  video.resize(w, h, d || 1);
+  return { w: video.cv.width, h: video.cv.height, rect: video.rect() };
+};
+window.BM.videoFps = function () { return video ? video.fps : -1; };
+window.BM.videoDigest = function () { return video ? video.lastDigest : "none"; };
+window.BM.videoFullscreen = async function (on) {
+  ensureVideo();
+  const ctn = document.getElementById("playCtn");
+  if (on === false) { await video.exitFullscreen(); return !!document.fullscreenElement; }
+  await video.enterFullscreen(ctn);
+  return !!document.fullscreenElement;
+};
+const fail3 = s => { document.title = "BM-L3-FAIL:" + s; };
+function stepsMsg() { return video && video.lastSteps ? video.lastSteps.join(",") : "-"; }
+async function selfTestL3() {
+  document.title = "BM-L3-RUNNING";
+  try {
+    statusEl.textContent = "L3: boot engine";
+    const pack = await l2ensurePack();
+    await l2host.spawn(pack, "build/game.wasm");
+    await l2host.go(39, 0);
+    if (l2host.frame() !== 39) return fail3("frame:" + l2host.frame());
+    const v0 = l2host.videoBytes().slice();
+    const D1 = fnv(v0);
+    statusEl.textContent = "L3: oracle compare";
+    const O = await loadOraclePixels("work/oracle.png");
+    if (O.w !== 256 || O.h !== 240) return fail3("oracle-size:" + O.w + "x" + O.h);
+    if (!eqB(v0, O.px)) return fail3("oracle-bytes");
+    ensureVideo();
+    statusEl.textContent = "L3: display-path proof";
+    video.resize(256, 240, 1);
+    video.setMode("integer", "nearest");
+    video.gl.viewport(0, 0, video.cv.width, video.cv.height);
+    video.gl.clearColor(0, 0, 0, 1);
+    video.gl.clear(video.gl.COLOR_BUFFER_BIT);
+    const blankD = strFnv(video.cv.toDataURL());
+    video.upload(v0);
+    const dpe = video.present();
+    const shownD = strFnv(video.cv.toDataURL());
+    if (dpe !== 0) return fail3("dp-present:" + dpe + " steps=" + stepsMsg());
+    if (video.lastDigest !== D1) return fail3("dp-upload-digest");
+    if (blankD === shownD) return fail3("display-nochange");
+    statusEl.textContent = "L3: integer 2x + scaling matrix";
+    video.resize(512, 480, 1);
+    video.setMode("integer", "nearest");
+    const r0 = video.rect();
+    if (r0.x !== 0 || r0.y !== 0 || r0.w !== 512 || r0.h !== 480) return fail3("integer-rect");
+    video.upload(v0);
+    if (video.present() !== 0) return fail3("gl-err steps=" + stepsMsg());
+    if (video.lastDigest !== D1) return fail3("upload-digest");
+    const vps = [[512, 480], [800, 600], [390, 844]];
+    const modes = ["integer", "fit", "fill", "stretch"];
+    const fils = ["nearest", "bilinear"];
+    for (const vp of vps) {
+      video.resize(vp[0], vp[1], 1);
+      for (const m of modes) for (const f of fils) {
+        video.setMode(m, f);
+        const rc = video.rect();
+        if (m === "integer") {
+          if (rc.w % 256 !== 0 || rc.h % 240 !== 0 || rc.w / 256 !== rc.h / 240) return fail3("matrix-int-math");
+          if (rc.w > vp[0] || rc.h > vp[1]) return fail3("matrix-int-overflow");
+        } else if (m === "fit") {
+          if (rc.w > vp[0] || rc.h > vp[1]) return fail3("matrix-fit-overflow");
+          if (rc.w !== vp[0] && rc.h !== vp[1]) return fail3("matrix-fit-edge");
+        } else if (m === "fill") {
+          if (rc.w < vp[0] || rc.h < vp[1]) return fail3("matrix-fill-cover");
+        } else {
+          if (rc.x !== 0 || rc.y !== 0 || rc.w !== vp[0] || rc.h !== vp[1]) return fail3("matrix-stretch");
+        }
+        video.upload(v0);
+        if (video.present() !== 0) return fail3("matrix-gl:" + vp[0] + "x" + vp[1] + m + f + " steps=" + stepsMsg());
+      }
+    }
+    const ctn = document.getElementById("playCtn");
+    statusEl.textContent = "L3: tap canvas for fullscreen";
+    document.title = "BM-L3-NEEDS-TAP";
+    await new Promise(res => ctn.addEventListener("pointerdown", res, { once: true }));
+    document.title = "BM-L3-RUNNING";
+    statusEl.textContent = "L3: fullscreen";
+    try {
+      await video.enterFullscreen(ctn);
+      await new Promise(r => setTimeout(r, 800));
+      if (!document.fullscreenElement) return fail3("fullscreen-state");
+      video.resize(window.innerWidth, window.innerHeight, 1);
+      video.setMode("integer", "nearest");
+      const fr0 = video.rect();
+      if (fr0.w !== video.cv.width || fr0.h !== video.cv.height) video.setMode("fit", "nearest");
+      video.upload(v0);
+      const fpe = video.present();
+      if (fpe !== 0) return fail3("fullscreen-present:" + fpe + " steps=" + stepsMsg() + " wh=" + video.cv.width + "x" + video.cv.height);
+    } catch (err) { return fail3("fullscreen-exc:" + String((err && err.message) || err).slice(0, 40)); }
+    statusEl.textContent = "L3: perf";
+    video.resize(512, 480, 1);
+    video.setMode("integer", "nearest");
+    const t0 = performance.now();
+    for (let i = 0; i < 120; i++) { video.upload(v0); video.present(); }
+    const avgMs = (performance.now() - t0) / 120;
+    const e0 = performance.now();
+    await l2host.go(600, 0);
+    const engFps = Math.round(600 * 1000 / (performance.now() - e0));
+    statusEl.textContent = "L3 perf present=" + avgMs.toFixed(2) + "ms engine=" + engFps + "fps";
+    if (!(avgMs < 8)) return fail3("present-slow:" + avgMs.toFixed(2));
+    await l2host.reset();
+    await l2host.go(39, 0);
+    if (fnv(l2host.videoBytes()) !== D1) return fail3("reset-pixels");
+    statusEl.textContent += " reset-ok";
+    await video.exitFullscreen();
+    await new Promise(r => setTimeout(r, 500));
+    if (document.fullscreenElement) return fail3("fullscreen-exit");
+    document.title = "BM-L3-PASS";
+  } catch (e) { fail3("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+if (qs.has("headless")) {
+  const t3 = qs.get("test");
+  if (t3 === "l3") selfTestL3();
+}

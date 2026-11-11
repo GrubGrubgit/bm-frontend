@@ -50,13 +50,18 @@ errors. Interface frozen — L3+ build against it, never around it.
 
 ## L3 — Video (WebGL PPU replacement, finished whole)
 Goal: the engine framebuffer on screen, correctly, at speed.
-- `src/video/`: WebGL uploader + present (256x240, integer + fill modes,
-  `pixelated`, portrait/landscape CSS), CHR/palette/scroll/OAM path per the
-  engine contract, FPS meter. Matches the `snap2png.py` oracle captures
-  (background + all 64 sprites) on title + first rooms.
-Acceptance: title screen matches the oracle capture; steady 60fps for 60s
-on the phone; reset returns to the identical boot pixels; zero console
-errors. No game logic here.
+- `src/video/`: WebGL uploader + present (256x240 guest; scaling
+  Integer/Fit/Fill/Stretch, filter Nearest default/Bilinear, fullscreen
+  viewport handling; `pixelated` for Nearest, portrait/landscape CSS),
+  CHR/palette/scroll/OAM path per the engine contract, FPS meter. Matches
+  the `snap2png.py` oracle captures (background + all 64 sprites) on title
+  + first rooms.
+Acceptance: title screen matches the oracle capture at Integer 2x/Nearest;
+scaling matrix green (Integer exact multiples, Fit aspect-correct
+letterbox, Fill/Stretch without crashes, Bilinear only smooths); fullscreen
+enters/exits cleanly on desktop + phone; steady 60fps for 60s on the phone;
+reset returns to the identical boot pixels; zero console errors. No game
+logic here.
 
 ## L4 — Audio (finished whole)
 Goal: game sound out of the phone speaker, no crackle.
@@ -83,7 +88,8 @@ errors.
 ## L6 — Shell (finished whole)
 Goal: a player can operate everything blindfolded; headless can drive it.
 - `src/ui/` + `src/app.js`: loader, pack status, start/stop/reset/pause,
-  state slots (persist via IndexedDB, survive reload), volume, scale mode,
+  state slots (persist via IndexedDB, survive reload), volume, scale +
+  filter + fullscreen (persisted, touch-accessible),
   status line (fps/audio/frames), log view, `window.BM` (SPEC §7) documented
   in `README.md`. Thin shell — no logic beyond composition.
 Acceptance: every control works by touch alone; slots survive reload; a

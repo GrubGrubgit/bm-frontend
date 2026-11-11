@@ -22,8 +22,12 @@ mobile browsers (secondary).
 - **Not an emulator.** The wasm module is the lifted game logic compiled
   from `bm-recomp` at a pinned commit — never a CPU core running ROM bytes.
   The ROM is a data source only (PRG/CHR/palette/layout source for the pack).
-- Graphics via WebGL (`256x240` guest, integer-fit upscale, `UNPACK` pixel
-  path, portrait + landscape). Audio via WebAudio (unlocked by user gesture).
+- Graphics via WebGL (`256x240` guest, `UNPACK` pixel path, portrait +
+  landscape). Scaling: Integer (pixel-perfect) / Fit (aspect-correct
+  letterbox) / Fill / Stretch, filter Nearest (default) / Bilinear, plus
+  Fullscreen API on the play container. High-res displays render the same
+  guest pixels upscaled — never re-authored assets. Audio via WebAudio
+  (unlocked by user gesture).
 - Responsive: desktop widescreen + mobile portrait/landscape. Touch controls
   and Bluetooth controllers are first-class, keyboard is dev convenience.
 - Modular code: one concern per file under `src/`, mirroring the FFV port
@@ -90,7 +94,8 @@ mobile browsers (secondary).
   `packreader.js` pattern).
 - `src/video/` — WebGL renderer replacing the PPU: CHR decode, palette,
   nametable/attribute fetch, scroll, OAM sprites, vblank/NMI presentation,
-  integer + fill scale modes, FPS meter. No game code.
+  scaling (Integer/Fit/Fill/Stretch) + filter (Nearest default/Bilinear) +
+  fullscreen viewport handling, FPS meter. No game code.
 - `src/audio/` — WebAudio pipeline: worklet/graph fed from the engine PCM
   (or APU voice params once frozen), device-rate handling, mute/volume,
   underrun counter. No game code.
@@ -99,7 +104,8 @@ mobile browsers (secondary).
   both orientations), `gamepad.js` (standard mapping incl. Bluetooth,
   hotplug + reconnect), `agent.js` (programmatic writes for headless).
 - `src/ui/` — shell: loader, pack status, start/stop/reset/pause, state
-  slots, volume, scale mode, status line, log view. Thumb-usable.
+  slots, volume, scale + filter + fullscreen controls (persisted), status
+  line, log view. Thumb-usable.
 - `src/app.js` — wiring only + `window.BM` (section 7). No logic beyond
   composition.
 

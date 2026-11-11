@@ -132,3 +132,25 @@ channel. Documented in `README.md`.
   input-to-photon latency under 100ms on touch. `work/` stays small;
   `sh tools/guard.sh` before heavy sessions (6GB minimum); user approval
   for any single write over 100MB; no silent background jobs.
+
+## 9. Build record (L0 toolchain, frozen 2026-11-11)
+- Engine: `build/vendor/` refreshed from `../recomp` at `ENGINE_PIN` on
+every build (`tools/build_spike.sh` aborts on pin/HEAD mismatch); vendored
+bytes compiled unmodified (amalgamation include).
+- Wasm: Termux clang 21.1.8 `--target=wasm32-unknown-unknown -O2
+-ffreestanding -nostdlib`, two-step via fixed `work/spike.o`, wasm-ld LLD
+21.1.8 `--no-entry --export-all --build-id=none`. Same output path gives
+identical sha256 (`b903ff34…`, verified twice in a row). No emscripten, no
+WASI sysroot (none exists on device), no network access at build time.
+- Full-engine link proven with the same object file plus
+`--no-gc-sections`: 3.0MB wasm, instantiates with zero imports in node
+v26, NMI restore + IRQ tails execute. Default link GC-drops unreferenced
+statics (why the L0 spike is 3.4KB); L2 uses the `--no-gc-sections` form.
+- Libc shims, owned here (`tools/wasm-shim/stdio.h`, `string.h`):
+`FILE`/`stderr`/`fprintf` (drops to 0), `memset`/`memcpy`/`memmove`. The
+engine calls `fprintf` only (1583 UNWIND-ESCAPE log sites, enforce mode).
+- Headless loop (`tools/headless.sh` + `tools/serve.js` on :8901):
+Chromium 156 `--headless=new`, console-error gate, `work/shot.png`,
+`BM-HEADLESS-READY` marker, nonzero exit on any failure. Green twice.
+- `bm_spike_*` is spike-only scaffolding. The section-5 C/JS contract
+freezes in L2; L3+ build against it.

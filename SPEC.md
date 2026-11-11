@@ -77,8 +77,13 @@ mobile browsers (secondary).
   sub-frame).
 - `bm_video()` — 256x240 framebuffer after the frame (exact pixel format
   frozen in P2: RGBA vs indexed+palette, owned by the WebGL uploader).
-- `bm_audio_read(buf, n)` / `bm_audio_rate()` — pull up to n PCM samples;
-  underrun counter owned here.
+- `bm_audio_events()` — drain the per-frame APU register event log
+  (ordered addr/value/cycle triples for `$4000`–`$4017` writes that frame,
+  including the frame counter). The JS side implements the NES APU natively
+  (pulse x2, triangle, noise, DMC as the game uses + frame counter) and
+  renders voices live at the device rate — exactly how the hardware does
+  it. No PCM crosses the wall; comparison renders (if any) live in `work/`
+  for verification only and never ship. Render-callback gap counter owned here.
 - `bm_save(id)` / `bm_load(id)` — opaque state blobs for UI save slots
   (survive page reload via IndexedDB `saves` store).
 - Everything else (game internals) stays behind this wall. Only `src/core/`
@@ -96,9 +101,10 @@ mobile browsers (secondary).
   nametable/attribute fetch, scroll, OAM sprites, vblank/NMI presentation,
   scaling (Integer/Fit/Fill/Stretch) + filter (Nearest default/Bilinear) +
   fullscreen viewport handling, FPS meter. No game code.
-- `src/audio/` — WebAudio pipeline: worklet/graph fed from the engine PCM
-  (or APU voice params once frozen), device-rate handling, mute/volume,
-  underrun counter. No game code.
+- `src/audio/` — live NES APU (FFV `spc.js` pattern: native voice
+  synthesis from the engine register stream, not PCM playback):
+  pulse/triangle/noise/DMC + frame counter per the game driver (bank5 TU),
+  worklet/graph at device rate, mute/volume, gap counter. No game code.
 - `src/input/` — ONE virtual-pad bus (FFV `input.js` pattern): `keyboard.js`
   (desktop), `touch.js` (d-pad + diagonals + A/B/Start/Select, multitouch,
   both orientations), `gamepad.js` (standard mapping incl. Bluetooth,
@@ -113,7 +119,7 @@ mobile browsers (secondary).
 `start()`, `stop()`, `reset()`, `pause(bool)`, `setPad(mask)`,
 `press(frames, mask)`, `frame()` (one frame, returns summary),
 `screenshot()` (canvas data URL), `save(slot)`, `load(slot)`, `stats()`
-(fps, audio underruns, frames run). Every call safe from the bridge eval
+(fps, audio render gaps, frames run). Every call safe from the bridge eval
 channel. Documented in `README.md`.
 
 ## 8. Verification (headless, on device)

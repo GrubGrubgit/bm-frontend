@@ -65,12 +65,16 @@ logic here.
 
 ## L4 — Audio (finished whole)
 Goal: game sound out of the phone speaker, no crackle.
-- `src/audio/`: WebAudio graph/worklet fed from `bm_audio_read`, device-rate
-  handling, mute/volume, underrun counter in `BM.stats()`. Voice/sequence
-  semantics come from the lifted music engine (bank5 TU) through the
-  adapter — no invented tunes, no placeholders.
-Acceptance: title music plays clean for 60s; underruns == 0; mute + volume
-behave; zero console errors.
+- `src/audio/`: live NES APU (FFV `spc.js` pattern) driven by the
+  `bm_audio_events()` register stream, rendered in a worklet/graph at the
+  device rate; mute/volume + render-gap counter in `BM.stats()`.
+  Voice/sequence semantics are the game music driver itself (bank5 TU)
+  writing real APU registers through the adapter — live synthesis, no PCM,
+  no invented tunes, no placeholders (any byte-exact reference renders live
+  in `work/` for comparison only).
+Acceptance: title music plays clean for 60s; render gaps == 0; mute +
+volume behave; voice audit (every register write from a 60s run hits an
+implemented APU path, no silent drops); zero console errors.
 
 ## L5 — Input (one bus, finished whole)
 Goal: every action playable with thumbs or a Bluetooth controller.

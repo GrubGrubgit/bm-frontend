@@ -40,10 +40,10 @@ mobile browsers (secondary).
 
 ## 3. Engine source (how the C gets here)
 - Engine lives in `GrubGrubgit/bm-recomp`, file `recomp/gen/combined_enf.c`
-  (+ `recomp/tools/lift/runtime.h`), canonical enforce TU, pinned by commit
+  (+ `recomp/tools/lift/runtime.h`), canonical OFF-mode TU (`combined_off.c` + `runtime.h`), pinned by commit
   hash in `ENGINE_PIN` at repo root. The frontend build script fetches that
   commit into `build/vendor/` (gitignored) and compiles from there.
-- Engine sources are wrapped, never forked: one thin NEW C adapter file
+- Engine sources are wrapped, never forked (`tools/patch_vendor.py` copies the pinned TU into `build/vendor/` and applies the adapter-owned APU-ring hook at two asserted anchors; canonical gen/ never modified): one thin NEW C adapter file
   (`src/core/bm_api.c`, owned here) exposes the section-6 interface; the
   vendored engine files are compiled unmodified. No hand-copies of engine
   code anywhere else in this repo.
@@ -67,30 +67,16 @@ mobile browsers (secondary).
 - Cache: IndexedDB, pack version-keyed, ROM never stored (re-extract on
   demand). Wipe button clears `rom`/`packs`/`saves`.
 
-## 5. C/JS platform contract (section-6 interface, frozen in P2)
-- `bm_init(pack)` / `bm_reset()` — cold start, deterministic from power-on
-  given the same pack. No wall-clock, no randomness outside the pack.
-- `bm_set_pad(mask)` — NES pad bits `01=A 02=B 04=Select 08=Start 10=Up
-  20=Down 40=Left 80=Right`, latched per frame from the unified input bus.
-- `bm_run_frame()` — advance exactly one 1/60s frame (cycle-timed NMI
-  model from the lifter is inside the engine; the frontend never steps
-  sub-frame).
-- `bm_video()` — 256x240 framebuffer after the frame (exact pixel format
-  frozen in P2: RGBA vs indexed+palette, owned by the WebGL uploader).
-- `bm_audio_events()` — drain the per-frame APU register event log
-  (ordered addr/value/cycle triples for `$4000`–`$4017` writes that frame,
-  including the frame counter). The JS side implements the NES APU natively
-  (pulse x2, triangle, noise, DMC as the game uses + frame counter) and
-  renders voices live at the device rate — exactly how the hardware does
-  it. No PCM crosses the wall; comparison renders (if any) live in `work/`
-  for verification only and never ship. Render-callback gap counter owned here.
-- `bm_save(id)` / `bm_load(id)` — opaque state blobs for UI save slots
-  (survive page reload via IndexedDB `saves` store).
-- Everything else (game internals) stays behind this wall. Only `src/core/`
-  touches wasm memory.
+## 5. C/JS platform contract (section-6 interface, FROZEN in L2)
+- Model: PLAIN single-entry. The host calls `bm_boot()` EXACTLY ONCE per worker lifetime (reset vector F23B; power-on state zeroed in C). Boot never returns; each vblank edge runs the real NMI tail, renders a frame, then calls the `host_frame(f)` import. The host drives everything from inside that import (node harness: throw-to-stop; browser game worker: copy out + park in Atomics.wait). Re-calling bm_boot mid-run re-enters the game and is forbidden. No asyncify: it breaks the engine tail-call chains and overflows the stack by frame ~57 (verified 2026-11-11, binaryen 133 removed from the pipeline).
+- Exports: `bm_stage_ptr` (131072B scratch: PRG/CHR load area, audio-drain dst, bm_snap out), `bm_load_prg`, `bm_load_chr`, `bm_video_ptr` (256x240x4 RGBA8 framebuffer; NESPAL table incl. the 8K-mode `b1=(chr0&0xFE)` quirk; pixel-identical to tracer `snap2png.py`, verified by `cmp`), `bm_frame_no`, `bm_set_pad(mask)` (bits `01=A 02=B 04=Select 08=Start 10=Up 20=Down 40=Left 80=Right`, latched per frame), `bm_audio_read(dst,max)` (drains the APU ring: 8B/event addr-lo,addr-hi,val,0,cycle32le for $4000-$4017 writes incl. frame counter; 256-entry ring), `bm_hash` (FNV-1a over cycles/ram/vram/pal/oam/regs/scroll/mapper), `bm_snap` (4160B tracer layout ram[2048]+vram[2048]+footer[64]), `bm_mem_size`. Sole import: `host_frame(int)`. Freestanding wasm32, no OS/threads/FS in C.
+- Stepping (browser): `src/core/worker.js` owns game.wasm; `src/core/host.js` (`GameHost`) owns the worker and is the ONLY module touching compiled game code besides the adapter. Hand-shake SAB (280640B): i32 cells STATE/CMD/PAD/FRAME/RUN_N/AUDIO_N/HASH/MEMSIZE/ERR/HASH_N/AUDIO_SUM, then video RGBA, 256-event audio log, 8192-entry hash ring. `go(n,pad)` / `step(pad)`; pause = stop commanding (worker parks in Atomics.wait, free); free-run fast-forward replays at ~1200fps (node), so loads are seconds. 60fps pacing lives in L6, not here.
+- Save/load = REPLAY, exact by determinism: `saveSlot` stores `{v,frame,pads[]}` in the IDB `saves` store; `load` = fresh worker + fast-forward the pad log (constant-pad runs grouped), then continue. Whole-memory restore is NOT used (proven to diverge: stale wasm locals outside linear memory, LDEED/LDEF7 loop to stack overflow). `reset` = fresh worker (parks after frame 0; `go(n)` advances n frames).
+- Determinism (acceptance): node `tools/test_game.mjs` — two boots, identical per-frame hashes (K=40 and K=600 PASS), save-image stable, replay-continue PASS, audio 5 boot events at frame 0 (~510 over 600 frames), C render == oracle `cmp`-identical. Browser `?headless=1&test=l2` — 40-frame determinism x3 boots, save/diverge/load/continue equality, audio>0, video non-blank, zero console errors (WD SEVERE gate), green twice.
+- Error model: engine traps / `unreachable` are fatal (worker posts `fatal`; e.g. the no-input title-timeout demo-path trap at frame ~3532 is L7 content, not a defect). Host import timeouts (20s boot / 30s run) fail loudly. No wall-clock, no randomness in the engine.
 
 ## 6. Subsystems (all under `src/`, vanilla ES modules, no framework)
-- `src/core/` — wasm host + frame loop: instantiate, rAF pacing with
+- `src/core/` — game worker + host (`worker.js` single-entry boot + SAB park/step, `host.js` GameHost: go/step/reset/replay save/load, ONLY module touching compiled game code besides the adapter) + frame loop: instantiate, rAF pacing with
   fixed-timestep + frame-skip policy, `reset()`, `stepFrame(pad)`,
   framebuffer hand-off, audio pump, state save/load. ONLY module touching
   compiled game code.
@@ -118,7 +104,7 @@ mobile browsers (secondary).
 ## 7. Shell + agent surface (`window.BM`, for users and headless)
 `start()`, `stop()`, `reset()`, `pause(bool)`, `setPad(mask)`,
 `press(frames, mask)`, `frame()` (one frame, returns summary),
-`screenshot()` (canvas data URL), `save(slot)`, `load(slot)`, `stats()`
+`screenshot()` (canvas data URL), `save(slot)`, `load(slot)`, `stats()`, L2: `bootL2()`, `runL2(n,pad)`, `stepL2(pad)`, `resetL2()`, `saveL2(slot)`, `loadL2(slot)`, `l2info()`
 (fps, audio render gaps, frames run). Every call safe from the bridge eval
 channel. Documented in `README.md`.
 

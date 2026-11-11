@@ -92,3 +92,74 @@ if (qs.has("headless")) {
   else if (t === "l1reload") selfTestReload().catch(e => fail(e));
   else document.title = "BM-HEADLESS-READY";
 }
+
+// ---- L2: wasm core + C/JS contract (SPEC section 5). ----
+import { GameHost } from "./core/host.js";
+const l2host = new GameHost();
+let l2pack = null;
+async function l2ensurePack() {
+  if (l2pack) return l2pack;
+  const cached = await loadPack();
+  if (cached && validatePack(cached).ok) { l2pack = cached; return l2pack; }
+  const resp = await fetch("testrom.nes");
+  if (!resp.ok) throw new Error("testrom-fetch:" + resp.status);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  const r = buildPack(bytes, "testrom");
+  if (!r.ok) throw new Error("pack:" + r.errors.join(" "));
+  if (!validatePack(r.pack).ok) throw new Error("pack-invalid");
+  l2pack = r.pack;
+  return l2pack;
+}
+window.BM.bootL2 = async function () {
+  const pack = await l2ensurePack();
+  return l2host.spawn(pack, "build/game.wasm");
+};
+window.BM.runL2 = function (n, pad) { return l2host.go(n, pad || 0); };
+window.BM.stepL2 = function (pad) { return l2host.step(pad || 0); };
+window.BM.resetL2 = function () { return l2host.reset(); };
+window.BM.saveL2 = function (slot) { return l2host.save(slot); };
+window.BM.loadL2 = function (slot) { return l2host.load(slot); };
+window.BM.l2info = function () {
+  const v = l2host.videoBytes ? l2host.videoBytes() : new Uint8Array(0);
+  let nz = 0;
+  for (let i = 0; i < v.length; i += 997) if (v[i] !== 0) nz++;
+  return { frame: l2host.frame(), audioTotal: l2host.audioTotal, padLogLen: l2host.padLog.length, videoSampleNz: nz };
+};
+const fail2 = s => { document.title = "BM-L2-FAIL:" + s; };
+const eqH = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+async function selfTestL2() {
+  document.title = "BM-L2-RUNNING";
+  try {
+    statusEl.textContent = "L2: loading pack";
+    const pack = await l2ensurePack();
+    statusEl.textContent = "L2: booting engine";
+    await l2host.spawn(pack, "build/game.wasm");
+    const A = await l2host.go(40, 0);
+    await l2host.reset();
+    const B = await l2host.go(40, 0);
+    if (!eqH(A, B)) return fail2("reset-determinism");
+    await l2host.reset();
+    const P1 = await l2host.go(20, 0);
+    if (!eqH(P1, A.slice(0, 20))) return fail2("reset3-determinism");
+    await l2host.save(1);
+    const P2 = await l2host.go(20, 0);
+    if (!eqH(P2, A.slice(20, 40))) return fail2("cont-determinism");
+    for (let i = 0; i < 10; i++) await l2host.step(0x80);
+    if (l2host.frame() !== 50) return fail2("diverge-frame");
+    const lf = await l2host.load(1);
+    if (lf !== 20) return fail2("load-frame:" + lf);
+    const C = await l2host.go(20, 0);
+    if (!eqH(C, P2)) return fail2("replay-continue");
+    if (!(l2host.audioTotal > 0)) return fail2("audio-zero");
+    const v = l2host.videoBytes();
+    let nz = 0;
+    for (let i = 0; i < v.length; i++) if (v[i] !== 0) nz++;
+    if (nz < 1000) return fail2("video-blank");
+    statusEl.textContent = "L2 self-test PASS frames=" + l2host.frame();
+    document.title = "BM-L2-PASS";
+  } catch (e) { fail2("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+if (qs.has("headless")) {
+  const t2 = qs.get("test");
+  if (t2 === "l2") selfTestL2();
+}

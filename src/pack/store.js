@@ -43,3 +43,15 @@ export async function loadRomId() {
   db.close();
   return id || null;
 }
+
+export async function saveSlot(n, data) {
+  const db = await openDb();
+  await tx(db, STORES.saves, "readwrite", s => s.put(data, "slot-" + n));
+  db.close();
+}
+export async function loadSlot(n) {
+  const db = await openDb();
+  const d = await tx(db, STORES.saves, "readonly", s => s.get("slot-" + n));
+  db.close();
+  return d || null;
+}

@@ -73,3 +73,16 @@ slot | RUNNING/PAUSED/stopped. Log view keeps the last 200 lines.
   installed clients pick it up. Offline: shell + cached engine load
   without network; the ROM pack lives in IndexedDB and survives;
   first launch and fresh engine builds need network once.
+
+## Android APK (install and play)
+
+- sh android/apk_build.sh builds android/release/BM-Web.apk
+  (debug-signed, installable): a WebView wrapper (dev.bmweb.frontend)
+  that serves the staged game over a localhost server with the same
+  COOP/COEP headers as tools/serve.js, so SharedArrayBuffer and
+  IndexedDB behave exactly like the tested headless setup.
+- No permissions: no network (localhost only), no storage (in-app
+  file picker feeds your ROM straight to the pack builder).
+- Needs SDK platform android-36 (default work/android-sdk, gitignored)
+  plus build/game.wasm. Supply your own ROM again in-app on first
+  launch; the pack persists in the app.

@@ -83,16 +83,30 @@ public class MainActivity extends Activity {
             miss(r.asset);
             return null;
           }
-          WebResourceResponse resp = new WebResourceResponse(r.mime, r.text ? "UTF-8" : null, in);
+          Map<String, String> h = new HashMap<String, String>();
+          h.put("Cross-Origin-Opener-Policy", "same-origin");
+          h.put("Cross-Origin-Embedder-Policy", "require-corp");
+          h.put("Cache-Control", "no-store");
+          WebResourceResponse resp = new WebResourceResponse(r.mime, r.text ? "UTF-8" : null, 200, "OK", h, in);
           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Map<String, String> h = new HashMap<String, String>();
-            h.put("Cross-Origin-Opener-Policy", "same-origin");
-            h.put("Cross-Origin-Embedder-Policy", "require-corp");
-            h.put("Cache-Control", "no-store");
             resp.setResponseHeaders(h);
           }
           return resp;
         } catch (Throwable t) { return null; }
+      }
+      public void onPageFinished(WebView v, String url) {
+        try {
+          v.evaluateJavascript("(async()=>{let h={};try{const r=await fetch(\"index.html\");h.coop=r.headers.get(\"cross-origin-opener-policy\");h.coep=r.headers.get(\"cross-origin-embedder-policy\");}catch(e){h.err=String(e).slice(0,120);}return JSON.stringify({coi:window.crossOriginIsolated,sab:typeof SharedArrayBuffer,origin:location.origin,h:h});})()", new ValueCallback<String>() {
+            public void onReceiveValue(String val) {
+              try {
+                FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);
+                String line = "PROBE " + val + "\n";
+                f.write(line.getBytes("UTF-8"));
+                f.close();
+              } catch (Throwable ignored9) {}
+            }
+          });
+        } catch (Throwable ignored10) {}
       }
     });
     web.setWebChromeClient(new WebChromeClient() {

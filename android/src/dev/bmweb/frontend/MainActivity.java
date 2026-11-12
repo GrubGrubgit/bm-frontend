@@ -96,17 +96,32 @@ public class MainActivity extends Activity {
       }
       public void onPageFinished(WebView v, String url) {
         try {
-          v.evaluateJavascript("(async()=>{let h={};try{const r=await fetch(\"index.html\");h.coop=r.headers.get(\"cross-origin-opener-policy\");h.coep=r.headers.get(\"cross-origin-embedder-policy\");}catch(e){h.err=String(e).slice(0,120);}return JSON.stringify({coi:window.crossOriginIsolated,sab:typeof SharedArrayBuffer,origin:location.origin,h:h});})()", new ValueCallback<String>() {
-            public void onReceiveValue(String val) {
-              try {
-                FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);
-                String line = "PROBE " + val + "\n";
-                f.write(line.getBytes("UTF-8"));
-                f.close();
-              } catch (Throwable ignored9) {}
+          final WebView vv = v;
+          vv.evaluateJavascript("window.__probeResult=\"pending\";(async()=>{let h={};try{const r=await fetch(\"index.html\");h.coop=r.headers.get(\"cross-origin-opener-policy\");h.coep=r.headers.get(\"cross-origin-embedder-policy\");}catch(e){h.err=String(e).slice(0,120);}window.__probeResult=JSON.stringify({coi:window.crossOriginIsolated,sab:typeof SharedArrayBuffer,origin:location.origin,h:h});})()", null);
+          Thread t = new Thread(new Runnable() {
+            public void run() {
+              try { Thread.sleep(4000); } catch (InterruptedException ignored11) {}
+              vv.post(new Runnable() {
+                public void run() {
+                  try {
+                    vv.evaluateJavascript("JSON.stringify(window.__probeResult)", new ValueCallback<String>() {
+                      public void onReceiveValue(String val) {
+                        try {
+                          FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);
+                          String line = "PROBE " + val + "\n";
+                          f.write(line.getBytes("UTF-8"));
+                          f.close();
+                        } catch (Throwable ignored9) {}
+                      }
+                    });
+                  } catch (Throwable ignored10) {}
+                }
+              });
             }
           });
-        } catch (Throwable ignored10) {}
+          t.setDaemon(true);
+          t.start();
+        } catch (Throwable ignored12) {}
       }
     });
     web.setWebChromeClient(new WebChromeClient() {

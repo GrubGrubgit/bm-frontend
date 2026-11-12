@@ -3,13 +3,16 @@ package dev.bmweb.frontend;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
-import android.content.res.AssetManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
+import android.webkit.ConsoleMessage;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -21,22 +24,23 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.util.HashMap;
+import java.util.Map;
 
 public class MainActivity extends Activity {
   private WebView web;
-  private LocalServer server;
   private ValueCallback<Uri[]> fileCb;
   private static final int FILE_REQ = 1001;
+  private static final String HOST = "bmweb.local";
 
   protected void onCreate(Bundle b) {
     super.onCreate(b);
     final MainActivity self = this;
     Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
       public void uncaughtException(Thread t, Throwable e) {
-        try { self.writeCrash(e); } catch (Throwable ignored4) {}
+        try { self.writeCrash(traceOf(e), false); } catch (Throwable ignored4) {}
         try { Thread.sleep(500); } catch (InterruptedException ignored5) {}
         System.exit(2);
       }
@@ -49,7 +53,7 @@ public class MainActivity extends Activity {
     try {
       startApp();
     } catch (Throwable e) {
-      try { writeCrash(e); } catch (Throwable ignored6) {}
+      try { writeCrash(traceOf(e), false); } catch (Throwable ignored6) {}
       showCrash("STARTUP CRASH:\n" + traceOf(e), false);
     }
   }
@@ -57,25 +61,32 @@ public class MainActivity extends Activity {
   private void startApp() {
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     immersive();
-    final AssetManager assets = getAssets();
-    server = new LocalServer(new LocalServer.Opener() {
-      public InputStream open(String path) throws IOException {
-        return assets.open("www/" + path);
-      }
-    });
-    int port;
-    try {
-      port = server.start();
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
     web = new WebView(this);
     WebSettings s = web.getSettings();
     s.setJavaScriptEnabled(true);
     s.setDomStorageEnabled(true);
     s.setMediaPlaybackRequiresUserGesture(false);
     s.setAllowFileAccess(false);
-    web.setWebViewClient(new WebViewClient());
+    web.setWebViewClient(new WebViewClient() {
+      public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest req) {
+        try {
+          if (!"GET".equals(req.getMethod())) return null;
+          if (!HOST.equals(req.getUrl().getHost())) return null;
+          AssetRoute r = AssetRoute.resolve(req.getUrl().getPath());
+          if (r == null) return null;
+          InputStream in = getAssets().open(r.asset);
+          WebResourceResponse resp = new WebResourceResponse(r.mime, r.text ? "UTF-8" : null, in);
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Map<String, String> h = new HashMap<String, String>();
+            h.put("Cross-Origin-Opener-Policy", "same-origin");
+            h.put("Cross-Origin-Embedder-Policy", "require-corp");
+            h.put("Cache-Control", "no-store");
+            resp.setResponseHeaders(h);
+          }
+          return resp;
+        } catch (Throwable t) { return null; }
+      }
+    });
     web.setWebChromeClient(new WebChromeClient() {
       public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
         if (fileCb != null) fileCb.onReceiveValue(null);
@@ -92,9 +103,20 @@ public class MainActivity extends Activity {
         }
         return true;
       }
+      public boolean onConsoleMessage(ConsoleMessage m) {
+        try {
+          if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR && m.message() != null && m.message().contains("SharedArrayBuffer")) {
+            String line = "JS: " + m.message() + " (" + m.sourceId() + ":" + m.lineNumber() + ")\n";
+            FileOutputStream f = new FileOutputStream(new File(getFilesDir(), "crash.log"), true);
+            f.write(line.getBytes("UTF-8"));
+            f.close();
+          }
+        } catch (Throwable ignored7) {}
+        return false;
+      }
     });
     setContentView(web);
-    web.loadUrl("http://127.0.0.1:" + port + "/index.html");
+    web.loadUrl("https://" + HOST + "/index.html");
   }
 
   private static String traceOf(Throwable e) {
@@ -105,10 +127,10 @@ public class MainActivity extends Activity {
 
   private File crashFile() { return new File(getFilesDir(), "crash.log"); }
 
-  private void writeCrash(Throwable e) {
+  private void writeCrash(String trace, boolean append) {
     try {
-      FileOutputStream f = new FileOutputStream(crashFile());
-      f.write(traceOf(e).getBytes("UTF-8"));
+      FileOutputStream f = new FileOutputStream(crashFile(), append);
+      f.write(trace.getBytes("UTF-8"));
       f.close();
     } catch (Exception ignored3) {}
   }
@@ -168,7 +190,6 @@ public class MainActivity extends Activity {
   }
 
   protected void onDestroy() {
-    if (server != null) server.stop();
     if (web != null) web.destroy();
     super.onDestroy();
   }

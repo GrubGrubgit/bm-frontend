@@ -106,6 +106,7 @@ public class MainActivity extends Activity {
           Map<String, String> h = new HashMap<String, String>();
           h.put("Cross-Origin-Opener-Policy", "same-origin");
           h.put("Cross-Origin-Embedder-Policy", "require-corp");
+          h.put("Cross-Origin-Resource-Policy", "same-origin");
           h.put("Cache-Control", "no-store");
           WebResourceResponse resp = new WebResourceResponse(r.mime, r.text ? "UTF-8" : null, 200, "OK", h, in);
           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -117,7 +118,7 @@ public class MainActivity extends Activity {
       public void onPageFinished(WebView v, String url) {
         try {
           final WebView vv = v;
-          vv.evaluateJavascript("window.__probeResult=\"pending\";(async()=>{let h={};try{const r=await fetch(\"index.html\");h.coop=r.headers.get(\"cross-origin-opener-policy\");h.coep=r.headers.get(\"cross-origin-embedder-policy\");}catch(e){h.err=String(e).slice(0,120);}window.__probeResult=JSON.stringify({coi:window.crossOriginIsolated,sab:typeof SharedArrayBuffer,origin:location.origin,h:h});})()", null);
+          vv.evaluateJavascript("window.__probeResult=\"pending\";(async()=>{let h={},j={};try{const r=await fetch(\"index.html\");h.coop=r.headers.get(\"cross-origin-opener-policy\");h.coep=r.headers.get(\"cross-origin-embedder-policy\");h.corp=r.headers.get(\"cross-origin-resource-policy\");}catch(e){h.err=String(e).slice(0,120);}try{const r2=await fetch(\"src/app.js\");j.corp=r2.headers.get(\"cross-origin-resource-policy\");j.ct=r2.headers.get(\"content-type\");}catch(e){j.err=String(e).slice(0,120);}window.__probeResult=JSON.stringify({coi:window.crossOriginIsolated,secure:window.isSecureContext,sab:typeof SharedArrayBuffer,origin:location.origin,ua:navigator.userAgent,h:h,js:j});})()", null);
           Thread t = new Thread(new Runnable() {
             public void run() {
               try { Thread.sleep(4000); } catch (InterruptedException ignored11) {}

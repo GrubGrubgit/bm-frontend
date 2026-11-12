@@ -80,6 +80,7 @@ public class LocalServer {
     h.append("Content-Length: ").append(body.length).append("\r\n");
     h.append("Cross-Origin-Opener-Policy: same-origin\r\n");
     h.append("Cross-Origin-Embedder-Policy: require-corp\r\n");
+    h.append("Cross-Origin-Resource-Policy: same-origin\r\n");
     h.append("Cache-Control: no-store\r\n");
     h.append("Connection: close\r\n\r\n");
     out.write(h.toString().getBytes("UTF-8"));

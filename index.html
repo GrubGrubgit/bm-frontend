@@ -59,7 +59,7 @@ button{padding:10px 14px;margin:2px}
 <h3>Video (L3)</h3>
 <div id="playCtn"><canvas id="gameCanvas" width="512" height="480" style="width:512px;height:480px"></canvas></div>
 <script>
-if (location.hostname !== "bmweb.local" && "serviceWorker" in navigator) {
+if (location.hostname !== "bmweb.local" && location.hostname !== "127.0.0.1" && location.hostname !== "localhost" && "serviceWorker" in navigator) {
   window.addEventListener("load", function () {
     navigator.serviceWorker.register("sw.js").catch(function (e) {
       console.log("[BM] sw: " + e);

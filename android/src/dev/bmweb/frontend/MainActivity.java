@@ -49,11 +49,6 @@ public class MainActivity extends Activity {
         System.exit(2);
       }
     });
-    String last = readCrash();
-    if (last != null && last.length() > 0) {
-      showCrash("LAST REPORT:\n" + last, true);
-      return;
-    }
     try {
       startApp();
     } catch (Throwable e) {
@@ -130,6 +125,7 @@ public class MainActivity extends Activity {
                         try {
                           FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);
                           String line = "PROBE " + val + "\n";
+                            injectReport(vv);
                           f.write(line.getBytes("UTF-8"));
                           f.close();
                         } catch (Throwable ignored9) {}
@@ -187,6 +183,16 @@ public class MainActivity extends Activity {
 
   private File crashFile() { return new File(getFilesDir(), LOG); }
 
+  private void injectReport(final WebView vv) {
+    try {
+      String all = readCrash();
+      if (all == null || all.length() == 0) return;
+      if (all.length() > 4000) all = all.substring(all.length() - 4000);
+      String q = all.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "");
+      final String js = "window.__bmLastReport=\"" + q + "\";";
+      vv.post(new Runnable() { public void run() { try { vv.evaluateJavascript(js, null); } catch (Throwable ignored14) {} } });
+    } catch (Throwable ignored15) {}
+  }
   private void miss(String what) {
     try {
       FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);

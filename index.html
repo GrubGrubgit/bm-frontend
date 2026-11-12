@@ -79,6 +79,9 @@ if (location.hostname === "bmweb.local" || location.hostname === "127.0.0.1" || 
 }
 </script>
 
+<script>
+setInterval(function(){try{var m=document.getElementById("metaEl");if(m&&window.__bmLastReport&&!m.__rep){m.__rep=1;m.textContent=String(window.__bmLastReport).slice(-600)+" | "+m.textContent;}}catch(e){}},1500);
+</script>
 <script type="module" src="src/app.js"></script>
 </body>
 </html>

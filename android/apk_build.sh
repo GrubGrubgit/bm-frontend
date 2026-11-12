@@ -9,7 +9,7 @@ SDK="${ANDROID_SDK_ROOT:-$PWD/work/android-sdk}"
 AJAR="$SDK/platforms/android-36/android.jar"
 if [ ! -f "$AJAR" ]; then echo "missing $AJAR"; exit 1; fi
 if [ ! -f build/game.wasm ]; then echo "missing build/game.wasm"; exit 1; fi
-VER="bm-apk-$(git rev-parse --short HEAD)"
+VER="bm-apk-$(git rev-parse --short HEAD)-$(date +%Y%m%d%H%M%S)"
 echo "sw version: $VER"
 rm -rf android/build/www android/build/gen android/build/classes android/build/dex android/build/base.apk
 mkdir -p android/build/www android/build/gen android/build/classes android/build/dex android/release

@@ -59,7 +59,18 @@ button{padding:10px 14px;margin:2px}
 <h3>Video (L3)</h3>
 <div id="playCtn"><canvas id="gameCanvas" width="512" height="480" style="width:512px;height:480px"></canvas></div>
 <script>
-if (location.hostname !== "bmweb.local" && location.hostname !== "127.0.0.1" && location.hostname !== "localhost" && "serviceWorker" in navigator) {
+// In-app origins (WebView wrapper) must NEVER be SW-controlled: the wrapper
+// serves COOP/COEP/CORP itself, and a stale SW breaks cross-origin isolation.
+if (location.hostname === "bmweb.local" || location.hostname === "127.0.0.1" || location.hostname === "localhost") {
+  if ("serviceWorker" in navigator) {
+    if (navigator.serviceWorker.controller) {
+      navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); setTimeout(function () { location.reload(); }, 500); }).catch(function () {});
+    } else {
+      navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); }).catch(function () {});
+      if (window.caches) { caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); }).catch(function () {}); }
+    }
+  }
+} else if ("serviceWorker" in navigator) {
   window.addEventListener("load", function () {
     navigator.serviceWorker.register("sw.js").catch(function (e) {
       console.log("[BM] sw: " + e);

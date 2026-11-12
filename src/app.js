@@ -183,7 +183,13 @@ if (qs.has("headless")) {
 import { VideoRenderer } from "./video/renderer.js";
 let video = null;
 function ensureVideo() {
-  if (!video) video = new VideoRenderer(document.getElementById("gameCanvas"));
+  if (!video) {
+    video = new VideoRenderer(document.getElementById("gameCanvas"));
+    video.onEvent = function (what) {
+      if (what === "lost") shellLog("GL context lost (app backgrounded?) - video frozen, engine+audio run on");
+      else shellLog("GL context restored - video live again");
+    };
+  }
   return video;
 }
 function fnv(b) {
@@ -654,6 +660,18 @@ async function shellStepOnce() {
     window.__bmVidErr = (window.__bmVidErr || 0) + 1;
     shellLog("video err n=" + window.__bmVidErr + " " + String((e && e.message) || e).slice(0, 90));
   }
+  if ((l2host.frame() & 31) === 0) {
+    try {
+      var wd = fnv(l2host.videoBytes());
+      if (wd === window.__bmLastD) window.__bmStaticN = (window.__bmStaticN || 0) + 32;
+      else { window.__bmLastD = wd; window.__bmStaticN = 0; }
+      if (window.__bmStaticN >= 320 && !window.__bmStaticHint) {
+        window.__bmStaticHint = true;
+        shellLog("picture static 320f while running - if the game waits, press STA/START; Reset restarts");
+        toast(padToastEl, "no picture change - try STA/START, or Reset", 4000);
+      }
+    } catch (e2) {}
+  }
   shellFpsCount++;
   const now = performance.now();
   if (!shellFpsT0) shellFpsT0 = now;
@@ -678,6 +696,7 @@ async function shellStart() {
   if (shellRunning && !shellPaused) return l2host.frame();
   const pack = await l2ensurePack();
   if (!l2host.inst || l2host.frame() < 0) await l2host.spawn(pack, "build/game.wasm");
+  window.__bmStaticHint = false; window.__bmStaticN = 0;
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   try { await ensureAudio().unlock(); syncAudioToPrefs(); }
   catch (e) { shellLog("audio locked: " + String((e && e.message) || e).slice(0, 60)); }
@@ -702,6 +721,7 @@ async function shellStop() {
 async function shellReset() {
   const pack = await l2ensurePack();
   await l2host.spawn(pack, "build/game.wasm");
+  window.__bmStaticHint = false; window.__bmStaticN = 0;
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   ensureVideo();
   video.upload(l2host.videoBytes());

@@ -21,9 +21,43 @@ function shader(gl, type, src) {
 }
 export function VideoRenderer(canvas) {
   this.cv = canvas;
+  this.lost = false;
+  this.onEvent = null;
+  var self = this;
+  if (canvas.isConnected !== false) {
+  canvas.addEventListener("webglcontextlost", function (e) {
+    if (!self._noRestore) { try { e.preventDefault(); } catch (err) {} }
+    self.lost = true;
+    if (self.onEvent) { try { self.onEvent("lost"); } catch (err) {} }
+  });
+  canvas.addEventListener("webglcontextrestored", function () {
+    try { self.initGL(); } catch (err) {}
+    self.lost = false;
+    if (self.onEvent) { try { self.onEvent("restored"); } catch (err) {} }
+  });
+  }
   var gl = canvas.getContext("webgl", { preserveDrawingBuffer: true, antialias: false, alpha: true, depth: false, stencil: false });
   if (!gl) throw new Error("no-webgl");
   this.gl = gl;
+  var noR = false;
+  try {
+    var di = gl.getExtension("WEBGL_debug_renderer_info");
+    var rn = di ? gl.getParameter(di.UNMASKED_RENDERER_WEBGL) : "";
+    noR = /swiftshader/i.test(String(rn || ""));
+  } catch (err) {}
+  this._noRestore = noR;
+  this.initGL();
+  this.scale = "integer";
+  this.filter = "nearest";
+  this.frames = 0;
+  this.fpsT0 = 0;
+  this.fps = 0;
+  this.lastDigest = "0";
+  this.applyFilter();
+}
+
+VideoRenderer.prototype.initGL = function () {
+  var gl = this.gl;
   var prog = this.prog = gl.createProgram();
   gl.attachShader(prog, shader(gl, gl.VERTEX_SHADER, VS));
   gl.attachShader(prog, shader(gl, gl.FRAGMENT_SHADER, FS));
@@ -45,14 +79,8 @@ export function VideoRenderer(canvas) {
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, GW, GH, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(GW * GH * 4));
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  this.scale = "integer";
-  this.filter = "nearest";
-  this.frames = 0;
-  this.fpsT0 = 0;
-  this.fps = 0;
-  this.lastDigest = "0";
   this.applyFilter();
-}
+};
 VideoRenderer.prototype.applyFilter = function () {
   var gl = this.gl;
   var f = this.filter === "bilinear" ? gl.LINEAR : gl.NEAREST;

@@ -36,6 +36,7 @@ static const uint8_t NESPAL[64][3] = {
 {0xF8,0xF8,0xF8},{0x3C,0xBC,0xFC},{0x68,0x88,0xFC},{0x98,0x78,0xF8},{0xF8,0x78,0xF8},{0xF8,0x58,0x98},{0xF8,0x78,0x58},{0xFC,0xA0,0x44},{0xF8,0xB8,0x00},{0xB8,0xF8,0x18},{0x58,0xD8,0x54},{0x58,0xF8,0x98},{0x00,0xE8,0xD8},{0x78,0x78,0x78},{0x00,0x00,0x00},{0x00,0x00,0x00},
 {0xFC,0xFC,0xFC},{0xA4,0xE4,0xFC},{0xB8,0xB8,0xF8},{0xD8,0xB8,0xF8},{0xF8,0xB8,0xF8},{0xF8,0xA8,0xC0},{0xF0,0xD0,0xB0},{0xFC,0xE0,0xA8},{0xF8,0xD8,0x78},{0xD8,0xF8,0x78},{0xB8,0xF8,0xB8},{0xB8,0xF8,0xD8},{0x00,0xFC,0xFC},{0xF8,0xD8,0xF8},{0x00,0x00,0x00},{0x00,0x00,0x00}};
 static uint8_t pad_fn(uint64_t f) { (void)f; return game_pad; }
+static uint8_t bg_opaque[256*240];
 static void render(void) {
   int mode8k = !(mmc_ctrl & 0x10);
   int b0 = mode8k ? (chr0 & 0xFE) : chr0;
@@ -43,62 +44,94 @@ static void render(void) {
   int bb = (reg2000 & 0x10) ? b1 : b0;
   int sb = (reg2000 & 0x08) ? b1 : b0;
   int spr16 = (reg2000 & 0x20) ? 1 : 0;
+  int mir = mmc_ctrl & 3;
+  int base = reg2000 & 3;
+  int base_x = base & 1;
   int x, y;
   for (y = 0; y < 240; y++) {
     for (x = 0; x < 256; x++) {
-      int sx = (x + scx) & 255;
-      int sy2 = (y + scy) % 480;
-      int nt = sy2 >= 240 ? 1 : 0;
-      int sy = nt ? sy2 - 240 : sy2;
-      int tx = sx >> 3, ty = sy >> 3;
-      int base = nt ? 0x400 : 0x000;
-      int t = vram[base + ty * 32 + tx];
-      int ax = vram[base + 0x3C0 + (ty >> 2) * 8 + (tx >> 2)];
+      int vx, vy, nt, tx, ty, base_vram;
+      if (mir == 2) {
+        vx = (base_x * 256 + scx + x) % 512;
+        vy = (scy + y) % 240;
+        nt = (vx >= 256) ? 1 : 0;
+        tx = (vx & 255) >> 3; ty = vy >> 3;
+        base_vram = nt ? 0x400 : 0x000;
+      } else if (mir == 3) {
+        int base_y = (base >> 1) & 1;
+        vx = (scx + x) & 255;
+        vy = (base_y * 240 + scy + y) % 480;
+        nt = (vy >= 240) ? 1 : 0;
+        tx = vx >> 3; ty = (nt ? (vy - 240) : vy) >> 3;
+        base_vram = nt ? 0x400 : 0x000;
+      } else if (mir == 1) {
+        vx = (scx + x) & 255; vy = (scy + y) % 240;
+        tx = vx >> 3; ty = vy >> 3; base_vram = 0x400;
+      } else {
+        vx = (scx + x) & 255; vy = (scy + y) % 240;
+        tx = vx >> 3; ty = vy >> 3; base_vram = 0x000;
+      }
+      int t = vram[base_vram + ty * 32 + tx];
+      int ax = vram[base_vram + 0x3C0 + (ty >> 2) * 8 + (tx >> 2)];
       int sh = ((ty & 2) ? 4 : 0) + ((tx & 2) ? 2 : 0);
       int palhi = (ax >> sh) & 3;
       int off = bb * 0x1000 + t * 16;
-      int row = sy & 7;
+      int row = vy & 7;
+      int col = vx & 7;
       int lo = chr[off + row], hi = chr[off + row + 8];
-      int bit = ((lo >> (7 - (sx & 7))) & 1) | ((((hi >> (7 - (sx & 7))) & 1) << 1));
+      int bit = ((lo >> (7 - col)) & 1) | (((hi >> (7 - col)) & 1) << 1);
       int idx = bit == 0 ? (pal[0] & 0x3F) : (pal[palhi * 4 + bit] & 0x3F);
       uint8_t *px = &framebuf[(y * 256 + x) * 4];
       px[0] = NESPAL[idx][0]; px[1] = NESPAL[idx][1]; px[2] = NESPAL[idx][2]; px[3] = 255;
+      bg_opaque[y * 256 + x] = (bit != 0) ? 1 : 0;
     }
   }
   {
     int s;
     for (s = 0; s < 64; s++) {
-      int oy = ram[0x200 + s * 4];
+      int oy = oam[s * 4];
       int ti, at, ox;
       int hh, palb, fx, fy, r;
       if (oy >= 0xEF) continue;
-      ti = ram[0x200 + s * 4 + 1];
-      at = ram[0x200 + s * 4 + 2];
-      ox = ram[0x200 + s * 4 + 3];
+      ti = oam[s * 4 + 1];
+      at = oam[s * 4 + 2];
+      ox = oam[s * 4 + 3];
       hh = spr16 ? 16 : 8;
       palb = at & 3; fx = at & 0x40; fy = at & 0x80;
       for (r = 0; r < hh; r++) {
         int rr = fy ? (hh - 1 - r) : r;
-        int t2 = spr16 ? ((ti & 0xFE) + (rr >> 3)) : ti;
-        int off = sb * 0x1000 + t2 * 16;
-        int lo = chr[off + (rr & 7)], hi = chr[off + (rr & 7) + 8];
-        int yy = oy + 1 + r;
-        int q;
+        int t2, off, lo, hi, yy, q;
+        if (spr16) {
+          int bank4k;
+          if (mode8k) bank4k = (chr0 & 0xFE) + (ti & 1);
+          else bank4k = (ti & 1) ? chr1 : chr0;
+          t2 = (ti & 0xFE) + (rr >> 3);
+          off = bank4k * 0x1000 + t2 * 16;
+        } else {
+          t2 = ti;
+          off = sb * 0x1000 + t2 * 16;
+        }
+        lo = chr[off + (rr & 7)]; hi = chr[off + (rr & 7) + 8];
+        yy = oy + 1 + r;
         if (yy < 0 || yy >= 240) continue;
         for (q = 0; q < 8; q++) {
           int cc = fx ? (7 - q) : q;
           int v = ((lo >> (7 - cc)) & 1) | ((((hi >> (7 - cc)) & 1) << 1));
           int xx = ox + q;
           if (v && xx >= 0 && xx < 256) {
-            int idx = pal[16 + palb * 4 + v] & 0x3F;
-            uint8_t *px = &framebuf[(yy * 256 + xx) * 4];
-            px[0] = NESPAL[idx][0]; px[1] = NESPAL[idx][1]; px[2] = NESPAL[idx][2];
+            if ((at & 0x20) && bg_opaque[yy * 256 + xx]) continue;
+            {
+              int idx2 = pal[16 + palb * 4 + v] & 0x3F;
+              uint8_t *px2 = &framebuf[(yy * 256 + xx) * 4];
+              px2[0] = NESPAL[idx2][0]; px2[1] = NESPAL[idx2][1]; px2[2] = NESPAL[idx2][2];
+            }
           }
         }
       }
     }
   }
 }
+
 static void nmi_frame(void) {
   b7_entry_EB7E();
   render();

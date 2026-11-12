@@ -320,7 +320,14 @@ export class ApuStream {
       apu.write(e[0], e[1]);
     }
     if (this.c0 < 0) { this.c0 = 9; this.cursor = 9; }
-    const target = (this.c0 + (f + 1) * FRAME_CYCLES + this.carry) >>> 0;
+    let target = (this.c0 + (f + 1) * FRAME_CYCLES + this.carry) >>> 0;
+    if (target > this.cursor) {
+      const gap = (target - this.cursor) >>> 0;
+      if (gap > FRAME_CYCLES * 2 && gap < 1073741824) {
+        this.c0 = (this.c0 - (gap - FRAME_CYCLES)) >>> 0;
+        target = (this.c0 + (f + 1) * FRAME_CYCLES + this.carry) >>> 0;
+      }
+    }
     if (target > this.cursor) {
       const dd = (target - this.cursor) >>> 0;
       if (dd > 0 && dd < 0x40000000) { apu.advance(dd); this.cursor = target; }

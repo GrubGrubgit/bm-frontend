@@ -668,6 +668,7 @@ async function shellStart() {
   if (shellRunning && !shellPaused) return l2host.frame();
   const pack = await l2ensurePack();
   if (!l2host.inst || l2host.frame() < 0) await l2host.spawn(pack, "build/game.wasm");
+  try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   try { await ensureAudio().unlock(); syncAudioToPrefs(); }
   catch (e) { shellLog("audio locked: " + String((e && e.message) || e).slice(0, 60)); }
   shellRunning = true; shellPaused = false;
@@ -683,6 +684,7 @@ async function shellStop() {
   shellRunning = false; shellPaused = false;
   if (shellRaf) { cancelAnimationFrame(shellRaf); shellRaf = 0; }
   try { l2host.terminate(); } catch (e) {}
+  try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   pauseBtn.textContent = "Pause";
   shellLog("stop");
   return -1;
@@ -690,6 +692,7 @@ async function shellStop() {
 async function shellReset() {
   const pack = await l2ensurePack();
   await l2host.spawn(pack, "build/game.wasm");
+  try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   ensureVideo();
   video.upload(l2host.videoBytes());
   video.present();
@@ -712,6 +715,7 @@ async function shellSave(slot) {
 async function shellLoad(slot) {
   const s = slot || prefs.slot;
   const f = await l2host.load(s);
+  try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   ensureVideo();
   video.upload(l2host.videoBytes());
   video.present();

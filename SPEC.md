@@ -84,7 +84,7 @@ mobile browsers (secondary).
 - `src/pack/` — builder + reader + schema version (FFV `pack.js` +
   `packreader.js` pattern).
 - `src/video/` — WebGL uploader + present of the SPEC section 5 framebuffer
-  (CHR/palette/scroll/OAM compositing lives in the C adapter, oracle-verified):
+  (CHR/palette/scroll/OAM compositing lives in the C adapter; OAM from oam[], scroll includes reg2000 base bits with MMC1 mirroring, sprite priority behind opaque bg, 8x16 bank fix; title oracle still matches):
   scaling (Integer/Fit/Fill/Stretch) + filter (Nearest default/Bilinear) +
   fullscreen viewport handling, FPS meter. No game code. Display proof is
   upload-digest equality plus a toDataURL blank-to-drawn bitmap change with
@@ -95,7 +95,7 @@ mobile browsers (secondary).
 - `src/audio/` — live NES APU (FFV `spc.js` pattern: native voice
   synthesis from the engine register stream, not PCM playback):
   pulse/triangle/noise/DMC + frame counter per the game driver (bank5 TU),
-  worklet/graph at device rate, mute/volume, gap counter. No game code.
+  worklet/graph at device rate, mute/volume, gap counter. Shell reset/stop/load resets the worklet voice; ApuStream rebases on frame jumps so load does not render thousands of silent frames. No game code.
 - `src/input/` — ONE virtual-pad bus (FFV `input.js` pattern): `keyboard.js`
   (desktop), `touch.js` (d-pad + diagonals + A/B/Start/Select, multitouch,
   both orientations), `gamepad.js` (standard mapping incl. Bluetooth,

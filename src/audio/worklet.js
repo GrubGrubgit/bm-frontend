@@ -19,6 +19,12 @@ class ApuVoice extends AudioWorkletProcessor {
         const blk = this.stream.pushFrame(m.f, m.ev);
         if (blk.length > 0) { this.fifo.push({ b: blk, o: 0 }); this.fifoLen += blk.length; }
         this.fed = m.f;
+      } else if (m.t === "reset") {
+        this.stream = new ApuStream(sampleRate);
+        this.fifo = [];
+        this.fifoLen = 0;
+        this.gaps = 0;
+        this.fed = -1;
       } else if (m.t === "stats") {
         this.port.postMessage({ t: "stats", fed: this.fed, fifo: this.fifoLen, gaps: this.gaps });
       }

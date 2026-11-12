@@ -31,6 +31,10 @@ export class ApuPlayer {
     this.node.port.postMessage({ t: "frame", f: f, ev: ev });
     this.pushed = f;
   }
+  reset() {
+    this.pushed = 0; this.lastFed = -1;
+    if (this.node) { try { this.node.port.postMessage({ t: 'reset' }); } catch (e) {} }
+  }
   setVolume(v) {
     this.volume = Math.max(0, Math.min(1, v));
     if (this.gain && !this.muted) this.gain.gain.value = this.volume;

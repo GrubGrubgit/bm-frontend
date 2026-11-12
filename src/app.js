@@ -553,6 +553,7 @@ if (qs.has("headless")) {
 // mask, video present + audio push per frame). Determinism + replay save/
 // load are L2 properties this layer reuses, never reimplements.
 import { loadPrefs, savePrefs } from "./ui/prefs.js";
+import { wireInstall } from "./ui/pwa.js";
 import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
 const prefs = loadPrefs();
 const shellStatusEl = document.getElementById("shellStatus");
@@ -560,6 +561,7 @@ const logEl = document.getElementById("logEl");
 const padToastEl = document.getElementById("padToast");
 const shellLog = makeLog(logEl);
 wirePadToasts(padToastEl, shellLog);
+wireInstall(document.getElementById("installBtn"), shellLog);
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 const resetBtn = document.getElementById("resetBtn");
@@ -913,4 +915,45 @@ if (qs.has("headless")) {
   if (t6 === "l6") selfTestL6();
   else if (t6 === "l6save") selfTestL6Save();
   else if (t6 === "l6reload") selfTestL6Reload();
+}
+// ---- PWA packaging (manifest + SW + install UI). ----
+const failPwa = (s) => { document.title = "BM-PWA-FAIL:" + s; };
+async function selfTestPwa() {
+  document.title = "BM-PWA-RUNNING";
+  try {
+    const link = document.querySelector("link[rel=manifest]");
+    if (!link) return failPwa("no-manifest-link");
+    const mr = await fetch(link.getAttribute("href"));
+    if (!mr.ok) return failPwa("manifest-fetch:" + mr.status);
+    const ct = (mr.headers.get("content-type") || "");
+    if (ct.indexOf("manifest+json") < 0 && ct.indexOf("json") < 0) return failPwa("manifest-mime:" + ct);
+    const man = await mr.json();
+    if (man.display !== "standalone") return failPwa("display");
+    if (!man.start_url || !man.icons || man.icons.length < 2) return failPwa("manifest-fields");
+    for (const ic of man.icons) {
+      const ir = await fetch(ic.src);
+      if (!ir.ok) return failPwa("icon-fetch:" + ic.src);
+    }
+    if (!("serviceWorker" in navigator)) return failPwa("no-sw-api");
+    let reg = null;
+    const t0 = performance.now();
+    for (;;) {
+      try { reg = await navigator.serviceWorker.getRegistration(); } catch (e) { reg = null; }
+      if (reg && reg.active) break;
+      if (performance.now() - t0 > 20000) return failPwa("sw-timeout");
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    if (!reg.active.scriptURL.endsWith("sw.js")) return failPwa("sw-script");
+    const pwa = window.BM.pwa();
+    if (!pwa.sw) return failPwa("pwa-sw");
+    const ib = document.getElementById("installBtn");
+    if (!ib) return failPwa("no-install-btn");
+    statusEl.textContent = "PWA checks PASS";
+    shellLog("PWA self-test PASS");
+    document.title = "BM-PWA-PASS";
+  } catch (e) { failPwa("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+if (qs.has("headless")) {
+  const tp = qs.get("test");
+  if (tp === "pwa") selfTestPwa();
 }

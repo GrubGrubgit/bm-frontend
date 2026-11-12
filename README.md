@@ -51,3 +51,25 @@ Prefs (localStorage bm-prefs-v1, survive reload): scale
 (integer/fit/fill/stretch), filter (nearest/bilinear), volume, muted,
 slot. Shell status line shows fps | frame | audio | scale/filter | vol |
 slot | RUNNING/PAUSED/stopped. Log view keeps the last 200 lines.
+
+## PWA packaging (installable app)
+
+- manifest.webmanifest (name, short_name, standalone display, icons)
+  plus sw.js (versioned app-shell + runtime cache, ROM bytes never
+  cached) make the repo installable from any static HTTPS host
+  (localhost counts as secure for testing).
+- Icons in src/icons/ are original block art, no game assets.
+- index.html links the manifest, sets the theme color + Apple touch
+  icon, registers sw.js on load, and shows an Install button when the
+  browser fires beforeinstallprompt (window.BM.install() / pwa()
+  for headless).
+- tools/serve.js serves .webmanifest as application/manifest+json
+  and keeps COOP/COEP so SharedArrayBuffer stays available.
+- Headless proof: index.html?headless=1&test=pwa (manifest fetch +
+  MIME, all icons 200, SW registered + active, BM.pwa surface, zero
+  console errors); L6 suite + save/reload pair re-verified green on
+  desktop + phone after the change.
+- Updating: bump VERSION in sw.js with every shipped change so
+  installed clients pick it up. Offline: shell + cached engine load
+  without network; the ROM pack lives in IndexedDB and survives;
+  first launch and fresh engine builds need network once.

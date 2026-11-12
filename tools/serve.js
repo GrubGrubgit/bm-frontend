@@ -5,7 +5,7 @@
 const http = require("http"), fs = require("fs"), path = require("path");
 const root = path.join(__dirname, "..");
 const TESTROM = "/data/data/com.termux/files/home/storage/AiAgent/def7cmrvqe/work/roms-dev/blaster-master-usa.nes";
-const mime = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".png": "image/png", ".css": "text/css", ".nes": "application/octet-stream" };
+const mime = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".png": "image/png", ".css": "text/css", ".webmanifest": "application/manifest+json", ".nes": "application/octet-stream" };
 function sendFile(res, f, type) {
   fs.readFile(f, (err, data) => {
     if (err) { res.writeHead(404); res.end("nf"); return; }

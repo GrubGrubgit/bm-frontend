@@ -1,6 +1,13 @@
 <!doctype html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bm-frontend L6</title><link rel="icon" href="data:,">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#111111">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="apple-touch-icon" href="src/icons/icon-192.png">
+
 <style>
 button,select,input[type=range]{min-height:44px;font-size:16px}
 button{padding:10px 14px;margin:2px}
@@ -35,6 +42,8 @@ button{padding:10px 14px;margin:2px}
 <label>scale <select id="scaleSel"><option value="integer">Integer</option><option value="fit">Fit</option><option value="fill">Fill</option><option value="stretch">Stretch</option></select></label>
 <label>filter <select id="filterSel"><option value="nearest">Nearest</option><option value="bilinear">Bilinear</option></select></label>
 <button id="fsBtn">Fullscreen</button>
+<button id="installBtn" hidden>Install</button>
+
 </div>
 <div class="shellRow">
 <label>vol <input id="volumeInput" type="range" min="0" max="100" value="80" style="width:140px"></label>
@@ -49,6 +58,16 @@ button{padding:10px 14px;margin:2px}
 <pre id="metaEl" style="white-space:pre-wrap;background:#222;padding:8px;min-height:60px">no ROM yet</pre>
 <h3>Video (L3)</h3>
 <div id="playCtn"><canvas id="gameCanvas" width="512" height="480" style="width:512px;height:480px"></canvas></div>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").catch(function (e) {
+      console.log("[BM] sw: " + e);
+    });
+  });
+}
+</script>
+
 <script type="module" src="src/app.js"></script>
 </body>
 </html>

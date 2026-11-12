@@ -62,7 +62,7 @@ button{padding:10px 14px;margin:2px}
 <script>
 // In-app origins (WebView wrapper) must NEVER be SW-controlled: the wrapper
 // serves COOP/COEP/CORP itself, and a stale SW breaks cross-origin isolation.
-if (location.hostname === "bmweb.local" || location.hostname === "127.0.0.1" || location.hostname === "localhost") {
+var INAPP = /[?&]inapp=1/.test(location.search); window.__INAPP = INAPP; if (INAPP) {
   if ("serviceWorker" in navigator) {
     if (navigator.serviceWorker.controller) {
       navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); setTimeout(function () { location.reload(); }, 500); }).catch(function () {});
@@ -81,7 +81,7 @@ if (location.hostname === "bmweb.local" || location.hostname === "127.0.0.1" || 
 </script>
 
 <script>
-setInterval(function(){try{var p=document.getElementById("probeEl");if(p&&window.__bmLastReport){var t=String(window.__bmLastReport).slice(-1500);if(p.__t!==t){p.__t=t;p.textContent=t;}}}catch(e){}},1500);
+setInterval(function(){try{var p=document.getElementById("probeEl");if(!p)return;if(!window.__INAPP){p.hidden=true;return;}if(window.__bmLastReport){var t=String(window.__bmLastReport).slice(-1500);if(p.__t!==t){p.__t=t;p.textContent=t;}}}catch(e){}},1500);
 </script>
 <script type="module" src="src/app.js"></script>
 </body>

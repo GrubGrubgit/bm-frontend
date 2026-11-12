@@ -49,11 +49,24 @@ public class MainActivity extends Activity {
         System.exit(2);
       }
     });
+    String curl = null;
     try {
-      startApp();
-    } catch (Throwable e) {
-      try { writeCrash(traceOf(e), false); } catch (Throwable ignored6) {}
-      showCrash("STARTUP CRASH:\n" + traceOf(e), false);
+      Intent svc = new Intent(this, ServerService.class);
+      if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc); else startService(svc);
+      for (int i = 0; i < 20 && curl == null; i++) {
+        curl = ServerService.baseUrl;
+        if (curl == null) { try { Thread.sleep(100); } catch (InterruptedException ignored16) {} }
+      }
+    } catch (Throwable ignored17) {}
+    if (curl != null && openInChrome(curl + "index.html")) {
+      showStatus(curl);
+    } else {
+      try {
+        startApp();
+      } catch (Throwable e) {
+        try { writeCrash(traceOf(e), false); } catch (Throwable ignored6) {}
+        showCrash("STARTUP CRASH:\n" + traceOf(e), false);
+      }
     }
   }
 
@@ -171,8 +184,45 @@ public class MainActivity extends Activity {
     });
     setContentView(web);
     String base = startLocalServer();
-    if (base != null) web.loadUrl(base + "index.html");
-    else web.loadUrl("https://" + HOST + "/index.html");
+    if (base != null) web.loadUrl(base + "index.html?inapp=1");
+    else web.loadUrl("https://" + HOST + "/index.html?inapp=1");
+  }
+
+  private boolean openInChrome(String url) {
+    try {
+      Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+      i.setPackage("com.android.chrome");
+      i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      startActivity(i);
+      return true;
+    } catch (Throwable t1) {
+      try {
+        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(i);
+        return true;
+      } catch (Throwable t2) { return false; }
+    }
+  }
+
+  private void showStatus(final String curl) {
+    LinearLayout root = new LinearLayout(this);
+    root.setOrientation(LinearLayout.VERTICAL);
+    int pad = (int) (16 * getResources().getDisplayMetrics().density);
+    root.setPadding(pad, pad, pad, pad);
+    TextView tv = new TextView(this);
+    tv.setText("BM Web server running at\n" + curl + "\n\nGame opened in Chrome. Keep this app in background (do not swipe it away) while playing.\nROM and saves live in Chrome and persist there.");
+    tv.setTextSize(14);
+    root.addView(tv);
+    Button again = new Button(this);
+    again.setText("Reopen in Chrome");
+    again.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { openInChrome(curl + "index.html"); } });
+    root.addView(again);
+    Button stop = new Button(this);
+    stop.setText("Stop server and exit");
+    stop.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { try { stopService(new Intent(MainActivity.this, ServerService.class)); } catch (Throwable ignored18) {} finish(); } });
+    root.addView(stop);
+    setContentView(root);
   }
 
   private static String traceOf(Throwable e) {

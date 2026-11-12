@@ -7,9 +7,9 @@
 // while held. Short guarded vibrate on direction change where supported.
 // Headless drives pointerdown/move/up with clientX/Y coords.
 const DEAD = 0.28;
-function buzz(m) {
+function buzz(m, e) {
   try {
-    if (m && typeof navigator.vibrate === "function") navigator.vibrate(8);
+    if (m && (!e || e.isTrusted) && typeof navigator.vibrate === "function") navigator.vibrate(8);
   } catch (err) {}
 }
 export function mountTouch(bus, parent) {
@@ -79,14 +79,14 @@ export function mountTouch(bus, parent) {
     activeId = e.pointerId;
     try { pad.setPointerCapture(e.pointerId); } catch (err) {}
     crossMask = crossFromEvent(e);
-    buzz(crossMask);
+    buzz(crossMask, e);
     recompute();
   });
   pad.addEventListener("pointermove", (e) => {
     if (e.pointerId !== activeId) return;
     e.preventDefault();
     const m = crossFromEvent(e);
-    if (m !== crossMask) { crossMask = m; buzz(m); recompute(); }
+    if (m !== crossMask) { crossMask = m; buzz(m, e); recompute(); }
   });
   const endCross = (e) => {
     if (e.pointerId !== activeId) return;

@@ -13,8 +13,17 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PrintStream;
 
 public class MainActivity extends Activity {
   private WebView web;
@@ -24,6 +33,28 @@ public class MainActivity extends Activity {
 
   protected void onCreate(Bundle b) {
     super.onCreate(b);
+    final MainActivity self = this;
+    Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+      public void uncaughtException(Thread t, Throwable e) {
+        try { self.writeCrash(e); } catch (Throwable ignored4) {}
+        try { Thread.sleep(500); } catch (InterruptedException ignored5) {}
+        System.exit(2);
+      }
+    });
+    String last = readCrash();
+    if (last != null && last.length() > 0) {
+      showCrash("LAST CRASH:\n" + last, true);
+      return;
+    }
+    try {
+      startApp();
+    } catch (Throwable e) {
+      try { writeCrash(e); } catch (Throwable ignored6) {}
+      showCrash("STARTUP CRASH:\n" + traceOf(e), false);
+    }
+  }
+
+  private void startApp() {
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     immersive();
     final AssetManager assets = getAssets();
@@ -64,6 +95,54 @@ public class MainActivity extends Activity {
     });
     setContentView(web);
     web.loadUrl("http://127.0.0.1:" + port + "/index.html");
+  }
+
+  private static String traceOf(Throwable e) {
+    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+    e.printStackTrace(new PrintStream(bos));
+    try { return bos.toString("UTF-8"); } catch (Exception x) { return bos.toString(); }
+  }
+
+  private File crashFile() { return new File(getFilesDir(), "crash.log"); }
+
+  private void writeCrash(Throwable e) {
+    try {
+      FileOutputStream f = new FileOutputStream(crashFile());
+      f.write(traceOf(e).getBytes("UTF-8"));
+      f.close();
+    } catch (Exception ignored3) {}
+  }
+
+  private String readCrash() {
+    try {
+      FileInputStream f = new FileInputStream(crashFile());
+      ByteArrayOutputStream bos = new ByteArrayOutputStream();
+      byte[] buf = new byte[8192];
+      int r;
+      while ((r = f.read(buf)) >= 0) bos.write(buf, 0, r);
+      f.close();
+      return bos.toString("UTF-8");
+    } catch (Exception e) { return null; }
+  }
+
+  private void showCrash(String trace, final boolean offerContinue) {
+    LinearLayout root = new LinearLayout(this);
+    root.setOrientation(LinearLayout.VERTICAL);
+    TextView tv = new TextView(this);
+    tv.setText(trace);
+    tv.setTextSize(12);
+    ScrollView sv = new ScrollView(this);
+    sv.addView(tv);
+    root.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1.0f));
+    if (offerContinue) {
+      Button b = new Button(this);
+      b.setText("Clear and start app");
+      b.setOnClickListener(new View.OnClickListener() {
+        public void onClick(View v) { crashFile().delete(); startApp(); }
+      });
+      root.addView(b);
+    }
+    setContentView(root);
   }
 
   protected void onActivityResult(int req, int res, Intent data) {

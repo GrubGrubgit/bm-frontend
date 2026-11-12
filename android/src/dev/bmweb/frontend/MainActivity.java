@@ -49,24 +49,11 @@ public class MainActivity extends Activity {
         System.exit(2);
       }
     });
-    String curl = null;
     try {
-      Intent svc = new Intent(this, ServerService.class);
-      if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc); else startService(svc);
-      for (int i = 0; i < 20 && curl == null; i++) {
-        curl = ServerService.baseUrl;
-        if (curl == null) { try { Thread.sleep(100); } catch (InterruptedException ignored16) {} }
-      }
-    } catch (Throwable ignored17) {}
-    if (curl != null && openInChrome(curl + "index.html")) {
-      showStatus(curl);
-    } else {
-      try {
-        startApp();
-      } catch (Throwable e) {
-        try { writeCrash(traceOf(e), false); } catch (Throwable ignored6) {}
-        showCrash("STARTUP CRASH:\n" + traceOf(e), false);
-      }
+      startApp();
+    } catch (Throwable e) {
+      try { writeCrash(traceOf(e), false); } catch (Throwable ignored6) {}
+      showCrash("STARTUP CRASH:\n" + traceOf(e), false);
     }
   }
 
@@ -123,36 +110,6 @@ public class MainActivity extends Activity {
           return resp;
         } catch (Throwable t) { return null; }
       }
-      public void onPageFinished(WebView v, String url) {
-        try {
-          final WebView vv = v;
-          vv.evaluateJavascript("window.__probeResult=\"pending\";(async()=>{let h={},j={};try{const r=await fetch(\"index.html\");h.coop=r.headers.get(\"cross-origin-opener-policy\");h.coep=r.headers.get(\"cross-origin-embedder-policy\");h.corp=r.headers.get(\"cross-origin-resource-policy\");}catch(e){h.err=String(e).slice(0,120);}try{const r2=await fetch(\"src/app.js\");j.corp=r2.headers.get(\"cross-origin-resource-policy\");j.ct=r2.headers.get(\"content-type\");}catch(e){j.err=String(e).slice(0,120);}window.__probeResult=JSON.stringify({coi:window.crossOriginIsolated,secure:window.isSecureContext,sab:typeof SharedArrayBuffer,origin:location.origin,ua:navigator.userAgent,h:h,js:j});})()", null);
-          Thread t = new Thread(new Runnable() {
-            public void run() {
-              try { Thread.sleep(4000); } catch (InterruptedException ignored11) {}
-              vv.post(new Runnable() {
-                public void run() {
-                  try {
-                    vv.evaluateJavascript("JSON.stringify(window.__probeResult)", new ValueCallback<String>() {
-                      public void onReceiveValue(String val) {
-                        try {
-                          FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);
-                          String line = "PROBE " + val + "\n";
-                            injectReport(vv);
-                          f.write(line.getBytes("UTF-8"));
-                          f.close();
-                        } catch (Throwable ignored9) {}
-                      }
-                    });
-                  } catch (Throwable ignored10) {}
-                }
-              });
-            }
-          });
-          t.setDaemon(true);
-          t.start();
-        } catch (Throwable ignored12) {}
-      }
     });
     web.setWebChromeClient(new WebChromeClient() {
       public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
@@ -188,42 +145,6 @@ public class MainActivity extends Activity {
     else web.loadUrl("https://" + HOST + "/index.html?inapp=1");
   }
 
-  private boolean openInChrome(String url) {
-    try {
-      Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-      i.setPackage("com.android.chrome");
-      i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-      startActivity(i);
-      return true;
-    } catch (Throwable t1) {
-      try {
-        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(i);
-        return true;
-      } catch (Throwable t2) { return false; }
-    }
-  }
-
-  private void showStatus(final String curl) {
-    LinearLayout root = new LinearLayout(this);
-    root.setOrientation(LinearLayout.VERTICAL);
-    int pad = (int) (16 * getResources().getDisplayMetrics().density);
-    root.setPadding(pad, pad, pad, pad);
-    TextView tv = new TextView(this);
-    tv.setText("BM Web server running at\n" + curl + "\n\nGame opened in Chrome. Keep this app in background (do not swipe it away) while playing.\nROM and saves live in Chrome and persist there.");
-    tv.setTextSize(14);
-    root.addView(tv);
-    Button again = new Button(this);
-    again.setText("Reopen in Chrome");
-    again.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { openInChrome(curl + "index.html"); } });
-    root.addView(again);
-    Button stop = new Button(this);
-    stop.setText("Stop server and exit");
-    stop.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { try { stopService(new Intent(MainActivity.this, ServerService.class)); } catch (Throwable ignored18) {} finish(); } });
-    root.addView(stop);
-    setContentView(root);
-  }
 
   private static String traceOf(Throwable e) {
     ByteArrayOutputStream bos = new ByteArrayOutputStream();
@@ -233,16 +154,6 @@ public class MainActivity extends Activity {
 
   private File crashFile() { return new File(getFilesDir(), LOG); }
 
-  private void injectReport(final WebView vv) {
-    try {
-      String all = readCrash();
-      if (all == null || all.length() == 0) return;
-      if (all.length() > 4000) all = all.substring(all.length() - 4000);
-      String q = all.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "");
-      final String js = "window.__bmLastReport=\"" + q + "\";";
-      vv.post(new Runnable() { public void run() { try { vv.evaluateJavascript(js, null); } catch (Throwable ignored14) {} } });
-    } catch (Throwable ignored15) {}
-  }
   private void miss(String what) {
     try {
       FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);
@@ -258,18 +169,6 @@ public class MainActivity extends Activity {
       f.write(trace.getBytes("UTF-8"));
       f.close();
     } catch (Exception ignored3) {}
-  }
-
-  private String readCrash() {
-    try {
-      FileInputStream f = new FileInputStream(crashFile());
-      ByteArrayOutputStream bos = new ByteArrayOutputStream();
-      byte[] buf = new byte[8192];
-      int r;
-      while ((r = f.read(buf)) >= 0) bos.write(buf, 0, r);
-      f.close();
-      return bos.toString("UTF-8");
-    } catch (Exception e) { return null; }
   }
 
   private void showCrash(String trace, final boolean offerContinue) {

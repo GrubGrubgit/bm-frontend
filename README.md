@@ -78,9 +78,9 @@ slot | RUNNING/PAUSED/stopped. Log view keeps the last 200 lines.
 
 - sh android/apk_build.sh builds android/release/BM-Web.apk
   (debug-signed, installable): a WebView wrapper (dev.bmweb.frontend)
-  that serves the staged game over a localhost server with the same
+  that serves the staged game straight out of the APK via shouldInterceptRequest (no sockets) with the same
   COOP/COEP headers as tools/serve.js, so SharedArrayBuffer and
-  IndexedDB behave exactly like the tested headless setup.
+  IndexedDB behave like the tested setup. Socket-free by necessity (device blocks ServerSocket with EPERM); the service worker stays off inside the app via hostname guard.
 - No permissions: no network (localhost only), no storage (in-app
   file picker feeds your ROM straight to the pack builder).
 - Needs SDK platform android-36 (default work/android-sdk, gitignored)

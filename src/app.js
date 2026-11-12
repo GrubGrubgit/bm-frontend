@@ -632,17 +632,28 @@ let shellRunning = false, shellPaused = false, shellStepping = false, shellRaf =
 let shellFpsCount = 0, shellFpsT0 = 0, shellFps = 0;
 async function shellStepOnce() {
   const mask = padBus.getMask();
-  const h = await l2host.go(1, mask);
+  let h;
+  try {
+    h = await Promise.race([l2host.go(1, mask), new Promise((rr, jj) => setTimeout(() => jj(new Error('go-stall')), 2500))]);
+  } catch (e) {
+    if (String((e && e.message) || e).indexOf('go-stall') >= 0) shellLog('STALL go>2500ms f=' + l2host.frame());
+    throw e;
+  }
   try {
     if (audioPlayer && audioPlayer.node) {
       const ab = l2host.audioFrame();
       if (ab.n > 0) audioPlayer.pushFrame(l2host.frame(), parseAudioBytes(ab));
     }
   } catch (e) {}
-  ensureVideo();
-  video.upload(l2host.videoBytes());
-  const pe = video.present();
-  if (pe !== 0) shellLog("video present err " + pe);
+  try {
+    ensureVideo();
+    video.upload(l2host.videoBytes());
+    const pe = video.present();
+    if (pe !== 0) shellLog("video present err " + pe);
+  } catch (e) {
+    window.__bmVidErr = (window.__bmVidErr || 0) + 1;
+    shellLog("video err n=" + window.__bmVidErr + " " + String((e && e.message) || e).slice(0, 90));
+  }
   shellFpsCount++;
   const now = performance.now();
   if (!shellFpsT0) shellFpsT0 = now;
@@ -658,8 +669,7 @@ function shellLoop() {
     (async () => {
       if (!shellPaused && !shellStepping) {
         shellStepping = true;
-        try { await shellStepOnce(); } catch (e) { shellLog("step err " + String((e && e.message) || e)); }
-        shellStepping = false;
+        try { await shellStepOnce(); } catch (e) { shellLog("step err " + String((e && e.message) || e)); try { shellStatusEl.textContent = "shell f=" + l2host.frame() + " err=" + String((e && e.message) || e).slice(0, 60); } catch (e2) {} } finally { shellStepping = false; }
       }
     })().then(() => shellLoop(), () => shellLoop());
   });

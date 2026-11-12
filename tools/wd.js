@@ -3,7 +3,7 @@
 const fs = require("fs");
 const { spawn } = require("child_process");
 const [url, shot, marker, tmo] = [process.argv[2], process.argv[3], process.argv[4], +(process.argv[5] || 25000)];
-const PORT = 9516;
+const PORT = +(process.env.WDPORT || 9516);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function api(method, path, body) {
   const r = await fetch("http://127.0.0.1:" + PORT + path, {
@@ -11,7 +11,7 @@ async function api(method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   const j = await r.json();
-  if (j.status) throw new Error("wd-status:" + j.status + " " + JSON.stringify(j.value).slice(0, 200));
+  if (j.status || (j.value && j.value.error)) throw new Error("wd-status:" + (j.status || j.value.error) + " " + JSON.stringify(j.value).slice(0, 200));
   return j.value;
 }
 (async () => {

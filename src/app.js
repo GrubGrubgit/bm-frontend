@@ -487,6 +487,8 @@ function kd(code) { window.dispatchEvent(new KeyboardEvent("keydown", { code: co
 function ku(code) { window.dispatchEvent(new KeyboardEvent("keyup", { code: code })); }
 function pdown(el, id) { el.dispatchEvent(new PointerEvent("pointerdown", { pointerId: id, bubbles: true, cancelable: true })); }
 function pup(el, id) { el.dispatchEvent(new PointerEvent("pointerup", { pointerId: id, bubbles: true, cancelable: true })); }
+function pdownAt(el, id, x, y) { el.dispatchEvent(new PointerEvent("pointerdown", { pointerId: id, clientX: x, clientY: y, bubbles: true, cancelable: true })); }
+function pmoveAt(el, id, x, y) { el.dispatchEvent(new PointerEvent("pointermove", { pointerId: id, clientX: x, clientY: y, bubbles: true, cancelable: true })); }
 function fakeNav(btns, axes) {
   const b = [];
   for (let i = 0; i < 16; i++) b.push({ pressed: !!btns[i] });
@@ -500,9 +502,18 @@ async function selfTestL5() {
     if (padBus.getMask() !== 0x81) return fail5("kbd:" + padBus.getMask().toString(16));
     ku("ArrowRight"); ku("KeyX");
     if (padBus.getMask() !== 0) return fail5("kbd-clear:" + padBus.getMask().toString(16));
-    pdown(touchUI.buttons.left, 11); pdown(touchUI.buttons.a, 12);
-    if (padBus.getMask() !== 0x41) return fail5("touch-multitouch:" + padBus.getMask().toString(16));
-    pup(touchUI.buttons.left, 11); pup(touchUI.buttons.a, 12);
+    const padR = touchUI.pad.getBoundingClientRect();
+    const pcx = padR.left + padR.width / 2, pcy = padR.top + padR.height / 2;
+    pdownAt(touchUI.pad, 11, pcx - padR.width * 0.32, pcy);
+    if (padBus.getMask() !== 0x40) return fail5("cross-left:" + padBus.getMask().toString(16));
+    pmoveAt(touchUI.pad, 11, pcx, pcy - padR.height * 0.32);
+    if (padBus.getMask() !== 0x10) return fail5("cross-slide-up:" + padBus.getMask().toString(16));
+    pmoveAt(touchUI.pad, 11, pcx - padR.width * 0.32, pcy - padR.height * 0.32);
+    if (padBus.getMask() !== 0x50) return fail5("cross-diag:" + padBus.getMask().toString(16));
+    pdown(touchUI.buttons.a, 12);
+    if (padBus.getMask() !== 0x51) return fail5("cross-multitouch:" + padBus.getMask().toString(16));
+    pup(touchUI.buttons.a, 12);
+    pup(touchUI.pad, 11);
     if (padBus.getMask() !== 0) return fail5("touch-clear:" + padBus.getMask().toString(16));
     if (pollGamepad(fakeNav({ 0: true, 14: true })) !== 0x41) return fail5("pad-map");
     if (pollGamepad(fakeNav({}, [0.9, -0.9])) !== 0x90) return fail5("pad-stick");

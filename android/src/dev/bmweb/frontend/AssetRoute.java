@@ -39,6 +39,6 @@ public class AssetRoute {
     String mime = mimeFor(ext);
     if (mime == null) return null;
     boolean text = mime.startsWith("text/") || mime.equals("application/javascript") || mime.equals("application/json") || mime.equals("application/manifest+json");
-    return new AssetRoute(mime, "www/" + p, text);
+    return new AssetRoute(mime, p, text);
   }
 }

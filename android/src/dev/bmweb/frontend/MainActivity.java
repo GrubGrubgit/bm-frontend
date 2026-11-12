@@ -24,6 +24,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.util.HashMap;
@@ -34,6 +35,7 @@ public class MainActivity extends Activity {
   private ValueCallback<Uri[]> fileCb;
   private static final int FILE_REQ = 1001;
   private static final String HOST = "bmweb.local";
+  private static final String LOG = "report.log";
 
   protected void onCreate(Bundle b) {
     super.onCreate(b);
@@ -47,7 +49,7 @@ public class MainActivity extends Activity {
     });
     String last = readCrash();
     if (last != null && last.length() > 0) {
-      showCrash("LAST CRASH:\n" + last, true);
+      showCrash("LAST REPORT:\n" + last, true);
       return;
     }
     try {
@@ -73,8 +75,14 @@ public class MainActivity extends Activity {
           if (!"GET".equals(req.getMethod())) return null;
           if (!HOST.equals(req.getUrl().getHost())) return null;
           AssetRoute r = AssetRoute.resolve(req.getUrl().getPath());
-          if (r == null) return null;
-          InputStream in = getAssets().open(r.asset);
+          if (r == null) { miss(req.getUrl().getPath()); return null; }
+          InputStream in;
+          try {
+            in = getAssets().open(r.asset);
+          } catch (IOException e) {
+            miss(r.asset);
+            return null;
+          }
           WebResourceResponse resp = new WebResourceResponse(r.mime, r.text ? "UTF-8" : null, in);
           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Map<String, String> h = new HashMap<String, String>();
@@ -107,7 +115,7 @@ public class MainActivity extends Activity {
         try {
           if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR && m.message() != null && m.message().contains("SharedArrayBuffer")) {
             String line = "JS: " + m.message() + " (" + m.sourceId() + ":" + m.lineNumber() + ")\n";
-            FileOutputStream f = new FileOutputStream(new File(getFilesDir(), "crash.log"), true);
+            FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);
             f.write(line.getBytes("UTF-8"));
             f.close();
           }
@@ -125,7 +133,16 @@ public class MainActivity extends Activity {
     try { return bos.toString("UTF-8"); } catch (Exception x) { return bos.toString(); }
   }
 
-  private File crashFile() { return new File(getFilesDir(), "crash.log"); }
+  private File crashFile() { return new File(getFilesDir(), LOG); }
+
+  private void miss(String what) {
+    try {
+      FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);
+      String line = "MISS " + what + "\n";
+      f.write(line.getBytes("UTF-8"));
+      f.close();
+    } catch (Throwable ignored8) {}
+  }
 
   private void writeCrash(String trace, boolean append) {
     try {

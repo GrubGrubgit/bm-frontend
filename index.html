@@ -56,6 +56,7 @@ button{padding:10px 14px;margin:2px}
 <div id="dropEl" style="margin-top:8px;padding:24px;text-align:center;border:2px dashed #666">…or drop ROM here</div>
 <div style="margin-top:8px"><button id="wipeBtn" style="padding:12px;font-size:16px">wipe cache</button></div>
 <pre id="metaEl" style="white-space:pre-wrap;background:#222;padding:8px;min-height:60px">no ROM yet</pre>
+<pre id="probeEl" style="white-space:pre-wrap;background:#111;color:#8f8;padding:8px;min-height:20px">probe: pending...</pre>
 <h3>Video (L3)</h3>
 <div id="playCtn"><canvas id="gameCanvas" width="512" height="480" style="width:512px;height:480px"></canvas></div>
 <script>
@@ -80,7 +81,7 @@ if (location.hostname === "bmweb.local" || location.hostname === "127.0.0.1" || 
 </script>
 
 <script>
-setInterval(function(){try{var m=document.getElementById("metaEl");if(m&&window.__bmLastReport&&!m.__rep){m.__rep=1;m.textContent=String(window.__bmLastReport).slice(-600)+" | "+m.textContent;}}catch(e){}},1500);
+setInterval(function(){try{var p=document.getElementById("probeEl");if(p&&window.__bmLastReport){var t=String(window.__bmLastReport).slice(-1500);if(p.__t!==t){p.__t=t;p.textContent=t;}}}catch(e){}},1500);
 </script>
 <script type="module" src="src/app.js"></script>
 </body>

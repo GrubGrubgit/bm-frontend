@@ -44,6 +44,11 @@ static void render(void) {
   int bb = (reg2000 & 0x10) ? b1 : b0;
   int sb = (reg2000 & 0x08) ? b1 : b0;
   int spr16 = (reg2000 & 0x20) ? 1 : 0;
+  int bg_en = reg2001 & 0x08;
+  int spr_en = reg2001 & 0x10;
+  int bg_left = reg2001 & 0x02;
+  int spr_left = reg2001 & 0x04;
+  int back_idx = pal[0] & 0x3F;
   int mir = mmc_ctrl & 3;
   int base = reg2000 & 3;
   int base_x = base & 1;
@@ -80,13 +85,14 @@ static void render(void) {
       int col = vx & 7;
       int lo = chr[off + row], hi = chr[off + row + 8];
       int bit = ((lo >> (7 - col)) & 1) | (((hi >> (7 - col)) & 1) << 1);
-      int idx = bit == 0 ? (pal[0] & 0x3F) : (pal[palhi * 4 + bit] & 0x3F);
+      int pix_on = bg_en && (bit != 0) && (bg_left || x >= 8);
+      int idx = pix_on ? (pal[palhi * 4 + bit] & 0x3F) : back_idx;
       uint8_t *px = &framebuf[(y * 256 + x) * 4];
       px[0] = NESPAL[idx][0]; px[1] = NESPAL[idx][1]; px[2] = NESPAL[idx][2]; px[3] = 255;
-      bg_opaque[y * 256 + x] = (bit != 0) ? 1 : 0;
+      bg_opaque[y * 256 + x] = pix_on ? 1 : 0;
     }
   }
-  {
+  if (spr_en) {
     int s;
     for (s = 0; s < 64; s++) {
       int oy = oam[s * 4];
@@ -118,7 +124,7 @@ static void render(void) {
           int cc = fx ? (7 - q) : q;
           int v = ((lo >> (7 - cc)) & 1) | ((((hi >> (7 - cc)) & 1) << 1));
           int xx = ox + q;
-          if (v && xx >= 0 && xx < 256) {
+          if (v && xx >= 0 && xx < 256 && (spr_left || xx >= 8)) {
             if ((at & 0x20) && bg_opaque[yy * 256 + xx]) continue;
             {
               int idx2 = pal[16 + palb * 4 + v] & 0x3F;
@@ -141,6 +147,7 @@ int bm_stage_ptr(void) { return (int)(intptr_t)stage; }
 void bm_load_prg(void) { memcpy(prg, stage, sizeof prg); }
 void bm_load_chr(void) { memcpy(chr, stage, sizeof chr); }
 int bm_video_ptr(void) { return (int)(intptr_t)framebuf; }
+int bm_oam_ptr(void) { return (int)(intptr_t)oam; }
 int bm_frame_no(void) { return frame_no; }
 void bm_set_pad(int m) { game_pad = (uint8_t)(m & 0xFF); }
 int bm_audio_read(int dst_ptr, int max) {
@@ -167,7 +174,7 @@ uint32_t bm_hash(void) {
   for (i = 0; i < 0x100; i++) { h ^= oam[i]; h *= 16777619u; }
   h ^= A; h *= 16777619u; h ^= X; h *= 16777619u; h ^= Y; h *= 16777619u;
   h ^= S; h *= 16777619u; h ^= P; h *= 16777619u;
-  h ^= scx; h *= 16777619u; h ^= scy; h *= 16777619u; h ^= reg2000; h *= 16777619u;
+  h ^= scx; h *= 16777619u; h ^= scy; h *= 16777619u; h ^= reg2000; h *= 16777619u; h ^= reg2001; h *= 16777619u;
   h ^= chr0; h *= 16777619u; h ^= chr1; h *= 16777619u; h ^= mmc_ctrl; h *= 16777619u;
   return h;
 }
@@ -181,9 +188,9 @@ void bm_boot(void) {
   memset(pal, 0, sizeof pal);
   memset(oam, 0, sizeof oam);
   A = 0; X = 0; Y = 0; S = 0xFD; P = 0x24;
-  pad_bits = 0; pad_pos1 = 0; pad_pos2 = 0; strobe = 0;
+  pad_bits = 0; pad_pos1 = 0; pad_pos2 = 0; strobe = 0; pad_latch1 = 0; pad_latch2 = 0;
   cycles = 9; scx = 0; scy = 0; sc_latch = 0; ppu_addr = 0; ppu_latch = 0;
-  ppu_buf = 0; oam_addr = 0; reg2000 = 0; chr0 = 0; chr1 = 0;
+  ppu_buf = 0; oam_addr = 0; reg2000 = 0; reg2001 = 0; chr0 = 0; chr1 = 0;
   mmc_shift = 0; mmc_count = 0; mmc_ctrl = 0x0C; swbank = prg[0];
   nmi_next_edge = 27517; nmi_armed = 1; in_nmi = 0;
   frame_no = 0; game_pad = 0; apu_head = 0; apu_tail = 0;
@@ -199,7 +206,7 @@ void bm_snap(void) {
   memcpy(d, ram, 2048); d += 2048;
   memcpy(d, vram, 2048); d += 2048;
   memcpy(d, pal, 32);
-  d[32] = scx; d[33] = scy; d[34] = reg2000; d[35] = chr0; d[36] = chr1; d[37] = mmc_ctrl;
+  d[32] = scx; d[33] = scy; d[34] = reg2000; d[35] = chr0; d[36] = chr1; d[37] = mmc_ctrl; d[38] = reg2001;
 }
 // PLAIN single-entry model (no asyncify, by decision 2026-11-11): the host
 // calls bm_boot() EXACTLY ONCE per run. Boot enters the game (reset vector

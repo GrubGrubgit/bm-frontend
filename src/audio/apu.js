@@ -15,7 +15,7 @@
 //   $4016 joy-strobe path bypasses the WR hook (zero $4016 writes logged).
 //   The audit below fails loudly if any of that ever stops being true.
 export const CPU_HZ = 1789773;
-export const FRAME_CYCLES = 29778;
+export const FRAME_CYCLES = 29781;
 const NOISE_PERIOD = [4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068];
 const DMC_RATE = [428, 380, 340, 320, 286, 254, 236, 214, 190, 160, 142, 128, 106, 84, 72, 54];
 const LENGTH_TABLE = [10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 28, 20, 30, 22, 32, 24, 34, 26, 36, 28, 38, 30];
@@ -26,7 +26,7 @@ function mkPulse() {
     swEn: false, swPer: 0, swNeg: false, swShift: 0, swDiv: 0, envVol: 0, envDiv: 0, envStart: false, en: false, peak: 0 };
 }
 function mkTri() {
-  return { halt: false, lin: 0, linRel: 0, linStart: false, len: 0, period: 0, step: 0, tc: 0, en: false, peak: 0 };
+  return { halt: false, loop: false, lin: 0, linRel: 0, linStart: false, len: 0, period: 0, step: 0, tc: 0, en: false, peak: 0 };
 }
 function mkNoise() {
   return { vol: 0, con: false, loop: false, len: 0, mode: false, period: 0, lfsr: 1, tc: 0,
@@ -207,7 +207,7 @@ export class NesApu {
         const c = this.p1;
         c.period = (c.period & 0xFF) | ((val & 7) << 8);
         c.step = 0; c.envStart = true;
-        c.len = c.en ? LENGTH_TABLE[(val >> 3) & 31] : 0;
+        c.len = LENGTH_TABLE[(val >> 3) & 31];
         break;
       }
       case 0x4004: {
@@ -225,12 +225,12 @@ export class NesApu {
         const c = this.p2;
         c.period = (c.period & 0xFF) | ((val & 7) << 8);
         c.step = 0; c.envStart = true;
-        c.len = c.en ? LENGTH_TABLE[(val >> 3) & 31] : 0;
+        c.len = LENGTH_TABLE[(val >> 3) & 31];
         break;
       }
       case 0x4008: {
         const t = this.tri;
-        t.halt = !!(val & 128); t.linRel = val & 127; t.linStart = true;
+        t.halt = !!(val & 128); t.loop = !!(val & 128); t.linRel = val & 127; t.linStart = true;
         break;
       }
       case 0x4009: break;
@@ -238,7 +238,7 @@ export class NesApu {
       case 0x400B: {
         const t = this.tri;
         t.period = (t.period & 0xFF) | ((val & 7) << 8);
-        t.len = t.en ? LENGTH_TABLE[(val >> 3) & 31] : 0;
+t.len = LENGTH_TABLE[(val >> 3) & 31];
         t.linStart = true;
         break;
       }
@@ -256,7 +256,7 @@ export class NesApu {
       case 0x400F: {
         const c = this.noi;
         c.envStart = true;
-        c.len = c.en ? LENGTH_TABLE[(val >> 3) & 31] : 0;
+        c.len = LENGTH_TABLE[(val >> 3) & 31];
         break;
       }
       case 0x4010: {

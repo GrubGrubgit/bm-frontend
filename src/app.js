@@ -553,7 +553,7 @@ async function selfTestL5() {
       if ((f & 1023) === 0) statusEl.textContent = "L5: capture " + f + "/3600";
     }
     if (l2host.frame() !== 3599) return fail5("survive:" + l2host.frame());
-    if (l2host.hash() !== 0xb31cbf03) return fail5("hash:" + l2host.hash().toString(16));
+    if (l2host.hash() !== 0xe46b2b8f) return fail5("hash:" + l2host.hash().toString(16));
     const v = l2host.videoBytes();
     let nz = 0;
     for (let i = 0; i < v.length; i++) if (v[i] !== 0) nz++;
@@ -636,6 +636,7 @@ document.addEventListener("fullscreenchange", () => {
 });
 let shellRunning = false, shellPaused = false, shellStepping = false, shellRaf = 0;
 let shellFpsCount = 0, shellFpsT0 = 0, shellFps = 0;
+let shellLastT = 0;
 async function shellStepOnce() {
   const mask = padBus.getMask();
   let h;
@@ -685,7 +686,10 @@ function shellLoop() {
   if (!shellRunning) { shellRaf = 0; return; }
   shellRaf = requestAnimationFrame(() => {
     (async () => {
-      if (!shellPaused && !shellStepping) {
+      var nowT = 0;
+      try { nowT = performance.now(); } catch (e) { nowT = 0; }
+      if (!shellPaused && !shellStepping && (shellLastT === 0 || nowT - shellLastT >= 16.0)) {
+        if (nowT !== 0) shellLastT = nowT;
         shellStepping = true;
         try { await shellStepOnce(); } catch (e) { shellLog("step err " + String((e && e.message) || e)); try { shellStatusEl.textContent = "shell f=" + l2host.frame() + " err=" + String((e && e.message) || e).slice(0, 60); } catch (e2) {} } finally { shellStepping = false; }
       }

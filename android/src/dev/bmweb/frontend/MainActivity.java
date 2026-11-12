@@ -3,6 +3,7 @@ package dev.bmweb.frontend;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.res.AssetManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -32,6 +33,7 @@ import java.util.Map;
 
 public class MainActivity extends Activity {
   private WebView web;
+  private LocalServer server;
   private ValueCallback<Uri[]> fileCb;
   private static final int FILE_REQ = 1001;
   private static final String HOST = "bmweb.local";
@@ -58,6 +60,24 @@ public class MainActivity extends Activity {
       try { writeCrash(traceOf(e), false); } catch (Throwable ignored6) {}
       showCrash("STARTUP CRASH:\n" + traceOf(e), false);
     }
+  }
+
+  private String startLocalServer() {
+    try {
+      final AssetManager assets = getAssets();
+      LocalServer srv = new LocalServer(new LocalServer.Opener() {
+        public InputStream open(String path) throws IOException { return assets.open(path); }
+      });
+      int[] ports = new int[] { 8901, 8902, 8903, 8904, 8905, 8906, 8907, 8908, 8909, 8910 };
+      for (int i = 0; i < ports.length; i++) {
+        try {
+          int p = srv.start(ports[i]);
+          server = srv;
+          return "http://127.0.0.1:" + p + "/";
+        } catch (IOException ignored13) {}
+      }
+      return null;
+    } catch (Throwable t) { return null; }
   }
 
   private void startApp() {
@@ -153,7 +173,9 @@ public class MainActivity extends Activity {
       }
     });
     setContentView(web);
-    web.loadUrl("https://" + HOST + "/index.html");
+    String base = startLocalServer();
+    if (base != null) web.loadUrl(base + "index.html");
+    else web.loadUrl("https://" + HOST + "/index.html");
   }
 
   private static String traceOf(Throwable e) {
@@ -236,6 +258,7 @@ public class MainActivity extends Activity {
   }
 
   protected void onDestroy() {
+    if (server != null) server.stop();
     if (web != null) web.destroy();
     super.onDestroy();
   }

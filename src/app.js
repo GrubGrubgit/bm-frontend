@@ -545,3 +545,372 @@ if (qs.has("headless")) {
   const t5 = qs.get("test");
   if (t5 === "l5") selfTestL5();
 }
+
+// ---- L6: shell (SPEC section 6 src/ui + section 7). Thin composition only:
+// loader/pack/start/stop/reset/pause, IDB state slots, volume, scale +
+// filter + fullscreen (persisted, touch-accessible), status line, log view.
+// 60fps pacing lives here (rAF loop stepping the L2 host with the live bus
+// mask, video present + audio push per frame). Determinism + replay save/
+// load are L2 properties this layer reuses, never reimplements.
+import { loadPrefs, savePrefs } from "./ui/prefs.js";
+import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
+const prefs = loadPrefs();
+const shellStatusEl = document.getElementById("shellStatus");
+const logEl = document.getElementById("logEl");
+const padToastEl = document.getElementById("padToast");
+const shellLog = makeLog(logEl);
+wirePadToasts(padToastEl, shellLog);
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const resetBtn = document.getElementById("resetBtn");
+const pauseBtn = document.getElementById("pauseBtn");
+const slotSel = document.getElementById("slotSel");
+const saveBtn = document.getElementById("saveBtn");
+const loadBtn = document.getElementById("loadBtn");
+const shotBtn = document.getElementById("shotBtn");
+const scaleSel = document.getElementById("scaleSel");
+const filterSel = document.getElementById("filterSel");
+const fsBtn = document.getElementById("fsBtn");
+const volumeInput = document.getElementById("volumeInput");
+const muteBtn = document.getElementById("muteBtn");
+const playCtn = document.getElementById("playCtn");
+slotSel.value = String(prefs.slot);
+scaleSel.value = prefs.scale;
+filterSel.value = prefs.filter;
+volumeInput.value = String(Math.round(prefs.volume * 100));
+muteBtn.textContent = prefs.muted ? "Unmute" : "Mute";
+pauseBtn.textContent = "Pause";
+function fitCanvas() {
+  const w = (playCtn && playCtn.clientWidth) || 512;
+  const h = Math.round(w * 240 / 256);
+  ensureVideo();
+  video.resize(w, h, Math.min(2, window.devicePixelRatio || 1));
+}
+function applyVideoPrefs() {
+  ensureVideo();
+  video.setMode(prefs.scale, prefs.filter);
+  fitCanvas();
+}
+function syncAudioToPrefs() {
+  if (!audioPlayer) return;
+  try {
+    audioPlayer.setVolume(prefs.volume);
+    audioPlayer.setMuted(prefs.muted);
+  } catch (e) {}
+  muteBtn.textContent = prefs.muted ? "Unmute" : "Mute";
+}
+applyVideoPrefs();
+window.addEventListener("resize", () => { try { fitCanvas(); } catch (e) {} });
+document.addEventListener("fullscreenchange", () => {
+  try {
+    if (document.fullscreenElement) {
+      ensureVideo();
+      video.resize(window.innerWidth, window.innerHeight, Math.min(2, window.devicePixelRatio || 1));
+    } else fitCanvas();
+  } catch (e) {}
+});
+let shellRunning = false, shellPaused = false, shellStepping = false, shellRaf = 0;
+let shellFpsCount = 0, shellFpsT0 = 0, shellFps = 0;
+async function shellStepOnce() {
+  const mask = padBus.getMask();
+  const h = await l2host.go(1, mask);
+  try {
+    if (audioPlayer && audioPlayer.node) {
+      const ab = l2host.audioFrame();
+      if (ab.n > 0) audioPlayer.pushFrame(l2host.frame(), parseAudioBytes(ab));
+    }
+  } catch (e) {}
+  ensureVideo();
+  video.upload(l2host.videoBytes());
+  const pe = video.present();
+  if (pe !== 0) shellLog("video present err " + pe);
+  shellFpsCount++;
+  const now = performance.now();
+  if (!shellFpsT0) shellFpsT0 = now;
+  else if (now - shellFpsT0 >= 1000) {
+    shellFps = shellFpsCount * 1000 / (now - shellFpsT0);
+    shellFpsCount = 0; shellFpsT0 = now;
+  }
+  return h;
+}
+function shellLoop() {
+  if (!shellRunning) { shellRaf = 0; return; }
+  shellRaf = requestAnimationFrame(() => {
+    (async () => {
+      if (!shellPaused && !shellStepping) {
+        shellStepping = true;
+        try { await shellStepOnce(); } catch (e) { shellLog("step err " + String((e && e.message) || e)); }
+        shellStepping = false;
+      }
+    })().then(() => shellLoop(), () => shellLoop());
+  });
+}
+async function shellStart() {
+  if (shellRunning && !shellPaused) return l2host.frame();
+  const pack = await l2ensurePack();
+  if (!l2host.worker || l2host.frame() < 0) await l2host.spawn(pack, "build/game.wasm");
+  try { await ensureAudio().unlock(); syncAudioToPrefs(); }
+  catch (e) { shellLog("audio locked: " + String((e && e.message) || e).slice(0, 60)); }
+  shellRunning = true; shellPaused = false;
+  pauseBtn.textContent = "Pause";
+  if (!shellRaf) shellLoop();
+  ensureVideo();
+  video.upload(l2host.videoBytes());
+  video.present();
+  shellLog("start f=" + l2host.frame());
+  return l2host.frame();
+}
+async function shellStop() {
+  shellRunning = false; shellPaused = false;
+  if (shellRaf) { cancelAnimationFrame(shellRaf); shellRaf = 0; }
+  try { l2host.terminate(); } catch (e) {}
+  pauseBtn.textContent = "Pause";
+  shellLog("stop");
+  return -1;
+}
+async function shellReset() {
+  const pack = await l2ensurePack();
+  await l2host.spawn(pack, "build/game.wasm");
+  ensureVideo();
+  video.upload(l2host.videoBytes());
+  video.present();
+  shellLog("reset f=" + l2host.frame());
+  return l2host.frame();
+}
+function shellPause(on) {
+  if (on === undefined) on = !shellPaused;
+  shellPaused = !!on;
+  pauseBtn.textContent = shellPaused ? "Resume" : "Pause";
+  shellLog(shellPaused ? "paused" : "resumed");
+  return shellPaused;
+}
+async function shellSave(slot) {
+  const s = slot || prefs.slot;
+  const d = await l2host.save(s);
+  shellLog("saved slot " + s + " f=" + d.frame);
+  return d;
+}
+async function shellLoad(slot) {
+  const s = slot || prefs.slot;
+  const f = await l2host.load(s);
+  ensureVideo();
+  video.upload(l2host.videoBytes());
+  video.present();
+  shellLog("loaded slot " + s + " f=" + f);
+  return f;
+}
+function shellScreenshot() {
+  if (!l2host.worker) throw new Error("not-started");
+  ensureVideo();
+  video.upload(l2host.videoBytes());
+  video.present();
+  return document.getElementById("gameCanvas").toDataURL("image/png");
+}
+async function shellFrame() {
+  if (!l2host.worker) throw new Error("not-started");
+  if (shellRunning && !shellPaused) throw new Error("pause-first");
+  const r = await l2host.step(padBus.getMask());
+  ensureVideo();
+  video.upload(l2host.videoBytes());
+  video.present();
+  return { frame: r.frame, hash: (r.hash >>> 0) };
+}
+window.BM.start = shellStart;
+window.BM.stop = shellStop;
+window.BM.reset = shellReset;
+window.BM.pause = shellPause;
+window.BM.save = shellSave;
+window.BM.load = shellLoad;
+window.BM.screenshot = shellScreenshot;
+window.BM.frame = shellFrame;
+window.BM.log = shellLog;
+window.BM.stats = ((prev) => () => Object.assign(prev(), {
+  running: shellRunning, paused: shellPaused, engineFrame: l2host.frame(),
+  fps: video ? video.fps : shellFps,
+  scale: prefs.scale, filter: prefs.filter,
+  volume: prefs.volume, muted: prefs.muted, slot: prefs.slot
+}))(window.BM.stats);
+startBtn.addEventListener("click", () => {
+  shellStart().catch((e) => { shellLog("start err " + e.message); statusEl.textContent = "start err " + e.message; });
+});
+stopBtn.addEventListener("click", () => { shellStop(); });
+resetBtn.addEventListener("click", () => {
+  shellReset().catch((e) => { shellLog("reset err " + e.message); statusEl.textContent = "reset err " + e.message; });
+});
+pauseBtn.addEventListener("click", () => { shellPause(); });
+saveBtn.addEventListener("click", () => {
+  shellSave().catch((e) => { shellLog("save err " + e.message); });
+});
+loadBtn.addEventListener("click", () => {
+  shellLoad().catch((e) => { shellLog("load err " + e.message); });
+});
+shotBtn.addEventListener("click", () => {
+  try { const u = shellScreenshot(); shellLog("shot " + u.length + "B"); toast(padToastEl, "shot " + u.length + "B", 1500); }
+  catch (e) { shellLog("shot err " + e.message); }
+});
+slotSel.addEventListener("change", () => {
+  prefs.slot = parseInt(slotSel.value, 10) || 1;
+  savePrefs(prefs);
+  shellLog("slot " + prefs.slot);
+});
+scaleSel.addEventListener("change", () => {
+  prefs.scale = scaleSel.value; savePrefs(prefs); applyVideoPrefs();
+  shellLog("scale " + prefs.scale);
+});
+filterSel.addEventListener("change", () => {
+  prefs.filter = filterSel.value; savePrefs(prefs); applyVideoPrefs();
+  shellLog("filter " + prefs.filter);
+});
+fsBtn.addEventListener("click", async () => {
+  try {
+    ensureVideo();
+    if (document.fullscreenElement) await video.exitFullscreen();
+    else await video.enterFullscreen(playCtn);
+    shellLog("fullscreen " + (!!document.fullscreenElement));
+  } catch (e) { shellLog("fullscreen err " + String((e && e.message) || e).slice(0, 60)); }
+});
+volumeInput.addEventListener("input", () => {
+  prefs.volume = Math.max(0, Math.min(1, Number(volumeInput.value) / 100));
+  savePrefs(prefs);
+  try { ensureAudio().setVolume(prefs.volume); } catch (e) {}
+});
+muteBtn.addEventListener("click", () => {
+  prefs.muted = !prefs.muted; savePrefs(prefs); syncAudioToPrefs();
+  shellLog(prefs.muted ? "muted" : "unmuted");
+});
+setInterval(() => {
+  try { if (shellStatusEl) shellStatusEl.textContent = fmtStatus(window.BM.stats()); } catch (e) {}
+}, 500);
+shellLog("shell ready: start/reset/pause + slots + volume + scale/filter/fullscreen");
+
+const fail6 = (s) => { document.title = "BM-L6-FAIL:" + s; };
+
+async function selfTestL6() {
+  document.title = "BM-L6-RUNNING";
+  try {
+    const need = ["startBtn", "stopBtn", "resetBtn", "pauseBtn", "slotSel", "saveBtn", "loadBtn", "shotBtn", "scaleSel", "filterSel", "fsBtn", "volumeInput", "muteBtn", "shellStatus", "logEl", "playCtn", "gameCanvas"];
+    for (const id of need) {
+      const el = document.getElementById(id);
+      if (!el) return fail6("missing:" + id);
+      const r = el.getBoundingClientRect();
+      if (!(r.width > 0 && r.height > 0)) return fail6("invisible:" + id);
+    }
+    for (const id of ["startBtn", "stopBtn", "resetBtn", "pauseBtn", "saveBtn", "loadBtn", "shotBtn", "fsBtn", "muteBtn"]) {
+      const r = document.getElementById(id).getBoundingClientRect();
+      if (!(r.height >= 40 && r.width >= 40)) return fail6("small:" + id);
+    }
+    for (const id of ["slotSel", "scaleSel", "filterSel"]) {
+      const r = document.getElementById(id).getBoundingClientRect();
+      if (!(r.height >= 40)) return fail6("small-sel:" + id);
+    }
+    const rb = document.getElementById("resetBtn");
+    if (rb.textContent.toLowerCase().indexOf("reset") < 0) return fail6("reset-label");
+    const keepScale = prefs.scale, keepFilter = prefs.filter;
+    const keepVol = prefs.volume, keepMuted = prefs.muted, keepSlot = prefs.slot;
+    prefs.scale = "fit"; prefs.filter = "bilinear"; prefs.volume = 0.5; prefs.muted = true; prefs.slot = 3;
+    savePrefs(prefs);
+    const back = loadPrefs();
+    if (back.scale !== "fit" || back.filter !== "bilinear" || back.volume !== 0.5 || back.muted !== true || back.slot !== 3) return fail6("prefs-roundtrip");
+    prefs.scale = keepScale; prefs.filter = keepFilter; prefs.volume = keepVol; prefs.muted = keepMuted; prefs.slot = keepSlot;
+    savePrefs(prefs);
+    slotSel.value = String(prefs.slot); scaleSel.value = prefs.scale; filterSel.value = prefs.filter;
+    volumeInput.value = String(Math.round(prefs.volume * 100));
+    syncAudioToPrefs(); applyVideoPrefs();
+    statusEl.textContent = "L6: shell session via BM.start";
+    await window.BM.start();
+    await window.BM.pause(true);
+    if (l2host.frame() !== 0) return fail6("start-frame:" + l2host.frame());
+    await l2host.go(2700, 0);
+    await window.BM.press(5, 8);
+    if (l2host.frame() !== 2705) return fail6("press-frame:" + l2host.frame());
+    agentPad.setPad(65);
+    await l2host.go(295, padBus.getMask());
+    agentPad.setPad(0);
+    if (l2host.frame() !== 3000) return fail6("room-frame:" + l2host.frame());
+    const v = l2host.videoBytes();
+    let nz = 0;
+    for (let i = 0; i < v.length; i++) if (v[i] !== 0) nz++;
+    if (nz < 1000) return fail6("video-blank");
+    const O = await loadOraclePixels("work/oracle.png");
+    if (eqB(v, O.px)) return fail6("still-on-title");
+    const shot = window.BM.screenshot();
+    if (shot.indexOf("data:image/png") !== 0) return fail6("shot-type");
+    if (shot.length < 4000) return fail6("shot-tiny:" + shot.length);
+    const pc = document.createElement("canvas");
+    const vr2 = new VideoRenderer(pc);
+    vr2.resize(256, 240, 1);
+    vr2.setMode("integer", "nearest");
+    vr2.gl.viewport(0, 0, 256, 240);
+    vr2.gl.clearColor(0, 0, 0, 1);
+    vr2.gl.clear(vr2.gl.COLOR_BUFFER_BIT);
+    const blankH = strFnv(pc.toDataURL());
+    vr2.upload(l2host.videoBytes());
+    if (vr2.present() !== 0) return fail6("shot-present");
+    const shownH = strFnv(pc.toDataURL());
+    if (blankH === shownH) return fail6("shot-nodraw");
+    const f0 = l2host.frame(), h0 = (l2host.ctl[6] >>> 0);
+    await window.BM.save(3);
+    await window.BM.reset();
+    if (l2host.frame() !== 0) return fail6("reset2-frame");
+    if ((l2host.ctl[6] >>> 0) === h0) return fail6("reset2-hash-same");
+    const lf = await window.BM.load(3);
+    if (lf !== f0) return fail6("load-frame:" + lf);
+    if ((l2host.ctl[6] >>> 0) !== h0) return fail6("load-hash");
+    const st = window.BM.stats();
+    if (!st.ok || st.errors.length !== 0) return fail6("stats-errors");
+    if (st.engineFrame !== f0 || st.slot !== prefs.slot) return fail6("stats-fields");
+    if (st.scale !== prefs.scale || st.volume !== prefs.volume) return fail6("stats-prefs");
+    await window.BM.pause(false);
+    await window.BM.stop();
+    if (window.BM.stats().running) return fail6("stop-running");
+    statusEl.textContent = "L6 shell PASS f=" + f0;
+    shellLog("L6 self-test PASS f=" + f0 + " hash=" + h0.toString(16));
+    document.title = "BM-L6-PASS";
+  } catch (e) { fail6("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+async function selfTestL6Save() {
+  document.title = "BM-L6-RUNNING";
+  try {
+    const pack = await l2ensurePack();
+    await savePack(pack);
+    await window.BM.start();
+    await window.BM.pause(true);
+    await window.BM.reset();
+    await l2host.go(2700, 0);
+    await window.BM.press(5, 8);
+    agentPad.setPad(65);
+    await l2host.go(295, padBus.getMask());
+    agentPad.setPad(0);
+    if (l2host.frame() !== 3000) return fail6("save-frame:" + l2host.frame());
+    await window.BM.save(7);
+    const h = (l2host.ctl[6] >>> 0).toString(16);
+    document.title = "BM-L6-SAVED:" + l2host.frame() + ":" + h;
+  } catch (e) { fail6("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+async function selfTestL6Reload() {
+  document.title = "BM-L6-RUNNING";
+  try {
+    const want = qs.get("want") || "";
+    const parts = want.split(":");
+    if (parts.length !== 2) return fail6("no-want");
+    const pack = await loadPack();
+    if (!pack || !validatePack(pack).ok) return fail6("pack-norestore");
+    await window.BM.start();
+    await window.BM.pause(true);
+    const f = await window.BM.load(7);
+    const h = (l2host.ctl[6] >>> 0).toString(16);
+    if (String(f) !== parts[0] || h !== parts[1]) return fail6("slot-mismatch:" + f + ":" + h);
+    const v = l2host.videoBytes();
+    let nz = 0;
+    for (let i = 0; i < v.length; i++) if (v[i] !== 0) nz++;
+    if (nz < 1000) return fail6("video-blank");
+    document.title = "BM-L6-RESTORED:" + f + ":" + h;
+    statusEl.textContent = "pack + slot 7 restored, f=" + f;
+  } catch (e) { fail6("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+if (qs.has("headless")) {
+  const t6 = qs.get("test");
+  if (t6 === "l6") selfTestL6();
+  else if (t6 === "l6save") selfTestL6Save();
+  else if (t6 === "l6reload") selfTestL6Reload();
+}

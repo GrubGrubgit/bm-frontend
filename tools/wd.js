@@ -19,7 +19,9 @@ async function api(method, path, body) {
   const drv = spawn("chromedriver", args, { stdio: "ignore" });
   await sleep(1500);
   try {
-    const chromeArgs = ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=" + (process.env.WINSIZE || "800,600")].concat((process.env.GLFLAGS || "").split(" ").filter(s => s.length > 0));
+    // Headless env: autoplay flag (no user gesture can unlock WebAudio headless;
+    // real devices unlock on the Start tap) + SwiftShader GL (see SPEC section 8).
+    const chromeArgs = ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--autoplay-policy=no-user-gesture-required", "--window-size=" + (process.env.WINSIZE || "800,600")].concat((process.env.GLFLAGS || "").split(" ").filter(s => s.length > 0));
     if (process.env.PROFILE) chromeArgs.push("--user-data-dir=" + process.env.PROFILE);
     const s = await api("POST", "/session", { capabilities: { alwaysMatch: { browserName: "chrome", "goog:chromeOptions": { args: chromeArgs }, "goog:loggingPrefs": { browser: "ALL" } } } });
     const sid = s.sessionId;
@@ -51,7 +53,7 @@ async function api(method, path, body) {
       if (bad.length > 0) { console.log("CONSOLE-ERRORS:"); for (const e of bad) console.log(e.message.slice(0, 300)); throw new Error("console-errors:" + bad.length); }
       const png = await api("GET", "/session/" + sid + "/screenshot");
       fs.writeFileSync(shot, Buffer.from(png, "base64"));
-      console.log("WD-OK marker=" + marker + " shot=" + fs.statSync(shot).size + "B");
+      console.log("WD-OK marker=" + marker + " shot=" + fs.statSync(shot).size + "B title=" + title);
     } finally {
       await api("DELETE", "/session/" + sid).catch(() => {});
     }

@@ -1,8 +1,46 @@
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bm-frontend L5</title><link rel="icon" href="data:,"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bm-frontend L6</title><link rel="icon" href="data:,">
+<style>
+button,select,input[type=range]{min-height:44px;font-size:16px}
+button{padding:10px 14px;margin:2px}
+#shellGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
+#shellGrid button{width:100%}
+.shellRow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;margin:6px 0}
+#shellStatus{background:#022;padding:8px;min-height:20px;white-space:pre-wrap}
+#logEl{background:#111;color:#9c9;font-size:12px;max-height:160px;overflow:auto;text-align:left;white-space:pre-wrap;padding:8px}
+#playCtn{background:#000;line-height:0;text-align:center}
+#padToast{background:#234;padding:8px;margin:4px 0}
+</style>
+</head>
 <body style="background:#111;color:#eee;font-family:monospace;max-width:700px;margin:0 auto;padding:12px">
 <div id="statusEl">boot…</div>
+<div id="shellStatus">shell: stopped</div>
+<div id="padToast" hidden></div>
+<h3>Game (L6 shell)</h3>
+<p style="font-size:14px">Reset restarts the game instantly. Start begins play (tap = audio unlock). All buttons work by touch.</p>
+<div id="shellGrid">
+<button id="startBtn">Start</button>
+<button id="resetBtn">Reset</button>
+<button id="pauseBtn">Pause</button>
+<button id="stopBtn">Stop</button>
+</div>
+<div class="shellRow">
+<label>slot <select id="slotSel"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+<button id="saveBtn">Save</button>
+<button id="loadBtn">Load</button>
+<button id="shotBtn">Shot</button>
+</div>
+<div class="shellRow">
+<label>scale <select id="scaleSel"><option value="integer">Integer</option><option value="fit">Fit</option><option value="fill">Fill</option><option value="stretch">Stretch</option></select></label>
+<label>filter <select id="filterSel"><option value="nearest">Nearest</option><option value="bilinear">Bilinear</option></select></label>
+<button id="fsBtn">Fullscreen</button>
+</div>
+<div class="shellRow">
+<label>vol <input id="volumeInput" type="range" min="0" max="100" value="80" style="width:140px"></label>
+<button id="muteBtn">Mute</button>
+</div>
+<pre id="logEl">log…</pre>
 <hr>
 <h3>ROM loader (L1)</h3>
 <label style="display:block;background:#243;padding:16px;text-align:center;border:2px dashed #6c6">tap to pick ROM<input id="romInput" type="file" accept=".nes,.bin" style="display:none"></label>
@@ -10,7 +48,7 @@
 <div style="margin-top:8px"><button id="wipeBtn" style="padding:12px;font-size:16px">wipe cache</button></div>
 <pre id="metaEl" style="white-space:pre-wrap;background:#222;padding:8px;min-height:60px">no ROM yet</pre>
 <h3>Video (L3)</h3>
-<div id="playCtn" style="background:#000;line-height:0"><canvas id="gameCanvas" width="512" height="480" style="width:512px;height:480px"></canvas></div>
+<div id="playCtn"><canvas id="gameCanvas" width="512" height="480" style="width:512px;height:480px"></canvas></div>
 <script type="module" src="src/app.js"></script>
 </body>
 </html>

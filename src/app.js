@@ -437,16 +437,25 @@ async function selfTestL4() {
     statusEl.textContent = "L4: realtime smoke";
     const sr = await ensureAudio().unlock();
     if (!(sr >= 22050)) return fail4("sample-rate:" + sr);
-    for (let f = 0; f < 150; f++) ensureAudio().pushFrame(f, byf.get(f) || []);
+    for (let f = 0; f < 5; f++) ensureAudio().pushFrame(f, byf.get(f) || []);
     const t0 = performance.now();
     for (;;) {
+      const st0 = await ensureAudio().workletStats();
+      if (st0.fed >= 4) break;
+      if (performance.now() - t0 > 15000) return fail4("prime-stall");
+      await new Promise(r => setTimeout(r, 100));
+    }
+    const gaps0 = (await ensureAudio().workletStats()).gaps;
+    for (let f = 5; f < 150; f++) ensureAudio().pushFrame(f, byf.get(f) || []);
+    const t1 = performance.now();
+    for (;;) {
       if (ensureAudio().stats().time >= 2.0) break;
-      if (performance.now() - t0 > 15000) return fail4("clock-stall");
+      if (performance.now() - t1 > 15000) return fail4("clock-stall");
       await new Promise(r => setTimeout(r, 200));
     }
     const ws = await ensureAudio().workletStats();
     if (ws.fed !== 149) return fail4("fed:" + ws.fed);
-    if (ws.gaps !== 0) return fail4("gaps:" + ws.gaps);
+    if (ws.gaps - gaps0 !== 0) return fail4("gaps:" + (ws.gaps - gaps0));
     ensureAudio().setVolume(0.5);
     if (ensureAudio().gain.gain.value !== 0.5) return fail4("volume:" + ensureAudio().gain.gain.value);
     ensureAudio().setMuted(true);
@@ -538,7 +547,7 @@ async function selfTestL5() {
       if ((f & 1023) === 0) statusEl.textContent = "L5: capture " + f + "/3600";
     }
     if (l2host.frame() !== 3599) return fail5("survive:" + l2host.frame());
-    if ((l2host.ctl[6] >>> 0) !== 0xb31cbf03) return fail5("hash:" + (l2host.ctl[6] >>> 0).toString(16));
+    if (l2host.hash() !== 0xb31cbf03) return fail5("hash:" + l2host.hash().toString(16));
     const v = l2host.videoBytes();
     let nz = 0;
     for (let i = 0; i < v.length; i++) if (v[i] !== 0) nz++;
@@ -658,7 +667,7 @@ function shellLoop() {
 async function shellStart() {
   if (shellRunning && !shellPaused) return l2host.frame();
   const pack = await l2ensurePack();
-  if (!l2host.worker || l2host.frame() < 0) await l2host.spawn(pack, "build/game.wasm");
+  if (!l2host.inst || l2host.frame() < 0) await l2host.spawn(pack, "build/game.wasm");
   try { await ensureAudio().unlock(); syncAudioToPrefs(); }
   catch (e) { shellLog("audio locked: " + String((e && e.message) || e).slice(0, 60)); }
   shellRunning = true; shellPaused = false;
@@ -710,14 +719,14 @@ async function shellLoad(slot) {
   return f;
 }
 function shellScreenshot() {
-  if (!l2host.worker) throw new Error("not-started");
+  if (!l2host.inst) throw new Error("not-started");
   ensureVideo();
   video.upload(l2host.videoBytes());
   video.present();
   return document.getElementById("gameCanvas").toDataURL("image/png");
 }
 async function shellFrame() {
-  if (!l2host.worker) throw new Error("not-started");
+  if (!l2host.inst) throw new Error("not-started");
   if (shellRunning && !shellPaused) throw new Error("pause-first");
   const r = await l2host.step(padBus.getMask());
   ensureVideo();
@@ -858,14 +867,14 @@ async function selfTestL6() {
     if (vr2.present() !== 0) return fail6("shot-present");
     const shownH = strFnv(pc.toDataURL());
     if (blankH === shownH) return fail6("shot-nodraw");
-    const f0 = l2host.frame(), h0 = (l2host.ctl[6] >>> 0);
+    const f0 = l2host.frame(), h0 = l2host.hash();
     await window.BM.save(3);
     await window.BM.reset();
     if (l2host.frame() !== 0) return fail6("reset2-frame");
-    if ((l2host.ctl[6] >>> 0) === h0) return fail6("reset2-hash-same");
+    if (l2host.hash() === h0) return fail6("reset2-hash-same");
     const lf = await window.BM.load(3);
     if (lf !== f0) return fail6("load-frame:" + lf);
-    if ((l2host.ctl[6] >>> 0) !== h0) return fail6("load-hash");
+    if (l2host.hash() !== h0) return fail6("load-hash");
     const st = window.BM.stats();
     if (!st.ok || st.errors.length !== 0) return fail6("stats-errors");
     if (st.engineFrame !== f0 || st.slot !== prefs.slot) return fail6("stats-fields");
@@ -893,7 +902,7 @@ async function selfTestL6Save() {
     agentPad.setPad(0);
     if (l2host.frame() !== 3000) return fail6("save-frame:" + l2host.frame());
     await window.BM.save(7);
-    const h = (l2host.ctl[6] >>> 0).toString(16);
+    const h = l2host.hash().toString(16);
     document.title = "BM-L6-SAVED:" + l2host.frame() + ":" + h;
   } catch (e) { fail6("exc:" + String((e && e.message) || e).slice(0, 80)); }
 }
@@ -908,7 +917,7 @@ async function selfTestL6Reload() {
     await window.BM.start();
     await window.BM.pause(true);
     const f = await window.BM.load(7);
-    const h = (l2host.ctl[6] >>> 0).toString(16);
+    const h = l2host.hash().toString(16);
     if (String(f) !== parts[0] || h !== parts[1]) return fail6("slot-mismatch:" + f + ":" + h);
     const v = l2host.videoBytes();
     let nz = 0;

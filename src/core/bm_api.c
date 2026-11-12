@@ -172,6 +172,5 @@ void bm_snap(void) {
 // calls bm_boot() EXACTLY ONCE per run. Boot enters the game (reset vector
 // F23B); each vblank edge runs nmi_frame() which renders then calls the
 // host_frame() import. The host controls stepping from inside that import:
-// node harnesses throw-to-stop, the game worker parks in Atomics.wait.
+// node harnesses throw-to-stop, the browser suspends the exact continuation.
 // Re-calling bm_boot() mid-run re-enters the game and MUST NOT be done.
-int bm_site_ptr(void) { return (int)(intptr_t)step_site_buf; }

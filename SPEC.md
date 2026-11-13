@@ -22,7 +22,8 @@ mobile browsers (secondary).
 - **Not an emulator.** The wasm module is the lifted game logic compiled
   from `bm-recomp` at a pinned commit — never a CPU core running ROM bytes.
   The ROM is a data source only (PRG/CHR/palette/layout source for the pack).
-- Graphics via WebGL (`256x240` guest, `UNPACK` pixel path, portrait +
+- Graphics via WebGL (`256x240` guest framebuffer, `240x224` CRT overscan
+  view: 8px hidden on every side like a real TV, `UNPACK` pixel path, portrait +
   landscape). Scaling: Integer (pixel-perfect) / Fit (aspect-correct
   letterbox) / Fill / Stretch, filter Nearest (default) / Bilinear, plus
   Fullscreen API on the play container. High-res displays render the same

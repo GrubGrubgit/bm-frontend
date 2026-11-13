@@ -6,6 +6,10 @@
 // Canvas backing store is set in device pixels by resize(); rect math is
 // in device pixels so Integer stays exact under any devicePixelRatio.
 var GW = 256, GH = 240;
+// CRT overscan view: hide 8px on every side (real TVs + jsnes clipToTvSize
+// black these out; tiles there are never meant to be seen). Upload stays
+// full-frame (digest/oracle compare full bytes); only the VIEW crops.
+var VW = 240, VH = 224, OX = 8, OY = 8;
 var VS = "attribute vec2 p;attribute vec2 t;varying vec2 v_t;" +
   "void main(){v_t=t;gl_Position=vec4(p,0.0,1.0);}";
 var FS = "precision mediump float;uniform sampler2D u_tex;varying vec2 v_t;" +
@@ -66,7 +70,7 @@ VideoRenderer.prototype.initGL = function () {
   gl.useProgram(prog);
   var vb = this.vbuf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vb);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, 1, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, OX/GW, OY/GH, 1, -1, (OX+VW)/GW, OY/GH, -1, 1, OX/GW, (OY+VH)/GH, 1, 1, (OX+VW)/GW, (OY+VH)/GH]), gl.STATIC_DRAW);
   var lp = gl.getAttribLocation(prog, "p"), lt = gl.getAttribLocation(prog, "t");
   gl.enableVertexAttribArray(lp);
   gl.enableVertexAttribArray(lt);
@@ -101,9 +105,9 @@ VideoRenderer.prototype.resize = function (cssW, cssH, dpr) {
 VideoRenderer.prototype.rect = function () {
   var dw = this.cv.width, dh = this.cv.height, rw, rh;
   if (this.scale === "stretch") { rw = dw; rh = dh; }
-  else if (this.scale === "fit") { var s = Math.min(dw / GW, dh / GH); rw = Math.round(GW * s); rh = Math.round(GH * s); }
-  else if (this.scale === "fill") { var s2 = Math.max(dw / GW, dh / GH); rw = Math.round(GW * s2); rh = Math.round(GH * s2); }
-  else { var k = Math.max(1, Math.floor(Math.min(dw / GW, dh / GH))); rw = GW * k; rh = GH * k; }
+  else if (this.scale === "fit") { var s = Math.min(dw / VW, dh / VH); rw = Math.round(VW * s); rh = Math.round(VH * s); }
+  else if (this.scale === "fill") { var s2 = Math.max(dw / VW, dh / VH); rw = Math.round(VW * s2); rh = Math.round(VH * s2); }
+  else { var k = Math.max(1, Math.floor(Math.min(dw / VW, dh / VH))); rw = VW * k; rh = VH * k; }
   return { x: Math.round((dw - rw) / 2), y: Math.round((dh - rh) / 2), w: rw, h: rh };
 };
 VideoRenderer.prototype.upload = function (rgba) {

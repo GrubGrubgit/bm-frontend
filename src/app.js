@@ -275,10 +275,10 @@ async function selfTestL3() {
     if (video.lastDigest !== D1) return fail3("dp-upload-digest");
     if (blankD === shownD) return fail3("display-nochange");
     statusEl.textContent = "L3: integer 2x + scaling matrix";
-    video.resize(512, 480, 1);
+    video.resize(480, 448, 1);
     video.setMode("integer", "nearest");
     const r0 = video.rect();
-    if (r0.x !== 0 || r0.y !== 0 || r0.w !== 512 || r0.h !== 480) return fail3("integer-rect");
+    if (r0.x !== 0 || r0.y !== 0 || r0.w !== 480 || r0.h !== 448) return fail3("integer-rect");
     video.upload(v0);
     if (video.present() !== 0) return fail3("gl-err steps=" + stepsMsg());
     if (video.lastDigest !== D1) return fail3("upload-digest");
@@ -291,7 +291,7 @@ async function selfTestL3() {
         video.setMode(m, f);
         const rc = video.rect();
         if (m === "integer") {
-          if (rc.w % 256 !== 0 || rc.h % 240 !== 0 || rc.w / 256 !== rc.h / 240) return fail3("matrix-int-math");
+          if (rc.w % 240 !== 0 || rc.h % 224 !== 0 || rc.w / 240 !== rc.h / 224) return fail3("matrix-int-math");
           if (rc.w > vp[0] || rc.h > vp[1]) return fail3("matrix-int-overflow");
         } else if (m === "fit") {
           if (rc.w > vp[0] || rc.h > vp[1]) return fail3("matrix-fit-overflow");
@@ -607,7 +607,7 @@ muteBtn.textContent = prefs.muted ? "Unmute" : "Mute";
 pauseBtn.textContent = "Pause";
 function fitCanvas() {
   const w = (playCtn && playCtn.clientWidth) || 512;
-  const h = Math.round(w * 240 / 256);
+  const h = Math.round(w * 224 / 240);
   ensureVideo();
   video.resize(w, h, Math.min(2, window.devicePixelRatio || 1));
 }

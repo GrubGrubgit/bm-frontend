@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<widget id="dev.bmweb.frontend" version="0.2.0"
+    xmlns="http://www.w3.org/ns/widgets"
+    xmlns:cdv="http://cordova.apache.org/ns/1.0">
+  <name>BM-Web</name>
+  <description>Blaster Master native web port (WebGL video, live NES APU audio, touch/keyboard/gamepad). You supply your own ROM in-page.</description>
+  <author email="dev@bmweb.local" href="https://bmweb.local">
+    BM-Web
+  </author>
+  <content src="index.html" />
+  <preference name="Fullscreen" value="true" />
+  <preference name="Orientation" value="default" />
+  <preference name="BackgroundColor" value="#ff111111" />
+  <preference name="AndroidXEnabled" value="true" />
+  <platform name="android">
+    <preference name="android-minSdkVersion" value="29" />
+    <preference name="android-targetSdkVersion" value="36" />
+  </platform>
+</widget>

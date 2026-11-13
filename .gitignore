@@ -8,3 +8,4 @@ work/
 build/
 node_modules/
 *.idsig
+dist/

@@ -29,6 +29,7 @@ async function handleFile(buf, name) {
 }
 wireLoader({
   inputEl: document.getElementById("romInput"),
+  pickEl: document.getElementById("pickBtn"),
   dropEl: document.getElementById("dropEl"),
   onFile: (buf, name) => handleFile(buf, name).catch(e => { statusEl.textContent = "error: " + e; }),
   onError: m => { statusEl.textContent = m; }

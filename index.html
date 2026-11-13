@@ -52,7 +52,7 @@ button{padding:10px 14px;margin:2px}
 <pre id="logEl">log…</pre>
 <hr>
 <h3>ROM loader (L1)</h3>
-<label style="display:block;background:#243;padding:16px;text-align:center;border:2px dashed #6c6">tap to pick ROM<input id="romInput" type="file" accept=".nes,.bin" style="display:none"></label>
+<button type="button" id="pickBtn" style="display:block;width:100%;background:#243;padding:16px;text-align:center;border:2px dashed #6c6;color:#eee;cursor:pointer">tap to pick ROM</button><input id="romInput" type="file" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" aria-hidden="true" tabindex="-1">
 <div id="dropEl" style="margin-top:8px;padding:24px;text-align:center;border:2px dashed #666">…or drop ROM here</div>
 <div style="margin-top:8px"><button id="wipeBtn" style="padding:12px;font-size:16px">wipe cache</button></div>
 <pre id="metaEl" style="white-space:pre-wrap;background:#222;padding:8px;min-height:60px">no ROM yet</pre>

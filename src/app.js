@@ -650,7 +650,11 @@ async function shellStepOnce() {
   try {
     if (audioPlayer && audioPlayer.node) {
       const ab = l2host.audioFrame();
-      if (ab.n > 0) audioPlayer.pushFrame(l2host.frame(), parseAudioBytes(ab));
+      // Push EVERY consumed edge, including empty ones: the worklet clock is
+      // frame-indexed (target = c0+(f+1)*FC), so skipping n=0 edges renders
+      // ~9% fewer samples than real time (measured 560/6000 empty) and trips
+      // the overrun rebase on every quiet stretch -> FIFO starvation crackle.
+      audioPlayer.pushFrame(l2host.frame(), parseAudioBytes(ab));
     }
   } catch (e) {}
   try {

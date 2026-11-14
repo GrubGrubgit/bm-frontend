@@ -183,7 +183,7 @@ int bm_mem_size(void) {
   return (int)(intptr_t)&__heap_base;
 }
 void bm_boot(void) {
-  memset(ram, 0, sizeof ram);
+  memset(ram, 0xFF, sizeof ram); // jsnes-parity power-on pattern
   memset(vram, 0, sizeof vram);
   memset(pal, 0, sizeof pal);
   memset(oam, 0, sizeof oam);

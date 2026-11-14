@@ -576,6 +576,7 @@ if (qs.has("headless")) {
 // 60fps pacing lives here (rAF loop stepping the L2 host with the live bus
 // mask, video present + audio push per frame). Determinism + replay save/
 // load are L2 properties this layer reuses, never reimplements.
+import { makeMovie, parseMovie, downloadMovie, replayMovie } from "./input/movie.js";
 import { loadPrefs, savePrefs } from "./ui/prefs.js";
 import { wireInstall } from "./ui/pwa.js";
 import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
@@ -761,6 +762,41 @@ async function shellLoad(slot) {
   shellLog("loaded slot " + s + " f=" + f);
   return f;
 }
+async function shellExportMovie() {
+  if (!l2host.inst) throw new Error("not-started");
+  const pads = l2host.padLog.slice(0, l2host.frame());
+  let crc = "unknown";
+  try { const id = await loadRomId(); if (id && id.crc32) crc = id.crc32; } catch (e) {}
+  const m = makeMovie(pads, crc);
+  downloadMovie(m, "bmmovie-f" + m.frame + ".json");
+  shellLog("movie exported f=" + m.frame + " rom=" + crc);
+  return m;
+}
+async function shellImportMovie(file) {
+  const text = await file.text();
+  const parsed = parseMovie(JSON.parse(text));
+  shellPause(true);
+  try {
+    let crc = "unknown";
+    try { const id = await loadRomId(); if (id && id.crc32) crc = id.crc32; } catch (e2) {}
+    if (String(parsed.rom) !== String(crc)) shellLog("movie rom " + parsed.rom + " vs current " + crc + " (replaying anyway)");
+    shellLog("movie replay " + parsed.pads.length + "f from boot...");
+    let last = -1;
+    const f = await replayMovie(l2host, parsed.pads, function (i, n) {
+      const pc = Math.floor(i * 10 / n);
+      if (pc !== last) { last = pc; shellLog("replay " + (pc * 10) + "%"); }
+    });
+    try { if (audioPlayer) audioPlayer.reset(); } catch (e3) {}
+    ensureVideo();
+    video.upload(l2host.videoBytes());
+    video.present();
+    shellLog("movie done f=" + f + " hash=" + l2host.hash().toString(16));
+    return f;
+  } catch (e4) {
+    shellLog("movie err " + String((e4 && e4.message) || e4).slice(0, 80));
+    throw e4;
+  }
+}
 function shellScreenshot() {
   if (!l2host.inst) throw new Error("not-started");
   ensureVideo();
@@ -783,6 +819,17 @@ window.BM.reset = shellReset;
 window.BM.pause = shellPause;
 window.BM.save = shellSave;
 window.BM.load = shellLoad;
+window.BM.exportMovie = shellExportMovie;
+window.BM.importMovieFile = shellImportMovie;
+window.BM.replayMovieData = async function (m) {
+  const parsed = parseMovie(m);
+  shellPause(true);
+  const f = await replayMovie(l2host, parsed.pads, null);
+  ensureVideo();
+  video.upload(l2host.videoBytes());
+  video.present();
+  return { frame: f, hash: l2host.hash() >>> 0 };
+};
 window.BM.screenshot = shellScreenshot;
 window.BM.frame = shellFrame;
 window.BM.log = shellLog;
@@ -805,6 +852,15 @@ saveBtn.addEventListener("click", () => {
 });
 loadBtn.addEventListener("click", () => {
   shellLoad().catch((e) => { shellLog("load err " + e.message); });
+});
+movieBtn.addEventListener("click", () => {
+  shellExportMovie().catch((e) => { shellLog("movie export err " + e.message); });
+});
+movieLoadBtn.addEventListener("click", () => { movieInput.click(); });
+movieInput.addEventListener("change", () => {
+  const f = movieInput.files && movieInput.files[0];
+  movieInput.value = "";
+  if (f) shellImportMovie(f).catch(() => {});
 });
 shotBtn.addEventListener("click", () => {
   try { const u = shellScreenshot(); shellLog("shot " + u.length + "B"); toast(padToastEl, "shot " + u.length + "B", 1500); }
@@ -975,6 +1031,32 @@ if (qs.has("headless")) {
   if (t6 === "l6") selfTestL6();
   else if (t6 === "l6save") selfTestL6Save();
   else if (t6 === "l6reload") selfTestL6Reload();
+}
+const failM = (s) => { document.title = "BM-MOVIE-FAIL:" + s; };
+async function selfTestMovie() {
+  document.title = "BM-MOVIE-RUNNING";
+  try {
+    const pack = await l2ensurePack();
+    await l2host.spawn(pack, "build/game.wasm");
+    for (let f = 1; f < 2700; f++) await l2host.go(1, 0);
+    await l2host.go(5, 8);
+    for (let f = 2705; f < 3000; f++) await l2host.go(1, 129);
+    const pads = l2host.padLog.slice(0, l2host.frame());
+    if (pads.length !== 2999) return failM("padlog:" + pads.length);
+    const m = makeMovie(pads, "testcrc");
+    const parsed = parseMovie(JSON.parse(JSON.stringify(m)));
+    if (parsed.frame !== 2999 || parsed.pads[2702] !== 8 || parsed.pads[2998] !== 129) return failM("rt");
+    const h0 = l2host.hash();
+    const st = await replayMovie(l2host, parsed.pads, null);
+    if (st !== 2999) return failM("frame:" + st);
+    if (l2host.hash() !== h0) return failM("hash");
+    statusEl.textContent = "movie self-test PASS f=2999";
+    document.title = "BM-MOVIE-PASS";
+  } catch (e) { failM("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+if (qs.has("headless")) {
+  const tm = qs.get("test");
+  if (tm === "movie") selfTestMovie();
 }
 // ---- PWA packaging (manifest + SW + install UI). ----
 const failPwa = (s) => { document.title = "BM-PWA-FAIL:" + s; };

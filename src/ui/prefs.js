@@ -1,11 +1,14 @@
 // src/ui/prefs.js -- shell preferences, persisted in localStorage.
-// Scale/filter/volume/muted/slot survive reload; engine saves live in IDB.
+// Scale/filter/volume/muted/slot/engine/pad-swaps survive reload; engine
+// saves live in IDB.
 const KEY = "bm-prefs-v1";
 export const PREF_DEFAULTS = Object.freeze({
   scale: "integer", filter: "nearest", volume: 0.8, muted: false, slot: 1,
+  engine: "wasm", swapAB: false, swapXY: false,
 });
 const SCALES = ["integer", "fit", "fill", "stretch"];
 const FILTERS = ["nearest", "bilinear"];
+const ENGINES = ["wasm", "jsnes"];
 export function loadPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { p = {}; }
@@ -16,6 +19,9 @@ export function loadPrefs() {
   if (!isFinite(out.volume)) out.volume = 0.8;
   out.muted = !!out.muted;
   out.slot = Math.max(1, Math.min(8, parseInt(out.slot, 10) || 1));
+  if (ENGINES.indexOf(out.engine) < 0) out.engine = "wasm";
+  out.swapAB = !!out.swapAB;
+  out.swapXY = !!out.swapXY;
   return out;
 }
 export function savePrefs(p) {
@@ -25,6 +31,9 @@ export function savePrefs(p) {
     volume: Math.max(0, Math.min(1, Number(p.volume) || 0)),
     muted: !!p.muted,
     slot: Math.max(1, Math.min(8, parseInt(p.slot, 10) || 1)),
+    engine: ENGINES.indexOf(p.engine) >= 0 ? p.engine : "wasm",
+    swapAB: !!p.swapAB,
+    swapXY: !!p.swapXY,
   };
   try { localStorage.setItem(KEY, JSON.stringify(clean)); } catch (e) {}
   return clean;

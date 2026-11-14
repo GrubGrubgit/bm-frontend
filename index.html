@@ -10,6 +10,7 @@
 
 <style>
 button,select,input[type=range]{min-height:44px;font-size:16px}
+input[type=checkbox]{min-height:44px;width:44px}
 button{padding:10px 14px;margin:2px}
 #shellGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
 #shellGrid button{width:100%}
@@ -51,6 +52,11 @@ button{padding:10px 14px;margin:2px}
 <div class="shellRow">
 <label>vol <input id="volumeInput" type="range" min="0" max="100" value="80" style="width:140px"></label>
 <button id="muteBtn">Mute</button>
+</div>
+<div class="shellRow">
+<label>engine <select id="engineSel"><option value="wasm">WASM port</option><option value="jsnes">jsnes (debug)</option></select></label>
+<label><input id="swapABInput" type="checkbox"> Swap A/B</label>
+<label><input id="swapXYInput" type="checkbox"> Swap X/Y</label>
 </div>
 <pre id="logEl">log…</pre>
 <hr>

@@ -15,7 +15,7 @@ export function fmtStatus(s) {
   return "fps " + (s.fps == null ? "-" : Number(s.fps).toFixed(0)) +
     " | frame " + s.engineFrame +
     " | audio " + (s.audio && s.audio.ready ? (s.audio.sampleRate + "Hz") : "locked") +
-    " | " + s.scale + "/" + s.filter +
+    " | eng " + (s.engine || "wasm") + " " + s.scale + "/" + s.filter +
     " | vol " + Math.round(s.volume * 100) + "%" + (s.muted ? " (muted)" : "") +
     " | slot " + s.slot + (s.running ? (s.paused ? " | PAUSED" : " | RUNNING") : " | stopped");
 }

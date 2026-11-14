@@ -96,7 +96,9 @@ if (qs.has("headless")) {
 
 // ---- L2: wasm core + C/JS contract (SPEC section 5). ----
 import { GameHost } from "./core/host.js";
-const l2host = new GameHost();
+const wasmHost = new GameHost();
+const jsnesHost = new JsnesHost();
+let l2host = wasmHost;
 let l2pack = null;
 async function l2ensurePack() {
   if (l2pack) return l2pack;
@@ -366,7 +368,13 @@ function ensureAudio() {
   if (!audioPlayer) audioPlayer = new ApuPlayer();
   return audioPlayer;
 }
+let pcmPlayer = null;
+function ensurePcm() {
+  if (!pcmPlayer) pcmPlayer = new PcmPlayer();
+  return pcmPlayer;
+}
 window.BM.audioUnlock = function () { return ensureAudio().unlock(); };
+window.BM.pcmUnlock = function () { return ensurePcm().unlock(); };
 window.BM.audioVolume = function (v) { return ensureAudio().setVolume(v); };
 window.BM.audioMute = function (m) { return ensureAudio().setMuted(m); };
 window.BM.audioStats = function () { return ensureAudio().stats(); };
@@ -489,11 +497,14 @@ import { attachKeyboard } from "./input/keyboard.js";
 import { mountTouch } from "./input/touch.js";
 import { pollGamepad, attachGamepad } from "./input/gamepad.js";
 import { AgentPad } from "./input/agent.js";
+import { JsnesHost } from "./core/jsnes_host.js";
+import { PcmPlayer } from "./audio/pcm.js";
 const padBus = new PadBus();
 const agentPad = new AgentPad(padBus, l2host);
 attachKeyboard(padBus);
 const touchUI = mountTouch(padBus);
-attachGamepad(padBus);
+const padFlags = { nav: navigator, swapAB: false, swapXY: false };
+attachGamepad(padBus, padFlags);
 window.BM.setPad = function (m) { return agentPad.setPad(m); };
 window.BM.press = function (frames, mask) { return agentPad.press(frames, mask); };
 window.BM.frame = function () { return l2host.frame(); };
@@ -530,6 +541,10 @@ async function selfTestL5() {
     if (padBus.getMask() !== 0) return fail5("touch-clear:" + padBus.getMask().toString(16));
     if (pollGamepad(fakeNav({ 0: true, 14: true })) !== 0x41) return fail5("pad-map");
     if (pollGamepad(fakeNav({}, [0.9, -0.9])) !== 0x90) return fail5("pad-stick");
+    if (pollGamepad(fakeNav({ 0: true })) !== 0x01) return fail5("pad-a");
+    if (pollGamepad(fakeNav({ 0: true }), { swapAB: true }) !== 0x02) return fail5("pad-swapAB");
+    if (pollGamepad(fakeNav({ 2: true })) !== 0x01) return fail5("pad-x");
+    if (pollGamepad(fakeNav({ 2: true }), { swapXY: true }) !== 0x02) return fail5("pad-swapXY");
     if (pollGamepad({ getGamepads: () => [null] }) !== 0) return fail5("pad-null");
     if (pollGamepad(null) !== 0) return fail5("pad-nonull");
     kd("ArrowRight");
@@ -619,6 +634,7 @@ function applyVideoPrefs() {
   fitCanvas();
 }
 function syncAudioToPrefs() {
+  try { if (pcmPlayer) { pcmPlayer.setVolume(prefs.volume); pcmPlayer.setMuted(prefs.muted); } } catch (e) {}
   if (!audioPlayer) return;
   try {
     audioPlayer.setVolume(prefs.volume);
@@ -649,7 +665,9 @@ async function shellStepOnce() {
     throw e;
   }
   try {
-    if (audioPlayer && audioPlayer.node) {
+    if (l2host === jsnesHost) {
+      if (pcmPlayer && pcmPlayer.node) pcmPlayer.pushSamples(l2host.frame(), l2host.pcmDrain());
+    } else if (audioPlayer && audioPlayer.node) {
       const ab = l2host.audioFrame();
       // Push EVERY consumed edge, including empty ones: the worklet clock is
       // frame-indexed (target = c0+(f+1)*FC), so skipping n=0 edges renders
@@ -708,7 +726,8 @@ async function shellStart() {
   if (!l2host.inst || l2host.frame() < 0) await l2host.spawn(pack, "build/game.wasm");
   window.__bmStaticHint = false; window.__bmStaticN = 0;
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
-  try { await ensureAudio().unlock(); syncAudioToPrefs(); }
+  try { if (pcmPlayer) pcmPlayer.reset(); } catch (e2) {}
+  try { await (l2host === jsnesHost ? ensurePcm().unlock() : ensureAudio().unlock()); syncAudioToPrefs(); }
   catch (e) { shellLog("audio locked: " + String((e && e.message) || e).slice(0, 60)); }
   shellRunning = true; shellPaused = false;
   pauseBtn.textContent = "Pause";
@@ -724,6 +743,7 @@ async function shellStop() {
   if (shellRaf) { cancelAnimationFrame(shellRaf); shellRaf = 0; }
   try { l2host.terminate(); } catch (e) {}
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
+  try { if (pcmPlayer) pcmPlayer.reset(); } catch (e2) {}
   pauseBtn.textContent = "Pause";
   shellLog("stop");
   return -1;
@@ -733,6 +753,7 @@ async function shellReset() {
   await l2host.spawn(pack, "build/game.wasm");
   window.__bmStaticHint = false; window.__bmStaticN = 0;
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
+  try { if (pcmPlayer) pcmPlayer.reset(); } catch (e2) {}
   ensureVideo();
   video.upload(l2host.videoBytes());
   video.present();
@@ -756,6 +777,7 @@ async function shellLoad(slot) {
   const s = slot || prefs.slot;
   const f = await l2host.load(s);
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
+  try { if (pcmPlayer) pcmPlayer.reset(); } catch (e2) {}
   ensureVideo();
   video.upload(l2host.videoBytes());
   video.present();
@@ -787,6 +809,7 @@ async function shellImportMovie(file) {
       if (pc !== last) { last = pc; shellLog("replay " + (pc * 10) + "%"); }
     });
     try { if (audioPlayer) audioPlayer.reset(); } catch (e3) {}
+    try { if (pcmPlayer) pcmPlayer.reset(); } catch (e4) {}
     ensureVideo();
     video.upload(l2host.videoBytes());
     video.present();
@@ -837,7 +860,8 @@ window.BM.stats = ((prev) => () => Object.assign(prev(), {
   running: shellRunning, paused: shellPaused, engineFrame: l2host.frame(),
   fps: video ? video.fps : shellFps,
   scale: prefs.scale, filter: prefs.filter,
-  volume: prefs.volume, muted: prefs.muted, slot: prefs.slot
+  volume: prefs.volume, muted: prefs.muted, slot: prefs.slot,
+  engine: prefs.engine
 }))(window.BM.stats);
 startBtn.addEventListener("click", () => {
   shellStart().catch((e) => { shellLog("start err " + e.message); statusEl.textContent = "start err " + e.message; });
@@ -895,6 +919,33 @@ volumeInput.addEventListener("input", () => {
 muteBtn.addEventListener("click", () => {
   prefs.muted = !prefs.muted; savePrefs(prefs); syncAudioToPrefs();
   shellLog(prefs.muted ? "muted" : "unmuted");
+});
+const engineSel = document.getElementById("engineSel");
+const swapABInput = document.getElementById("swapABInput");
+const swapXYInput = document.getElementById("swapXYInput");
+engineSel.value = prefs.engine;
+swapABInput.checked = !!prefs.swapAB;
+swapXYInput.checked = !!prefs.swapXY;
+padFlags.swapAB = !!prefs.swapAB;
+padFlags.swapXY = !!prefs.swapXY;
+if (!qs.has("headless") && prefs.engine === "jsnes") { l2host = jsnesHost; agentPad.host = l2host; }
+engineSel.addEventListener("change", () => {
+  const want = engineSel.value === "jsnes" ? "jsnes" : "wasm";
+  if (want === prefs.engine) return;
+  try { shellStop(); } catch (e) {}
+  prefs.engine = want; savePrefs(prefs);
+  l2host = (want === "jsnes") ? jsnesHost : wasmHost;
+  agentPad.host = l2host;
+  try { ensureVideo(); video.upload(l2host.videoBytes()); video.present(); } catch (e2) {}
+  shellLog("engine " + want + " (takes effect on Start)");
+});
+swapABInput.addEventListener("change", () => {
+  prefs.swapAB = !!swapABInput.checked; padFlags.swapAB = prefs.swapAB; savePrefs(prefs);
+  shellLog("swap A/B " + (prefs.swapAB ? "on" : "off"));
+});
+swapXYInput.addEventListener("change", () => {
+  prefs.swapXY = !!swapXYInput.checked; padFlags.swapXY = prefs.swapXY; savePrefs(prefs);
+  shellLog("swap X/Y " + (prefs.swapXY ? "on" : "off"));
 });
 setInterval(() => {
   try { if (shellStatusEl) shellStatusEl.textContent = fmtStatus(window.BM.stats()); } catch (e) {}
@@ -1057,6 +1108,36 @@ async function selfTestMovie() {
 if (qs.has("headless")) {
   const tm = qs.get("test");
   if (tm === "movie") selfTestMovie();
+}
+const failJ = (s) => { document.title = "BM-JSNES-FAIL:" + s; };
+async function selfTestJsnes() {
+  document.title = "BM-JSNES-RUNNING";
+  try {
+    const pack = await l2ensurePack();
+    const h = new JsnesHost();
+    await h.spawn(pack);
+    for (let f = 1; f < 2700; f++) await h.go(1, 0);
+    await h.go(5, 8);
+    for (let f = 2705; f < 3000; f++) await h.go(1, 129);
+    if (h.frame() !== 2999) return failJ("frame:" + h.frame());
+    if (h.padLog.length !== 2999 || h.padLog[2702] !== 8 || h.padLog[2998] !== 129) return failJ("padlog");
+    const v = h.videoBytes();
+    let nz = 0;
+    for (let i = 0; i < v.length; i += 401) if (v[i] !== 0) nz++;
+    if (nz < 10) return failJ("video-blank");
+    const h0 = h.hash();
+    const m = makeMovie(h.padLog.slice(0, h.frame()), "testcrc");
+    const parsed = parseMovie(JSON.parse(JSON.stringify(m)));
+    const st = await replayMovie(h, parsed.pads, null);
+    if (st !== 2999) return failJ("replay-frame:" + st);
+    if (h.hash() !== h0) return failJ("replay-hash");
+    statusEl.textContent = "jsnes self-test PASS f=2999 hash=" + h0.toString(16);
+    document.title = "BM-JSNES-PASS";
+  } catch (e) { failJ("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+if (qs.has("headless")) {
+  const tj = qs.get("test");
+  if (tj === "jsnes") selfTestJsnes();
 }
 // ---- PWA packaging (manifest + SW + install UI). ----
 const failPwa = (s) => { document.title = "BM-PWA-FAIL:" + s; };

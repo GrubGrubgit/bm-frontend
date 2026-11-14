@@ -4,7 +4,7 @@
 const KEY = "bm-prefs-v1";
 export const PREF_DEFAULTS = Object.freeze({
   scale: "integer", filter: "nearest", volume: 0.8, muted: false, slot: 1,
-  engine: "wasm", swapAB: false, swapXY: false,
+  engine: "wasm", swapAB: false, swapXY: false, touch: true,
 });
 const SCALES = ["integer", "fit", "fill", "stretch"];
 const FILTERS = ["nearest", "bilinear"];
@@ -22,6 +22,7 @@ export function loadPrefs() {
   if (ENGINES.indexOf(out.engine) < 0) out.engine = "wasm";
   out.swapAB = !!out.swapAB;
   out.swapXY = !!out.swapXY;
+  out.touch = out.touch !== false;
   return out;
 }
 export function savePrefs(p) {
@@ -34,6 +35,7 @@ export function savePrefs(p) {
     engine: ENGINES.indexOf(p.engine) >= 0 ? p.engine : "wasm",
     swapAB: !!p.swapAB,
     swapXY: !!p.swapXY,
+    touch: p.touch !== false,
   };
   try { localStorage.setItem(KEY, JSON.stringify(clean)); } catch (e) {}
   return clean;

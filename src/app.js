@@ -489,6 +489,7 @@ if (qs.has("headless")) {
 // ---- L5: one virtual-pad bus (SPEC section 6 src/input, section 7). ----
 // Four named sources (keyboard/touch/gamepad/agent) OR into a single NES
 // mask ($01=A $02=B $04=Select $08=Start $10=Up $20=Down $40=Left $80=Right)
+// Touch pad lives in-flow in #touchCtn below the video (toggle via Touch pad checkbox).
 // that every engine step reads. Thumb controls are a fixed bottom overlay
 // (L6 skins it); keyboard is dev convenience; gamepad uses the standard
 // mapping with stick deadzone; agent drives the same bus headless.
@@ -502,7 +503,7 @@ import { PcmPlayer } from "./audio/pcm.js";
 const padBus = new PadBus();
 const agentPad = new AgentPad(padBus, l2host);
 attachKeyboard(padBus);
-const touchUI = mountTouch(padBus);
+let touchUI = mountTouch(padBus, document.getElementById("touchCtn") || undefined);
 const padFlags = { nav: navigator, swapAB: false, swapXY: false };
 attachGamepad(padBus, padFlags);
 window.BM.setPad = function (m) { return agentPad.setPad(m); };
@@ -522,6 +523,7 @@ function fakeNav(btns, axes) {
   return { getGamepads: () => [{ connected: true, buttons: b, axes: axes || [0, 0] }] };
 }
 async function selfTestL5() {
+    if (!touchUI) { try { touchUI = mountTouch(padBus, document.getElementById("touchCtn") || undefined); } catch (e) {} }
   document.title = "BM-L5-RUNNING";
   try {
     statusEl.textContent = "L5: source mapping proofs";
@@ -529,6 +531,8 @@ async function selfTestL5() {
     if (padBus.getMask() !== 0x81) return fail5("kbd:" + padBus.getMask().toString(16));
     ku("ArrowRight"); ku("KeyX");
     if (padBus.getMask() !== 0) return fail5("kbd-clear:" + padBus.getMask().toString(16));
+    try { touchUI.root.scrollIntoView({ block: "end" }); } catch (e) {}
+    await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });
     const lr = touchUI.dirs.left.getBoundingClientRect();
     pdownAt(touchUI.dirs.left, 11, (lr.left + lr.right) / 2, (lr.top + lr.bottom) / 2);
     if (padBus.getMask() !== 0x40) return fail5("dpad-left:" + padBus.getMask().toString(16));
@@ -943,6 +947,23 @@ swapABInput.addEventListener("change", () => {
   prefs.swapAB = !!swapABInput.checked; padFlags.swapAB = prefs.swapAB; savePrefs(prefs);
   shellLog("swap A/B " + (prefs.swapAB ? "on" : "off"));
 });
+const touchInput = document.getElementById("touchInput");
+if (touchInput) {
+  touchInput.checked = prefs.touch !== false;
+  if (prefs.touch === false && touchUI) { try { touchUI.unmount(); } catch (e) {} touchUI = null; }
+  touchInput.addEventListener("change", () => {
+    prefs.touch = !!touchInput.checked;
+    savePrefs(prefs);
+    if (prefs.touch === false) {
+      try { if (touchUI) touchUI.unmount(); } catch (e) {}
+      touchUI = null;
+      shellLog("touch pad off");
+    } else {
+      if (!touchUI) { try { touchUI = mountTouch(padBus, document.getElementById("touchCtn") || undefined); } catch (e) { shellLog("touch err " + String((e && e.message) || e).slice(0, 60)); } }
+      shellLog("touch pad on");
+    }
+  });
+}
 swapXYInput.addEventListener("change", () => {
   prefs.swapXY = !!swapXYInput.checked; padFlags.swapXY = prefs.swapXY; savePrefs(prefs);
   shellLog("swap X/Y " + (prefs.swapXY ? "on" : "off"));

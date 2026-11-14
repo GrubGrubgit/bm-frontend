@@ -11,9 +11,10 @@ export function mountTouch(bus, parent) {
   document.head.appendChild(st);
   const root = document.createElement("div");
   root.id = "touchPad";
-  root.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:30;" +
+  root.style.cssText = "position:static;left:auto;right:auto;bottom:auto;z-index:auto;" +
     "display:flex;justify-content:space-between;align-items:flex-end;" +
-    "gap:min(2vw,10px);padding:8px 10px calc(8px + env(safe-area-inset-bottom));" +
+    "gap:min(2vw,10px);padding:14px 6px 26px;margin-top:10px;" +
+    "background:#0a0a0a;border-top:1px solid #333;" +
     "pointer-events:none;touch-action:none;user-select:none;-webkit-user-select:none;";
   const CELL = "min(15vw,60px)";
   const face = "pointer-events:auto;touch-action:none;box-sizing:border-box;" +

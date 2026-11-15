@@ -17,6 +17,12 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.JavascriptInterface;
+import android.widget.Toast;
+import android.content.ContentValues;
+import android.os.Environment;
+import android.provider.MediaStore;
+import java.io.OutputStream;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -84,6 +90,43 @@ public class MainActivity extends Activity {
     s.setDomStorageEnabled(true);
     s.setMediaPlaybackRequiresUserGesture(false);
     s.setAllowFileAccess(false);
+    web.addJavascriptInterface(new Object() {
+      @JavascriptInterface
+      public void saveMovie(String name, String dataUrl) {
+        String safe = String.valueOf(name).replaceAll("[^A-Za-z0-9._-]", "_");
+        if (safe.length() == 0) safe = "bmmovie.json";
+        if (safe.length() > 64) safe = safe.substring(safe.length() - 64);
+        try {
+          int comma = dataUrl.indexOf(',');
+          byte[] raw = android.util.Base64.decode(dataUrl.substring(comma + 1), android.util.Base64.DEFAULT);
+          if (Build.VERSION.SDK_INT >= 29) {
+            ContentValues cv = new ContentValues();
+            cv.put(MediaStore.Downloads.DISPLAY_NAME, safe);
+            cv.put(MediaStore.Downloads.MIME_TYPE, "application/json");
+            cv.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+            if (uri == null) throw new IOException("mediastore-insert-null");
+            OutputStream os = getContentResolver().openOutputStream(uri);
+            os.write(raw);
+            os.close();
+          } else {
+            File d = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), safe);
+            FileOutputStream fos = new FileOutputStream(d);
+            fos.write(raw);
+            fos.close();
+          }
+          toast("saved Downloads/" + safe);
+        } catch (Throwable t) {
+          toast("movie save failed");
+        }
+      }
+      private void toast(final String msg) {
+        final MainActivity a = MainActivity.this;
+        a.runOnUiThread(new Runnable() {
+          public void run() { Toast.makeText(a, msg, Toast.LENGTH_LONG).show(); }
+        });
+      }
+    }, "BMApk");
     web.setWebViewClient(new WebViewClient() {
       public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest req) {
         try {

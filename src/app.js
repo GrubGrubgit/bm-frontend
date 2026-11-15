@@ -794,8 +794,8 @@ async function shellExportMovie() {
   let crc = "unknown";
   try { const id = await loadRomId(); if (id && id.crc32) crc = id.crc32; } catch (e) {}
   const m = makeMovie(pads, crc);
-  downloadMovie(m, "bmmovie-f" + m.frame + ".json");
-  shellLog("movie exported f=" + m.frame + " rom=" + crc);
+  const dl = downloadMovie(m, "bmmovie-f" + m.frame + ".json");
+  shellLog("movie exported f=" + m.frame + " rom=" + crc + " via " + dl.via + " -> Downloads/bmmovie-f" + m.frame + ".json");
   return m;
 }
 async function shellImportMovie(file) {

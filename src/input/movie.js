@@ -30,14 +30,22 @@ export function parseMovie(o) {
   return { pads: pads, frame: o.frame, rom: String(o.rom) };
 }
 export function downloadMovie(movie, fname) {
-  const blob = new Blob([JSON.stringify(movie)], { type: "application/json" });
+  const name = fname || ("bmmovie-f" + movie.frame + ".json");
+  const text = JSON.stringify(movie);
+  try {
+    if (window.BMApk && typeof window.BMApk.saveMovie === "function") {
+      window.BMApk.saveMovie(name, "data:application/json;base64," + btoa(text));
+      return { frame: movie.frame, via: "apk" };
+    }
+  } catch (e) { /* fall through to anchor download */ }
+  const blob = new Blob([text], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = fname || ("bmmovie-f" + movie.frame + ".json");
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-  return movie.frame;
+  return { frame: movie.frame, via: "browser" };
 }
 export async function replayMovie(host, pads, onProgress) {
   await host.reset();

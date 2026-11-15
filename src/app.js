@@ -98,6 +98,7 @@ if (qs.has("headless")) {
 import { GameHost } from "./core/host.js";
 const wasmHost = new GameHost();
 const jsnesHost = new JsnesHost();
+const mesenHost = new MesenHost();
 let l2host = wasmHost;
 let l2pack = null;
 async function l2ensurePack() {
@@ -499,6 +500,7 @@ import { mountTouch } from "./input/touch.js";
 import { pollGamepad, attachGamepad } from "./input/gamepad.js";
 import { AgentPad } from "./input/agent.js";
 import { JsnesHost } from "./core/jsnes_host.js";
+import { MesenHost } from "./core/mesen_host.js";
 import { PcmPlayer } from "./audio/pcm.js";
 const padBus = new PadBus();
 const agentPad = new AgentPad(padBus, l2host);
@@ -669,7 +671,7 @@ async function shellStepOnce() {
     throw e;
   }
   try {
-    if (l2host === jsnesHost) {
+    if (l2host === jsnesHost || l2host === mesenHost) {
       if (pcmPlayer && pcmPlayer.node) pcmPlayer.pushSamples(l2host.frame(), l2host.pcmDrain());
     } else if (audioPlayer && audioPlayer.node) {
       const ab = l2host.audioFrame();
@@ -731,7 +733,7 @@ async function shellStart() {
   window.__bmStaticHint = false; window.__bmStaticN = 0;
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   try { if (pcmPlayer) pcmPlayer.reset(); } catch (e2) {}
-  try { await (l2host === jsnesHost ? ensurePcm().unlock() : ensureAudio().unlock()); syncAudioToPrefs(); }
+  try { await ((l2host === jsnesHost || l2host === mesenHost) ? ensurePcm().unlock() : ensureAudio().unlock()); syncAudioToPrefs(); }
   catch (e) { shellLog("audio locked: " + String((e && e.message) || e).slice(0, 60)); }
   shellRunning = true; shellPaused = false;
   pauseBtn.textContent = "Pause";
@@ -932,13 +934,13 @@ swapABInput.checked = !!prefs.swapAB;
 swapXYInput.checked = !!prefs.swapXY;
 padFlags.swapAB = !!prefs.swapAB;
 padFlags.swapXY = !!prefs.swapXY;
-if (!qs.has("headless") && prefs.engine === "jsnes") { l2host = jsnesHost; agentPad.host = l2host; }
+if (!qs.has("headless") && (prefs.engine === "jsnes" || prefs.engine === "mesen")) { l2host = (prefs.engine === "mesen") ? mesenHost : jsnesHost; agentPad.host = l2host; }
 engineSel.addEventListener("change", () => {
-  const want = engineSel.value === "jsnes" ? "jsnes" : "wasm";
+  const want = engineSel.value === "jsnes" ? "jsnes" : (engineSel.value === "mesen" ? "mesen" : "wasm");
   if (want === prefs.engine) return;
   try { shellStop(); } catch (e) {}
   prefs.engine = want; savePrefs(prefs);
-  l2host = (want === "jsnes") ? jsnesHost : wasmHost;
+  l2host = (want === "jsnes") ? jsnesHost : ((want === "mesen") ? mesenHost : wasmHost);
   agentPad.host = l2host;
   try { ensureVideo(); video.upload(l2host.videoBytes()); video.present(); } catch (e2) {}
   shellLog("engine " + want + " (takes effect on Start)");
@@ -1159,6 +1161,47 @@ async function selfTestJsnes() {
 if (qs.has("headless")) {
   const tj = qs.get("test");
   if (tj === "jsnes") selfTestJsnes();
+}
+const failMesen = (s) => { document.title = "BM-MESEN-FAIL:" + s; };
+async function selfTestMesen() {
+  document.title = "BM-MESEN-RUNNING";
+  try {
+    const pack = await l2ensurePack();
+    const h = new MesenHost();
+    await h.spawn(pack);
+    const A = await h.go(40, 0);
+    await h.reset();
+    const B = await h.go(40, 0);
+    if (!eqH(A, B)) return failMesen("reset-determinism");
+    if (h.frame() !== 40) return failMesen("frame:" + h.frame());
+    if (h.padLog.length !== 40 || h.padLog[0] !== 0) return failMesen("padlog");
+    const v = h.videoBytes();
+    let nz = 0;
+    for (let i = 0; i < v.length; i += 997) if (v[i] !== 0) nz++;
+    if (nz < 10) return failMesen("video-blank");
+    const pcm = h.pcmDrain();
+    if (!(pcm.length > 0)) return failMesen("pcm-zero");
+    if (!(h.audioTotal > 0)) return failMesen("audio-zero");
+    const h0 = h.hash();
+    const m = makeMovie(h.padLog.slice(0, h.frame()), "mesencrc");
+    const parsed = parseMovie(JSON.parse(JSON.stringify(m)));
+    const st = await replayMovie(h, parsed.pads, null);
+    if (st !== 40) return failMesen("replay-frame:" + st);
+    if (h.hash() !== h0) return failMesen("replay-hash");
+    // input-responsiveness probe: park on the title, tap START, video must move
+    await h.reset();
+    for (let f = 0; f < 600; f++) await h.go(1, 0);
+    const preStart = h.hash();
+    await h.go(12, 8);
+    if (h.hash() === preStart) return failMesen("start-static");
+    h.terminate();
+    statusEl.textContent = "mesen self-test PASS f=40 hash=" + h0.toString(16);
+    document.title = "BM-MESEN-PASS";
+  } catch (e) { failMesen("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
+if (qs.has("headless")) {
+  const tm2 = qs.get("test");
+  if (tm2 === "mesen") selfTestMesen();
 }
 // ---- PWA packaging (manifest + SW + install UI). ----
 const failPwa = (s) => { document.title = "BM-PWA-FAIL:" + s; };

@@ -56,7 +56,7 @@ button{padding:10px 14px;margin:2px}
 <button id="muteBtn">Mute</button>
 </div>
 <div class="shellRow">
-<label>engine <select id="engineSel"><option value="wasm">WASM port</option><option value="jsnes">jsnes (debug)</option></select></label>
+<label>engine <select id="engineSel"><option value="wasm">WASM port</option><option value="jsnes">jsnes (debug)</option><option value="mesen">Mesen (accurate)</option></select></label>
 <label><input id="swapABInput" type="checkbox"> Swap A/B</label>
 <label><input id="swapXYInput" type="checkbox"> Swap X/Y</label>
 <label><input id="touchInput" type="checkbox"> Touch pad</label>
@@ -97,6 +97,7 @@ var INAPP = /[?&]inapp=1/.test(location.search); window.__INAPP = INAPP; if (INA
 <script>
 setInterval(function(){try{var p=document.getElementById("probeEl");if(!p)return;if(!window.__INAPP){p.hidden=true;return;}if(window.__bmLastReport){var t=String(window.__bmLastReport).slice(-1500);if(p.__t!==t){p.__t=t;p.textContent=t;}}}catch(e){}},1500);
 </script>
+<script src="src/core/mesen/mesen.js"></script>
 <script type="module" src="src/app.js"></script>
 </body>
 </html>

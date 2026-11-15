@@ -4,6 +4,7 @@
 // the real engine without a file picker. Localhost only, never deployed.
 const http = require("http"), fs = require("fs"), path = require("path");
 const root = path.join(__dirname, "..");
+const PADS2 = "/data/data/com.termux/files/home/ai-bridge/session-homes/sess-20261107-174920-5205/wrun/padsfull2.bin";
 const TESTROM = "/data/data/com.termux/files/home/storage/AiAgent/def7cmrvqe/work/roms-dev/blaster-master-usa.nes";
 const mime = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".png": "image/png", ".css": "text/css", ".webmanifest": "application/manifest+json", ".nes": "application/octet-stream" };
 function sendFile(res, f, type) {
@@ -16,6 +17,7 @@ function sendFile(res, f, type) {
 http.createServer((req, res) => {
   let p = decodeURIComponent(req.url.split("?")[0]);
   if (p === "/testrom.nes") { sendFile(res, TESTROM, "application/octet-stream"); return; }
+  if (p === "/pads2.bin") { sendFile(res, PADS2, "application/octet-stream"); return; }
   if (p.endsWith("/")) p += "index.html";
   const norm = path.normalize(p);
   if (norm === ".." || norm.startsWith("../") || norm.startsWith("..")) { res.writeHead(400); res.end("bad"); return; }

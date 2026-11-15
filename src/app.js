@@ -97,7 +97,6 @@ if (qs.has("headless")) {
 // ---- L2: wasm core + C/JS contract (SPEC section 5). ----
 import { GameHost } from "./core/host.js";
 const wasmHost = new GameHost();
-const jsnesHost = new JsnesHost();
 const mesenHost = new MesenHost();
 let l2host = wasmHost;
 let l2pack = null;
@@ -499,7 +498,6 @@ import { attachKeyboard } from "./input/keyboard.js";
 import { mountTouch } from "./input/touch.js";
 import { pollGamepad, attachGamepad } from "./input/gamepad.js";
 import { AgentPad } from "./input/agent.js";
-import { JsnesHost } from "./core/jsnes_host.js";
 import { MesenHost } from "./core/mesen_host.js";
 import { PcmPlayer } from "./audio/pcm.js";
 const padBus = new PadBus();
@@ -671,7 +669,7 @@ async function shellStepOnce() {
     throw e;
   }
   try {
-    if (l2host === jsnesHost || l2host === mesenHost) {
+    if (l2host === mesenHost) {
       if (pcmPlayer && pcmPlayer.node) pcmPlayer.pushSamples(l2host.frame(), l2host.pcmDrain());
     } else if (audioPlayer && audioPlayer.node) {
       const ab = l2host.audioFrame();
@@ -733,7 +731,7 @@ async function shellStart() {
   window.__bmStaticHint = false; window.__bmStaticN = 0;
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   try { if (pcmPlayer) pcmPlayer.reset(); } catch (e2) {}
-  try { await ((l2host === jsnesHost || l2host === mesenHost) ? ensurePcm().unlock() : ensureAudio().unlock()); syncAudioToPrefs(); }
+  try { await ((l2host === mesenHost) ? ensurePcm().unlock() : ensureAudio().unlock()); syncAudioToPrefs(); }
   catch (e) { shellLog("audio locked: " + String((e && e.message) || e).slice(0, 60)); }
   shellRunning = true; shellPaused = false;
   pauseBtn.textContent = "Pause";
@@ -934,13 +932,13 @@ swapABInput.checked = !!prefs.swapAB;
 swapXYInput.checked = !!prefs.swapXY;
 padFlags.swapAB = !!prefs.swapAB;
 padFlags.swapXY = !!prefs.swapXY;
-if (!qs.has("headless") && (prefs.engine === "jsnes" || prefs.engine === "mesen")) { l2host = (prefs.engine === "mesen") ? mesenHost : jsnesHost; agentPad.host = l2host; }
+if (!qs.has("headless") && prefs.engine === "mesen") { l2host = mesenHost; agentPad.host = l2host; }
 engineSel.addEventListener("change", () => {
-  const want = engineSel.value === "jsnes" ? "jsnes" : (engineSel.value === "mesen" ? "mesen" : "wasm");
+  const want = engineSel.value === "mesen" ? "mesen" : "wasm";
   if (want === prefs.engine) return;
   try { shellStop(); } catch (e) {}
   prefs.engine = want; savePrefs(prefs);
-  l2host = (want === "jsnes") ? jsnesHost : ((want === "mesen") ? mesenHost : wasmHost);
+  l2host = (want === "mesen") ? mesenHost : wasmHost;
   agentPad.host = l2host;
   try { ensureVideo(); video.upload(l2host.videoBytes()); video.present(); } catch (e2) {}
   shellLog("engine " + want + " (takes effect on Start)");
@@ -1131,36 +1129,6 @@ async function selfTestMovie() {
 if (qs.has("headless")) {
   const tm = qs.get("test");
   if (tm === "movie") selfTestMovie();
-}
-const failJ = (s) => { document.title = "BM-JSNES-FAIL:" + s; };
-async function selfTestJsnes() {
-  document.title = "BM-JSNES-RUNNING";
-  try {
-    const pack = await l2ensurePack();
-    const h = new JsnesHost();
-    await h.spawn(pack);
-    for (let f = 1; f < 2700; f++) await h.go(1, 0);
-    await h.go(5, 8);
-    for (let f = 2705; f < 3000; f++) await h.go(1, 129);
-    if (h.frame() !== 2999) return failJ("frame:" + h.frame());
-    if (h.padLog.length !== 2999 || h.padLog[2702] !== 8 || h.padLog[2998] !== 129) return failJ("padlog");
-    const v = h.videoBytes();
-    let nz = 0;
-    for (let i = 0; i < v.length; i += 401) if (v[i] !== 0) nz++;
-    if (nz < 10) return failJ("video-blank");
-    const h0 = h.hash();
-    const m = makeMovie(h.padLog.slice(0, h.frame()), "testcrc");
-    const parsed = parseMovie(JSON.parse(JSON.stringify(m)));
-    const st = await replayMovie(h, parsed.pads, null);
-    if (st !== 2999) return failJ("replay-frame:" + st);
-    if (h.hash() !== h0) return failJ("replay-hash");
-    statusEl.textContent = "jsnes self-test PASS f=2999 hash=" + h0.toString(16);
-    document.title = "BM-JSNES-PASS";
-  } catch (e) { failJ("exc:" + String((e && e.message) || e).slice(0, 80)); }
-}
-if (qs.has("headless")) {
-  const tj = qs.get("test");
-  if (tj === "jsnes") selfTestJsnes();
 }
 const failMesen = (s) => { document.title = "BM-MESEN-FAIL:" + s; };
 async function selfTestMesen() {

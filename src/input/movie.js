@@ -4,8 +4,8 @@
 // consumed edge. A movie = {app,v,rom,frame,pads} with pads as base64 of
 // the raw bytes (1/frame; ~3.6KB per minute, trivial to share as a file).
 // Replay = fresh spawn + fast-forward (deterministic: same proof as
-// save/load in L2/L6 self-tests). Movies replay in jsnes too (see
-// doorup/jmovie.mjs) with the same bit order (bit i = button bit i).
+// save/load in L2/L6 self-tests). Movies replay across engines with
+// the same bit order (bit i = button bit i).
 export function encodePads(pads) {
   const b = pads instanceof Uint8Array ? pads : Uint8Array.from(pads);
   let s = "";

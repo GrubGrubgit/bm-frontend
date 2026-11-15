@@ -6,8 +6,8 @@
 // Canvas backing store is set in device pixels by resize(); rect math is
 // in device pixels so Integer stays exact under any devicePixelRatio.
 var GW = 256, GH = 240;
-// CRT overscan view: hide 8px on every side (real TVs + jsnes clipToTvSize
-// black these out; tiles there are never meant to be seen). Upload stays
+// CRT overscan view: hide 8px on every side (real TVs black these out;
+// tiles there are never meant to be seen). Upload stays
 // full-frame (digest/oracle compare full bytes); only the VIEW crops.
 var VW = 240, VH = 224, OX = 8, OY = 8;
 var VS = "attribute vec2 p;attribute vec2 t;varying vec2 v_t;" +

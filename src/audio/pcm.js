@@ -1,6 +1,6 @@
-// src/audio/pcm.js -- realtime raw-PCM lifecycle for the jsnes debug
+// src/audio/pcm.js -- realtime raw-PCM lifecycle for the Mesen accurate
 // engine (mirrors player.js shape: unlock/pushSamples/reset/volume/mute).
-// jsnes emits 44100Hz mono; this resamples (linear) to the device rate.
+// Mesen emits 44100Hz mono; this resamples (linear) to the device rate.
 const SRC_RATE = 44100;
 export class PcmPlayer {
   constructor() {

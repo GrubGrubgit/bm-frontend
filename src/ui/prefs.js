@@ -8,7 +8,7 @@ export const PREF_DEFAULTS = Object.freeze({
 });
 const SCALES = ["integer", "fit", "fill", "stretch"];
 const FILTERS = ["nearest", "bilinear"];
-const ENGINES = ["wasm", "jsnes", "mesen"];
+const ENGINES = ["wasm", "mesen"];
 export function loadPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { p = {}; }

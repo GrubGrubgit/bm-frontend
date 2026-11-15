@@ -3,13 +3,13 @@
 // hash/padLog/inst), so the shell, movies, slots and bus run unmodified on
 // the accurate engine. Pads are the SAME 1B/frame NES-bit log, so a movie
 // recorded on any engine replays on any other (that cross-check is the
-// point: Mesen is the accuracy oracle for the pause behavior that jsnes
-// and the static port get wrong).
+// point: Mesen is the accuracy oracle for the pause behavior that the
+// static port gets wrong).
 //
 // Video bytes are RGBA like the port (converted from the core's XRGB8888);
 // hash is FNV-1a over the frame words (engine-local, only compared within
 // Mesen). Audio bypasses the APU-voice path: raw 44100Hz mono int16 batches
-// via audio/pcm.js, same as jsnes. Save/load is replay by determinism
+// via audio/pcm.js, for raw PCM. Save/load is replay by determinism
 // (pad log + frame count; fresh module per spawn is bit-identical, proven
 // by the mesen smoke page: MESEN-SMOKE-PASS ... det+bootdet).
 //

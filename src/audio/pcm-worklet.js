@@ -1,7 +1,7 @@
-// src/audio/pcm-worklet.js -- dumb PCM FIFO renderer for the jsnes debug
+// src/audio/pcm-worklet.js -- dumb PCM FIFO renderer for the Mesen accurate
 // engine. The ApuPlayer/worklet path stays untouched (wasm port voices
 // real APU registers); this worklet just plays raw mono float samples
-// pushed from jsnes onAudioSample. Starvation emits silence (unlike the
+// pushed from the Mesen host. Starvation emits silence (unlike the
 // APU voice it is NOT gap-counted: debug audio only).
 class PcmVoice extends AudioWorkletProcessor {
   constructor() {

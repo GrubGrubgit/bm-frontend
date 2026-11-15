@@ -164,3 +164,14 @@ GameHost.prototype.terminate = function () {
   this.inst = null;
   this._pending = [];
 };
+GameHost.prototype.trapInfo = function () {
+  try {
+    var ex = this.inst && this.inst.exports;
+    if (!ex || !ex.bm_trap_flag || !ex.bm_trap_flag()) return null;
+    var mem = new Uint8Array(ex.memory.buffer);
+    var np = ex.bm_trap_namep();
+    var s = "";
+    for (var i = 0; i < 24 && mem[np + i]; i++) s += String.fromCharCode(mem[np + i]);
+    return { name: s, val: ex.bm_trap_code() };
+  } catch (e) { return null; }
+};

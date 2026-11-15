@@ -60,3 +60,20 @@ export async function replayMovie(host, pads, onProgress) {
   }
   return host.frame();
 }
+export function downloadJson(obj, fname) {
+  const text = JSON.stringify(obj);
+  try {
+    if (window.BMApk && typeof window.BMApk.saveMovie === "function") {
+      window.BMApk.saveMovie(fname, "data:application/json;base64," + btoa(text));
+      return { fname: fname, via: "apk" };
+    }
+  } catch (e) {}
+  const blob = new Blob([text], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  return { fname: fname, via: "browser" };
+}

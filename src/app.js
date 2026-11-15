@@ -595,7 +595,8 @@ if (qs.has("headless")) {
 // 60fps pacing lives here (rAF loop stepping the L2 host with the live bus
 // mask, video present + audio push per frame). Determinism + replay save/
 // load are L2 properties this layer reuses, never reimplements.
-import { makeMovie, parseMovie, downloadMovie, replayMovie } from "./input/movie.js";
+import { autoTrapReport, manualBugReport } from "./ui/report.js";
+import { makeMovie, parseMovie, downloadMovie, replayMovie, downloadJson } from "./input/movie.js";
 import { loadPrefs, savePrefs } from "./ui/prefs.js";
 import { wireInstall } from "./ui/pwa.js";
 import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
@@ -603,7 +604,9 @@ const prefs = loadPrefs();
 const shellStatusEl = document.getElementById("shellStatus");
 const logEl = document.getElementById("logEl");
 const padToastEl = document.getElementById("padToast");
-const shellLog = makeLog(logEl);
+const shellLogBase = makeLog(logEl);
+const logTail = [];
+function shellLog(m) { logTail.push(m); if (logTail.length > 200) logTail.shift(); return shellLogBase(m); }
 wirePadToasts(padToastEl, shellLog);
 wireInstall(document.getElementById("installBtn"), shellLog);
 const startBtn = document.getElementById("startBtn");
@@ -719,7 +722,7 @@ function shellLoop() {
       if (!shellPaused && !shellStepping && (shellLastT === 0 || nowT - shellLastT >= 16.0)) {
         if (nowT !== 0) shellLastT = nowT;
         shellStepping = true;
-        try { await shellStepOnce(); } catch (e) { shellLog("step err " + String((e && e.message) || e)); try { shellStatusEl.textContent = "shell f=" + l2host.frame() + " err=" + String((e && e.message) || e).slice(0, 60); } catch (e2) {} } finally { shellStepping = false; }
+        try { await shellStepOnce(); } catch (e) { shellLog("step err " + String((e && e.message) || e)); try { shellStatusEl.textContent = "shell f=" + l2host.frame() + " err=" + String((e && e.message) || e).slice(0, 60); } catch (e2) {} try { shellAutoTrapReport(); } catch (e3) {} } finally { shellStepping = false; }
       }
     })().then(() => shellLoop(), () => shellLoop());
   });
@@ -1212,3 +1215,11 @@ if (qs.has("headless")) {
   const tp = qs.get("test");
   if (tp === "pwa") selfTestPwa();
 }
+async function shellAutoTrapReport() {
+  try { await autoTrapReport(l2host, prefs.engine, loadRomId, logTail, shellLog); } catch (e) {}
+}
+async function shellManualReport() {
+  return manualBugReport(l2host, prefs.engine, loadRomId, logTail, shellLog);
+}
+window.BM.reportBug = shellManualReport;
+reportBtn.addEventListener("click", () => { shellManualReport().catch((e) => { shellLog("report err " + e.message); }); });

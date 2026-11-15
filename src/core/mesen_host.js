@@ -168,3 +168,4 @@ MesenHost.prototype.terminate = function () {
     try { if (np) mod._free(np); } catch (e2) {}
   }
 };
+MesenHost.prototype.trapInfo = function () { return null; };

@@ -22,6 +22,26 @@ void *memcpy(void *d, const void *s, size_t n) {
   return d;
 }
 void *memmove(void *d, const void *s, size_t n) { return memcpy(d, s, n); }
+static char bm_trap_name[24];
+static uint16_t bm_trap_val;
+static int bm_trap_seen;
+void bm_trap(uint16_t v, const char *name) {
+  if (!bm_trap_seen) {
+    int i;
+    bm_trap_seen = 1;
+    bm_trap_val = v;
+    bm_trap_name[0] = 0;
+    if (name) {
+      i = 0;
+      while (i < 23 && name[i]) { bm_trap_name[i] = name[i]; i++; }
+      bm_trap_name[i] = 0;
+    }
+  }
+  __builtin_trap();
+}
+int bm_trap_flag(void) { return bm_trap_seen; }
+int bm_trap_code(void) { return (int)bm_trap_val; }
+int bm_trap_namep(void) { return (int)(intptr_t)bm_trap_name; }
 #include "combined_off.c"
 __attribute__((import_module("env"))) __attribute__((import_name("host_frame"))) void host_frame(int frame);
 static int frame_no;
@@ -94,7 +114,7 @@ static void render(void) {
   }
   if (spr_en) {
     int s;
-    for (s = 0; s < 64; s++) {
+    for (s = 63; s >= 0; s--) {
       int oy = oam[s * 4];
       int ti, at, ox;
       int hh, palb, fx, fy, r;
@@ -193,7 +213,8 @@ void bm_boot(void) {
   ppu_buf = 0; oam_addr = 0; reg2000 = 0; reg2001 = 0; chr0 = 0; chr1 = 0;
   mmc_shift = 0; mmc_count = 0; mmc_ctrl = 0x0C; swbank = prg[0];
   nmi_next_edge = 27517; nmi_armed = 1; in_nmi = 0;
-  frame_no = 0; game_pad = 0; apu_head = 0; apu_tail = 0;
+  frame_no = 0; game_pad = 0;
+  bm_trap_seen = 0; bm_trap_val = 0; bm_trap_name[0] = 0; apu_head = 0; apu_tail = 0;
   pad_sample_fn = pad_fn;
   nmi_fire_fn = nmi_frame;
   b7_entry_F23B();

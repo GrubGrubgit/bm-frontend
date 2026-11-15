@@ -1,0 +1,50 @@
+// src/ui/report.js -- one-tap bug reports: deterministic movie + full RAM
+// snap + shell log tail + trap name (wasm port). Everything needed to
+// reproduce and name a crash, with zero manual steps from the player:
+// traps auto-save on first hit, freezes save on Report tap.
+import { makeMovie, downloadJson } from "../input/movie.js";
+function b64bytes(u8) {
+  var s = "";
+  for (var i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+  return btoa(s);
+}
+export async function buildBugReport(host, engineName, getCrc, tail, why) {
+  var pads = host.padLog.slice(0, host.frame());
+  var crc = "unknown";
+  try { var id = await getCrc(); if (id && id.crc32) crc = id.crc32; } catch (e) {}
+  var m = makeMovie(pads, crc);
+  var snapB64 = "";
+  try {
+    var ex = host.inst && host.inst.exports;
+    if (ex && ex.bm_snap) {
+      ex.bm_snap();
+      var mem = new Uint8Array(ex.memory.buffer);
+      snapB64 = b64bytes(mem.slice(ex.bm_stage_ptr(), ex.bm_stage_ptr() + 4160));
+    }
+  } catch (e2) {}
+  var trap = null;
+  try { trap = host.trapInfo ? host.trapInfo() : null; } catch (e3) {}
+  var wwwv = "";
+  try { var r = await fetch("PACKAGING.json"); if (r.ok) wwwv = (await r.json()).version || ""; } catch (e4) {}
+  return { app: "bm-bugreport", v: 1, www: wwwv, engine: engineName || "wasm", frame: host.frame(), why: why, trap: trap, rom: crc, movie: m, snap: snapB64, log: tail.slice(-60) };
+}
+export async function saveBugReport(r, fname) { return downloadJson(r, fname); }
+export async function autoTrapReport(host, engineName, getCrc, tail, log) {
+  var ti = null;
+  try { ti = host.trapInfo ? host.trapInfo() : null; } catch (e) {}
+  if (!ti) return;
+  var key = host.frame() + ":" + ti.name + ":" + ti.val;
+  if (typeof window !== "undefined" && window.__bmLastTrapKey === key) return;
+  if (typeof window !== "undefined") window.__bmLastTrapKey = key;
+  try {
+    var r = await buildBugReport(host, engineName, getCrc, tail, "auto-trap");
+    var dl = saveBugReport(r, "bmbug-f" + r.frame + "-" + (ti.name || "trap") + ".json");
+    log("bugreport f=" + r.frame + " trap=" + (ti.name || "?") + " val=" + ti.val + " via " + dl.via);
+  } catch (e2) { log("bugreport err " + String((e2 && e2.message) || e2).slice(0, 80)); }
+}
+export async function manualBugReport(host, engineName, getCrc, tail, log) {
+  var r = await buildBugReport(host, engineName, getCrc, tail, "manual");
+  var dl = saveBugReport(r, "bmbug-f" + r.frame + "-manual.json");
+  log("bugreport f=" + r.frame + " via " + dl.via + " -> Downloads/bmbug-f" + r.frame + "-manual.json");
+  return r;
+}

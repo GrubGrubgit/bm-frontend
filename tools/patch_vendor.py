@@ -30,6 +30,19 @@ def main():
     assert co.count(A1) == 1, "combined anchor1 drift"
     assert co.count(A2) == 1, "combined anchor2 drift"
     co = co.replace(A1, R1).replace(A2, R2)
+    nstub = co.count("(void) { __builtin_trap(); }")
+    assert nstub == 7, nstub
+    ndef = co.count("default: __builtin_trap();")
+    assert ndef == 1, ndef
+    tls = []
+    for ln in co.split(chr(10)):
+        if "(void) { __builtin_trap(); }" in ln:
+            nm = ln.split("static void ")[1].split("(void)")[0]
+            ln = "static void " + nm + "(void) { bm_trap(0, " + chr(34) + nm + chr(34) + "); }"
+        if ln.strip() == "default: __builtin_trap();":
+            ln = ln.replace("__builtin_trap();", "bm_trap(_v, (const char*)0);")
+        tls.append(ln)
+    co = chr(10).join(tls)
     (OUT / "combined_off.c").write_text(co)
     print("vendor patched: runtime.h APU ring + combined_off.c verbatim")
 main()

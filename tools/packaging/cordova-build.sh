@@ -44,6 +44,9 @@ cp "$CFG" "$WORK/config.xml"
 cd "$WORK"
 cordova platform add android@15.1.0
 
+echo --- bmapk bridge ---
+python3 $REPO/tools/packaging/patch-cordova-bmapk.py $WORK/platforms/android/app/src/main/java/dev/bmweb/frontend/MainActivity.java
+
 # ARM Termux: AGP downloads an x86_64-only aapt2 that cannot execute here
 # ("AAPT2 ... Daemon startup failed" / Syntax error "(" unexpected).
 # Fix: swap each cached copy with Termux's ARM aapt2 (packages: aapt2,

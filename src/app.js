@@ -610,7 +610,7 @@ if (qs.has("headless")) {
 // mask, video present + audio push per frame). Determinism + replay save/
 // load are L2 properties this layer reuses, never reimplements.
 import { autoTrapReport, manualBugReport, formatTrapBanner } from "./ui/report.js";
-import { makeMovie, makeMovieV2, parseMovie, downloadMovie, replayMovie, downloadJson } from "./input/movie.js";
+import { makeMovie, makeMovieV2, parseMovie, downloadMovie, downloadPng, replayMovie, downloadJson } from "./input/movie.js";
 import { loadPrefs, savePrefs } from "./ui/prefs.js";
 import { wireInstall } from "./ui/pwa.js";
 import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
@@ -879,9 +879,8 @@ function dlOkLine(what, via, where) {
 async function shellExportMovie() {
   if (!l2host.inst) throw new Error("not-started");
   if (replay.recording) {
-    shellLog("finalizing active take for export...");
+    shellLog("finalizing active take, then exporting...");
     await replayToggleRecord();
-    return null;
   }
   const pads = l2host.padLog.slice(0, l2host.frame());
   const crc = await currentRomCrc();
@@ -1256,7 +1255,13 @@ if (recBtn) recBtn.addEventListener("click", () => {
   }).catch(replayErr("record err"));
 });
 shotBtn.addEventListener("click", () => {
-  try { const u = shellScreenshot(); shellLog("shot " + u.length + "B"); toast(padToastEl, "shot " + u.length + "B", 1500); }
+  try {
+    const u = shellScreenshot();
+    const f = l2host.inst ? l2host.frame() : 0;
+    const dl = downloadPng(u, "bmshot-f" + f + ".png");
+    shellLog(dlOkLine("shot f=" + f + " " + u.length + "B", dl.via, "bmshot-f" + f + ".png"));
+    toast(padToastEl, dlFailed(dl.via) ? "shot NOT SAVED" : ("shot " + u.length + "B"), 1500);
+  }
   catch (e) { shellLog("shot err " + e.message); }
 });
 slotSel.addEventListener("change", () => {

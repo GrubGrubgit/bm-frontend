@@ -50,13 +50,36 @@ export function parseMovie(o) {
 // "FAILED: ..."). Returns null when no bridge exists. In an app context
 // (Cordova/file) without the bridge, anchor downloads are silently dropped
 // by the WebView, so report FAILED instead of lying about success.
-function apkSave(name, text) {
+function apkHasBridge() {
+  try { return !!(window.BMApk && (typeof window.BMApk.saveFile === "function" || typeof window.BMApk.saveMovie === "function")); }
+  catch (e) { return false; }
+}
+function apkSaveDataUrl(name, mime, dataUrl) {
   try {
-    if (window.BMApk && typeof window.BMApk.saveMovie === "function")
-      return "apk:" + String(window.BMApk.saveMovie(name, "data:application/json;base64," + btoa(text)));
+    if (window.BMApk && typeof window.BMApk.saveFile === "function")
+      return "apk:" + String(window.BMApk.saveFile(name, mime, dataUrl));
+    if (String(mime).indexOf("json") >= 0 && window.BMApk && typeof window.BMApk.saveMovie === "function")
+      return "apk:" + String(window.BMApk.saveMovie(name, dataUrl));
   } catch (e) { return "apk-error:" + String((e && e.message) || e).slice(0, 60); }
+  return null;
+}
+function apkSave(name, text) {
+  var r = apkSaveDataUrl(name, "application/json", "data:application/json;base64," + btoa(text));
+  if (r !== null) return r;
+  try {
+    if (apkHasBridge()) return "apk-error:no-save-method";
+  } catch (e) {}
   if ((typeof window.cordova !== "undefined") || location.protocol === "file:") return "FAILED-no-bridge";
   return null;
+}
+function anchorDownload(dataUrl, name) {
+  var a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function () { a.remove(); }, 2000);
+  return { fname: name, via: "browser" };
 }
 export function downloadMovie(movie, fname) {
   const name = fname || ("bmmovie-f" + movie.frame + ".json");
@@ -64,13 +87,17 @@ export function downloadMovie(movie, fname) {
   const apkr = apkSave(name, text);
   if (apkr !== null) return { frame: movie.frame, via: apkr };
   const blob = new Blob([text], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  const url = URL.createObjectURL(blob);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+  anchorDownload(url, name);
   return { frame: movie.frame, via: "browser" };
+}
+export function downloadPng(dataUrl, fname) {
+  const name = fname || "bmshot.png";
+  const apkr = apkSaveDataUrl(name, "image/png", dataUrl);
+  if (apkr !== null) return { fname: name, via: apkr };
+  if ((typeof window.cordova !== "undefined") || (typeof location !== "undefined" && location.protocol === "file:")) return { fname: name, via: "FAILED-no-bridge" };
+  return anchorDownload(dataUrl, name);
 }
 export async function replayMovie(host, pads, onProgress) {
   await host.reset();

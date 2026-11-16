@@ -58,7 +58,10 @@ function apkSaveDataUrl(name, mime, dataUrl) {
   try {
     if (window.BMApk && typeof window.BMApk.saveFile === "function")
       return "apk:" + String(window.BMApk.saveFile(name, mime, dataUrl));
-    if (String(mime).indexOf("json") >= 0 && window.BMApk && typeof window.BMApk.saveMovie === "function")
+    // Old APKs only expose saveMovie (json path). It just writes the dataUrl
+    // string to Downloads, so reuse it for PNGs too when saveFile is missing
+    // (otherwise Shot/Report PNGs report FAILED-no-bridge on those builds).
+    if (window.BMApk && typeof window.BMApk.saveMovie === "function")
       return "apk:" + String(window.BMApk.saveMovie(name, dataUrl));
   } catch (e) { return "apk-error:" + String((e && e.message) || e).slice(0, 60); }
   return null;

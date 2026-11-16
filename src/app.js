@@ -609,7 +609,7 @@ if (qs.has("headless")) {
 // 60fps pacing lives here (rAF loop stepping the L2 host with the live bus
 // mask, video present + audio push per frame). Determinism + replay save/
 // load are L2 properties this layer reuses, never reimplements.
-import { autoTrapReport, manualBugReport, formatTrapBanner } from "./ui/report.js";
+import { autoTrapReport, autoFaultReport, manualBugReport, formatTrapBanner } from "./ui/report.js";
 import { makeMovie, makeMovieV2, parseMovie, downloadMovie, downloadPng, replayMovie, downloadJson } from "./input/movie.js";
 import { loadPrefs, savePrefs } from "./ui/prefs.js";
 import { wireInstall } from "./ui/pwa.js";
@@ -719,7 +719,7 @@ async function presentFrame() {
       if (window.__bmStaticN >= 320 && !window.__bmStaticHint) {
         window.__bmStaticHint = true;
         shellLog("picture static 320f while running - if the game waits, press STA/START; Reset restarts");
-        toast(padToastEl, "no picture change - try STA/START, or Reset", 4000);
+        toast(padToastEl, "no picture change - try STA/START, or Reset", 8000);
       }
     } catch (e2) {}
   }
@@ -766,35 +766,51 @@ function shellLoop() {
 // replay guards throw loud anchor/load mismatches. A trap auto-pauses the
 // shell so the state freezes for inspection instead of ticking into the
 // fault every frame; Report still auto-saves the bmbug with movie+snap.
+// The banner is sticky (status ticker preserves it) + a long toast popup so
+// phone users see it. Non-trap faults (go-stall, wasm RuntimeError without
+// trap_flag) now pause + save a fault bmbug too - previously they froze
+// with only "step err ..." and no popup (the H-drop symptom).
+function clearTrapBanner() {
+  window.__bmTrapBanner = "";
+  window.__bmTrapBannerKey = "";
+}
+function showTrapBanner(b) {
+  window.__bmTrapBanner = b;
+  try { shellStatusEl.textContent = b + " - paused; Report saves bmbug, Reset restarts"; } catch (e2) {}
+  try { document.title = "BM-" + b.slice(0, 60); } catch (e3) {}
+  try { toast(padToastEl, b + " - paused", 8000); } catch (e4) {}
+}
 function shellOnStepErr(e) {
   var ti = null;
   try { ti = (l2host.trapInfo && l2host.trapInfo()) || null; } catch (e4) {}
+  var errMsg = String((e && e.message) || e);
   if (ti) {
     var key = l2host.frame() + ":" + (ti.name || "-") + ":" + ti.val;
     if (window.__bmTrapBannerKey !== key) {
       window.__bmTrapBannerKey = key;
       var b = formatTrapBanner(ti, l2host.frame(), prefs.engine);
       shellLog(b);
-      try { shellStatusEl.textContent = b + " - paused; Report saves bmbug, Reset restarts"; } catch (e2) {}
-      try { document.title = "BM-" + b.slice(0, 60); } catch (e3) {}
+      showTrapBanner(b);
       shellLog("auto-paused on trap - state frozen for inspection");
     }
     if (replay.movie) replay.trapped = true;
     if (replay.movie && replay.mode === "playing") replay.mode = "paused";
     try { shellPause(true); } catch (e5) {}
   } else {
-    shellLog("step err " + String((e && e.message) || e));
-    try { shellStatusEl.textContent = "shell f=" + l2host.frame() + " err=" + String((e && e.message) || e).slice(0, 60); } catch (e2) {}
-    if (replay.movie && replay.mode === "playing") {
-      replay.mode = "paused";
-      try { shellPause(true); } catch (e6) {}
-    }
+    shellLog("step err " + errMsg);
+    var fb = "FAULT f=" + l2host.frame() + " err=" + errMsg.slice(0, 60);
+    if (window.__bmTrapBanner !== fb) showTrapBanner(fb);
+    try { shellAutoFaultReport(errMsg); } catch (e7) {}
+    if (replay.movie) replay.trapped = true;
+    if (replay.movie && replay.mode === "playing") replay.mode = "paused";
+    try { shellPause(true); } catch (e6) {}
   }
 }
 async function shellStart() {
   if (shellRunning && !shellPaused) return l2host.frame();
   const pack = await l2ensurePack();
   if (!l2host.inst || l2host.frame() < 0) await l2host.spawn(pack, "build/game.wasm");
+  try { clearTrapBanner(); } catch (e) {}
   window.__bmStaticHint = false; window.__bmStaticN = 0;
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   try { if (pcmPlayer) pcmPlayer.reset(); } catch (e2) {}
@@ -829,6 +845,7 @@ async function shellReset() {
   anchorSave = null;
   const pack = await l2ensurePack();
   await l2host.spawn(pack, "build/game.wasm");
+  try { clearTrapBanner(); } catch (e) {}
   window.__bmStaticHint = false; window.__bmStaticN = 0;
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   try { if (pcmPlayer) pcmPlayer.reset(); } catch (e2) {}
@@ -873,8 +890,32 @@ async function shellLoad(slot) {
 }
 function dlFailed(via) { return /^(apk:FAILED|FAILED|apk-error)/.test(String(via || "")); }
 function dlOkLine(what, via, where) {
-  if (dlFailed(via)) return what + " NOT SAVED (" + via + ") - bridge missing, file did not reach Downloads";
+  if (dlFailed(via)) return what + " NOT SAVED (" + via + ") - file did not reach Downloads";
   return what + " via " + via + " -> Downloads/" + where;
+}
+// On Android the WebView file download is silently dropped, so saves MUST go
+// through the BMApk bridge. Old builds only exposed saveMovie and never asked
+// for storage permission, so every save failed with no system popup. Ask for
+// it when the bridge offers it; when a save still fails in-app, tell the user
+// exactly where to grant it.
+async function ensureApkStoragePermission() {
+  try {
+    if (window.BMApk && typeof window.BMApk.requestPermission === "function") {
+      var r = window.BMApk.requestPermission("storage");
+      if (r && r.then) r = await r;
+      shellLog("storage permission: " + String(r).slice(0, 80));
+      return String(r);
+    }
+  } catch (e) { shellLog("permission request err " + String((e && e.message) || e).slice(0, 60)); }
+  return "";
+}
+function dlFailedToast(what, via) {
+  if (!dlFailed(via)) return;
+  var inApp = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+  if (inApp) toast(padToastEl, what + " NOT SAVED (" + via + ") - grant Files permission in App info, then tap again", 8000);
+  else toast(padToastEl, what + " NOT SAVED (" + via + ")", 5000);
+  shellLog("hint: in the APK grant Files/Media permission (long-press icon > App info > Permissions), then tap again - take is kept, nothing lost");
+  try { ensureApkStoragePermission(); } catch (e) {}
 }
 async function shellExportMovie() {
   if (!l2host.inst) throw new Error("not-started");
@@ -887,6 +928,8 @@ async function shellExportMovie() {
   const m = makeMovieV2(pads, crc, { start: 0, anchorHash: null, engine: prefs.engine });
   const dl = downloadMovie(m, "bmmovie-f" + m.frame + ".json");
   shellLog(dlOkLine("movie exported f=" + m.frame + " rom=" + crc, dl.via, "bmmovie-f" + m.frame + ".json"));
+  if (dlFailed(dl.via)) { window.__bmLastTake = m; dlFailedToast("movie", dl.via); }
+  else toast(padToastEl, "movie saved f=" + m.frame, 2500);
   return m;
 }
 async function shellImportMovie(file) {
@@ -1004,7 +1047,7 @@ async function replayLoadParsed(m) {
   replay.movie = m;
   replay.trapped = false;
   replay.pauseSave = null;
-  window.__bmTrapBannerKey = "";
+  try { clearTrapBanner(); } catch (e) {}
   shellLog("replay loaded " + m.pads.length + "f v" + m.version + " anchor:" + replayAnchorText());
   if (m.version === 2 && replay.anchor.kind === "save" && replay.anchor.frame === m.start && replay.anchor.hash && m.anchorHash && replay.anchor.hash === m.anchorHash) {
     shellLog("replay anchor = loaded save (verified), fast restore");
@@ -1083,7 +1126,7 @@ async function replayPlay() {
   replayProgress.last = -1;
   await replayPositionForPlay();
   replay.trapped = false;
-  window.__bmTrapBannerKey = "";
+  try { clearTrapBanner(); } catch (e) {}
   replay.mode = "playing";
   try { shellPaused = false; pauseBtn.textContent = "Pause"; } catch (e) {}
   if (!shellRunning) shellRunning = true;
@@ -1112,7 +1155,7 @@ async function replayRestart() {
   replayProgress.last = -1;
   await replayPositionForPlay();
   replay.trapped = false;
-  window.__bmTrapBannerKey = "";
+  try { clearTrapBanner(); } catch (e) {}
   replay.mode = "playing";
   try { shellPaused = false; pauseBtn.textContent = "Pause"; } catch (e) {}
   if (!shellRunning) shellRunning = true;
@@ -1140,6 +1183,8 @@ async function replayToggleRecord() {
     const m = makeMovieV2(pads, await currentRomCrc(), { start: replay.recording.start, anchorHash: replay.recording.hash, engine: prefs.engine });
     const dl = downloadMovie(m, "bmmovie-f" + m.frame + "-take" + m.start + ".json");
     shellLog(dlOkLine("take saved f=" + m.frame + " take@" + m.start + " anchor=" + m.anchorHash, dl.via, "bmmovie-f" + m.frame + "-take" + m.start + ".json"));
+    if (dlFailed(dl.via)) { window.__bmLastTake = m; dlFailedToast("take", dl.via); }
+    else toast(padToastEl, "take saved f=" + m.frame, 2500);
     replay.recording = null;
     updateReplayStatus();
     return m.frame;
@@ -1260,7 +1305,8 @@ shotBtn.addEventListener("click", () => {
     const f = l2host.inst ? l2host.frame() : 0;
     const dl = downloadPng(u, "bmshot-f" + f + ".png");
     shellLog(dlOkLine("shot f=" + f + " " + u.length + "B", dl.via, "bmshot-f" + f + ".png"));
-    toast(padToastEl, dlFailed(dl.via) ? "shot NOT SAVED" : ("shot " + u.length + "B"), 1500);
+    if (dlFailed(dl.via)) dlFailedToast("shot", dl.via);
+    else toast(padToastEl, "shot " + u.length + "B", 1500);
   }
   catch (e) { shellLog("shot err " + e.message); }
 });
@@ -1339,13 +1385,25 @@ swapXYInput.addEventListener("change", () => {
   shellLog("swap X/Y " + (prefs.swapXY ? "on" : "off"));
 });
 setInterval(() => {
-  try { if (shellStatusEl) shellStatusEl.textContent = fmtStatus(window.BM.stats()); } catch (e) {}
+  try {
+    if (!shellStatusEl) return;
+    if (window.__bmTrapBanner) shellStatusEl.textContent = window.__bmTrapBanner + " - paused; Report saves bmbug, Reset restarts | " + fmtStatus(window.BM.stats());
+    else shellStatusEl.textContent = fmtStatus(window.BM.stats());
+  } catch (e) {}
 }, 500);
 shellLog("shell ready: start/reset/pause + slots + volume + scale/filter/fullscreen");
 try {
   const hasBridge = !!(window.BMApk && typeof window.BMApk.saveMovie === "function");
   const inApp = (typeof window.cordova !== "undefined") || location.protocol === "file:";
-  shellLog("BMApk bridge: " + (hasBridge ? "present" : "MISSING" + (inApp ? " - Movie/Record/Report files will NOT save in this build" : " (browser: anchor downloads used)")));
+  fetch("PACKAGING.json").then(r => r.ok ? r.json() : null).then(q => {
+    if (q) shellLog("www v" + q.version + " git " + (q.git || "?") + " built " + (q.built || "?"));
+  }).catch(() => {});
+  var hasFile = !!(window.BMApk && typeof window.BMApk.saveFile === "function");
+  var hasMovie = !!(window.BMApk && typeof window.BMApk.saveMovie === "function");
+  var canPerm = !!(window.BMApk && typeof window.BMApk.requestPermission === "function");
+  var inApp2 = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+  shellLog("BMApk bridge: saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " requestPermission=" + (canPerm ? "yes" : "no") + (inApp2 ? " (APK/file)" : " (browser: anchor downloads used)"));
+  if (inApp2 && !hasFile && !hasMovie) shellLog("saves will NOT reach Downloads in this build - no bridge; update the APK");
 } catch (e) {}
 
 const fail6 = (s) => { document.title = "BM-L6-FAIL:" + s; };
@@ -1683,6 +1741,13 @@ if (qs.has("headless")) {
 }
 async function shellAutoTrapReport() {
   try { await autoTrapReport(l2host, prefs.engine, loadRomId, logTail, shellLog); } catch (e) {}
+  var last = logTail[logTail.length - 1] || "";
+  if (/NOT SAVED|FAILED/.test(last)) dlFailedToast("bugreport", last);
+}
+async function shellAutoFaultReport(errMsg) {
+  try { await autoFaultReport(l2host, prefs.engine, loadRomId, logTail, shellLog, errMsg); } catch (e) {}
+  var last2 = logTail[logTail.length - 1] || "";
+  if (/NOT SAVED|FAILED/.test(last2)) dlFailedToast("bugreport", last2);
 }
 async function shellManualReport() {
   return manualBugReport(l2host, prefs.engine, loadRomId, logTail, shellLog);

@@ -52,6 +52,16 @@ export async function autoTrapReport(host, engineName, getCrc, tail, log) {
     log("bugreport f=" + r.frame + " trap=" + (ti.name || "?") + " val=" + ti.val + " via " + dl.via);
   } catch (e2) { log("bugreport err " + String((e2 && e2.message) || e2).slice(0, 80)); }
 }
+// Same as autoTrapReport but for faults where trapInfo() is null (wasm
+// RuntimeError without trap_flag, go-stall, boot-returned, replay guard).
+// Previously these froze with only "step err ..." and no bmbug, no popup.
+export async function autoFaultReport(host, engineName, getCrc, tail, log, errMsg) {
+  try {
+    var r = await buildBugReport(host, engineName, getCrc, tail, "auto-fault: " + String(errMsg || "?").slice(0, 120));
+    var dl = await saveBugReport(r, "bmbug-f" + r.frame + "-fault.json");
+    log("bugreport f=" + r.frame + " fault=" + String(errMsg || "?").slice(0, 60) + " via " + dl.via);
+  } catch (e2) { log("bugreport err " + String((e2 && e2.message) || e2).slice(0, 80)); }
+}
 export async function manualBugReport(host, engineName, getCrc, tail, log) {
   var r = await buildBugReport(host, engineName, getCrc, tail, "manual");
   var dl = await saveBugReport(r, "bmbug-f" + r.frame + "-manual.json");

@@ -18,8 +18,7 @@ export function fmtStatus(s) {
     ((s.engine === "mesen" && s.pcm && s.pcm.ready) ? (" pcm" + (Number(s.pcm.fifoSec) < 0 ? "" : "+") + Number(s.pcm.fifoSec).toFixed(1) + "s") : "") +
     " | eng " + (s.engine || "wasm") + " " + s.scale + "/" + s.filter +
     " | vol " + Math.round(s.volume * 100) + "%" + (s.muted ? " (muted)" : "") +
-    " | slot " + s.slot + (s.running ? (s.paused ? " | PAUSED" : " | RUNNING") : " | stopped") +
-);
+    " | slot " + s.slot + (s.running ? (s.paused ? " | PAUSED" : " | RUNNING") : " | stopped") ;
 }
 export function toast(toastEl, msg, ms) {
   if (!toastEl) return;

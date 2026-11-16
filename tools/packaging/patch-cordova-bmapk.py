@@ -11,6 +11,7 @@
 import sys
 import json
 from pathlib import Path
+import os
 
 p = sys.argv[1]
 src = open(p).read()
@@ -293,4 +294,16 @@ stripped = src.rstrip()
 assert stripped.endswith('}')
 src = stripped + chr(10) + cls
 open(p, 'w').write(src)
-print('patched ' + p)
+bridge = ('package dev.bmweb.frontend;' + chr(10)
+  + 'import android.os.Build;' + chr(10)
+  + 'import android.net.Uri;' + chr(10)
+  + 'import android.provider.MediaStore;' + chr(10)
+  + 'import android.webkit.JavascriptInterface;' + chr(10)
+  + 'import android.widget.Toast;' + chr(10)
+  + 'import android.content.ContentValues;' + chr(10)
+  + 'import java.io.IOException;' + chr(10)
+  + 'import java.io.OutputStream;' + chr(10)
+  + cls)
+javapath = os.path.join(os.path.dirname(p), 'BMApkBridge.java')
+open(javapath, 'w').write(bridge)
+print('patched ' + p + ' + wrote ' + javapath)

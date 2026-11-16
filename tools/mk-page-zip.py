@@ -39,7 +39,7 @@ WASM_Q = Q + 'build/game.wasm' + Q
 STORE_LINE = 'import { savePack, loadPack, wipeAll, loadRomId } from ' + Q + './pack/store.js' + Q + ';'
 assert WASM_Q in app, 'wasm-path-moved'
 assert STORE_LINE in app, 'store-import-moved'
-assert app.count(WASM_Q) == 14, 'wasm-count-changed'
+assert app.count(WASM_Q) == 15, 'wasm-count-changed'
 prf = rd('src/ui/prefs.js').decode('utf-8')
 ENG = 'const ENGINES = [' + Q + 'wasm' + Q + ', ' + Q + 'mesen' + Q + '];'
 assert ENG in prf, 'engines-moved'
@@ -59,7 +59,7 @@ app2 = app.replace(STORE_LINE, STORE_LINE + BM_ADD, 1)
 WASM_NEW = '(BM_BASE + ' + Q + 'build/game.wasm' + Q + ')'
 app3 = app2.replace(WASM_Q, WASM_NEW)
 assert app3.count(WASM_Q) == app3.count(WASM_NEW), 'wasm-wrap'
-assert app3.count(WASM_NEW) == 14, 'wasm-new-count'
+assert app3.count(WASM_NEW) == 15, 'wasm-new-count'
 prf2 = prf.replace(ENG, 'const ENGINES = [' + Q + 'wasm' + Q + ']; // page: wasm only, no oracle shipped')
 PKG_NEW = 'fetch((typeof window !== ' + Q + 'undefined' + Q + ' && window.__BM_BASE || ' + Q + Q + ') + ' + Q + 'PACKAGING.json' + Q + ')'
 rep2 = rep.replace(PKG, PKG_NEW)

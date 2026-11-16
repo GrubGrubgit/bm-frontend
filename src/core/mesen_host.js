@@ -105,10 +105,14 @@ MesenHost.prototype._pullFrame = function (pad) {
   }
   var ap = mod._mesen_audio(), n = mod._mesen_alen();
   if (ap && n > 0) {
-    var s16 = mod.HEAPU16.subarray(ap >> 1, (ap >> 1) + n);
-    for (var k = 0; k < s16.length; k++) {
-      var v = s16[k];
-      this._au.push(v < 0 ? v / 32768 : v / 32767);
+    // g_audio is int16_t: convert via the UNSIGNED view (always exported)
+    // so this never depends on glue HEAP16 availability. The old code read
+    // unsigned samples as-is (v < 0 dead) and wrapped every negative sample
+    // to +0.5..+1.0: DC blast + hard distortion.
+    var u16 = mod.HEAPU16.subarray(ap >> 1, (ap >> 1) + n);
+    for (var k = 0; k < u16.length; k++) {
+      var v = u16[k];
+      this._au.push(v >= 32768 ? (v - 65536) / 32768 : v / 32767);
     }
     this.audioTotal += n;
     mod._mesen_aclear();

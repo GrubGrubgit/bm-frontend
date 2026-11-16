@@ -902,14 +902,12 @@ async function shellLoad(slot) {
 }
 function dlFailed(via) { return /^(apk:FAILED|FAILED|apk-error|apk:timeout|timeout|apk:bad|bad-data|no-picker|apk:anchor-in-app)/.test(String(via || "")); }
 
-}
 function dlOkLine(what, via, where) {
   if (dlFailed(via)) return what + " NOT SAVED (" + via + ") - tap again to retry";
   if (String(via).indexOf("shared:") === 0) return what + " shared (" + where + ")";
   return what + " saved (" + where + ")";
 }
 
-}
 // Saves: ONE path on every surface (page, APK, desktop). Desktop browsers with
 // a file picker get the system dialog. Otherwise: name dialog, then the
 // system share sheet when it takes files (the user picks the location there),
@@ -1545,11 +1543,10 @@ setInterval(() => {
 }, 500);
 shellLog("shell ready: start/reset/pause + slots + volume + scale/filter/fullscreen");
 try {
-try {
     fetch("PACKAGING.json").then(r => r.ok ? r.json() : null).then(q => {
       if (q) { window.__bmWww = "www v" + q.version; shellLog("www v" + q.version + " git " + (q.git || "?") + " built " + (q.built || "?")); }
     }).catch(() => {});
-  } catch (eBoot) {}
+} catch (e) {}
 
 const fail6 = (s) => { document.title = "BM-L6-FAIL:" + s; };
 

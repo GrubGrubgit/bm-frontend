@@ -831,6 +831,7 @@ async function shellStop() {
     try { toast(padToastEl, "finalizing take - opening save dialog...", 2500); } catch (e7) {}
     shellLog("stop: finalizing active take first - save dialog opening...");
     try { await replayToggleRecord(); } catch (e8) { shellLog("stop save err " + String((e8 && e8.message) || e8).slice(0, 80)); }
+    try { recBtn.textContent = "Record"; } catch (e8e) {}
   }
   if (replay.movie) shellLog("replay cleared by stop");
   replay.movie = null; replay.mode = "idle"; replay.recording = null; replay.pauseSave = null; replay.trapped = false;
@@ -849,6 +850,7 @@ async function shellReset() {
     try { toast(padToastEl, "finalizing take - opening save dialog...", 2500); } catch (e7b) {}
     shellLog("reset: finalizing active take first - save dialog opening...");
     try { await replayToggleRecord(); } catch (e8b) { shellLog("reset save err " + String((e8b && e8b.message) || e8b).slice(0, 80)); }
+    try { recBtn.textContent = "Record"; } catch (e8f) {}
   }
   if (replay.movie) shellLog("replay cleared by reset (Movie up-arrow to reload)");
   replay.movie = null; replay.mode = "idle"; replay.recording = null; replay.pauseSave = null; replay.trapped = false;
@@ -1325,6 +1327,12 @@ async function replayRestart() {
   } finally { replay.busy = false; }
 }
 async function replayStop() {
+  if (replay.recording) {
+    try { toast(padToastEl, "finalizing take - opening save dialog...", 2500); } catch (e7c) {}
+    shellLog("r-stop: finalizing active take first - save dialog opening...");
+    try { await replayToggleRecord(); } catch (e8c) { shellLog("r-stop save err " + String((e8c && e8c.message) || e8c).slice(0, 80)); }
+    try { recBtn.textContent = "Record"; } catch (e8d) {}
+  }
   replay.busy = true;
   try {
   if (!replay.movie || replay.mode === "idle") { shellLog("replay: nothing to stop"); return l2host.frame(); }
@@ -1473,12 +1481,12 @@ const rRestartBtn = document.getElementById("rRestartBtn");
 const rStopBtn = document.getElementById("rStopBtn");
 const recBtn = document.getElementById("recBtn");
 function replayErr(tag) {
-  return (e) => { shellLog(tag + " " + String((e && e.message) || e).slice(0, 80)); try { shellStatusEl.textContent = tag + " " + String((e && e.message) || e).slice(0, 60); } catch (e2) {} };
+  return (e) => { var em = String((e && e.message) || e).slice(0, 80); shellLog(tag + " " + em); try { shellStatusEl.textContent = tag + " " + em.slice(0, 60); } catch (e2) {} try { toast(padToastEl, tag + " " + em.slice(0, 60), 4000); } catch (e3) {} };
 }
 if (rPlayBtn) rPlayBtn.addEventListener("click", () => { replayPlay().catch(replayErr("replay play err")); });
 if (rPauseBtn) rPauseBtn.addEventListener("click", () => { replayPause().catch(replayErr("replay pause err")); });
 if (rRestartBtn) rRestartBtn.addEventListener("click", () => { replayRestart().catch(replayErr("replay restart err")); });
-if (rStopBtn) rStopBtn.addEventListener("click", () => { replayStop().catch(replayErr("replay stop err")); });
+if (rStopBtn) rStopBtn.addEventListener("click", () => { try { toast(padToastEl, replay.recording ? "finalizing take - opening save dialog..." : "stopping replay...", 2000); } catch (e5b) {} replayStop().catch(replayErr("replay stop err")); });
 if (recBtn) recBtn.addEventListener("click", () => {
   try { toast(padToastEl, replay.recording ? "finalizing take - opening save dialog..." : "starting synced take...", 2000); } catch (e5) {}
   replayToggleRecord().then(() => {

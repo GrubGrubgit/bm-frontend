@@ -1049,8 +1049,8 @@ async function savePngWithDialog(dataUrl, defaultName) {
 }
 async function shellFileAccess() {
   if (!window.BMApk || typeof window.BMApk.openAllFilesSettings !== "function") {
-    try { toast(padToastEl, "this page saves via download/share - nothing to enable", 3500); } catch (eFA) {}
-    shellLog("no app bridge here - saves use share/download, no permission needed");
+    try { toast(padToastEl, "no app bridge in this copy - saves use share/download", 3500); } catch (eFA) {}
+    shellLog("no app bridge in this copy - saves use share/download, no permission needed");
     return "page";
   }
   var g = false;
@@ -1583,8 +1583,10 @@ swapXYInput.addEventListener("change", () => {
 setInterval(() => {
   try {
     if (!shellStatusEl) return;
-    if (window.__bmTrapBanner) shellStatusEl.textContent = window.__bmTrapBanner + " - paused; Report saves bmbug, Reset restarts | " + fmtStatus(window.BM.stats()) + " | " + (window.__bmWww || "");
-    else shellStatusEl.textContent = fmtStatus(window.BM.stats()) + " | " + (window.__bmWww || "");
+    var jb = "off";
+    try { jb = (window.BMApk && typeof window.BMApk.saveDirect === "function") ? "on" : "off"; } catch (eJB) { jb = "off"; }
+    if (window.__bmTrapBanner) shellStatusEl.textContent = window.__bmTrapBanner + " - paused; Report saves bmbug, Reset restarts | " + fmtStatus(window.BM.stats()) + " | " + (window.__bmWww || "") + " bridge:" + jb;
+    else shellStatusEl.textContent = fmtStatus(window.BM.stats()) + " | " + (window.__bmWww || "") + " bridge:" + jb;
   } catch (e) {}
 }, 500);
 shellLog("shell ready: start/reset/pause + slots + volume + scale/filter/fullscreen");

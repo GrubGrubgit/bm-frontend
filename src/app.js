@@ -988,6 +988,22 @@ async function saveBlobWithDialog(blob, dataUrlOrNull, defaultName, mime) {
       shellLog("save dialog failed, trying app save");
     }
   }
+  if (dataUrlOrNull && window.BMApk && typeof window.BMApk.saveDirect === "function") {
+    var granted = true;
+    try { granted = !!(window.BMApk.hasAllFiles && window.BMApk.hasAllFiles()); } catch (eG) { granted = true; }
+    if (granted) {
+      var nmD2 = await promptForName(defaultName);
+      if (nmD2 == null) return { via: "cancelled" };
+      var dr;
+      try { dr = window.BMApk.saveDirect(nmD2, mime, dataUrlOrNull); }
+      catch (eD) { dr = "bridge-error:" + String((eD && eD.message) || eD).slice(0, 60); }
+      if (String(dr).indexOf("FAILED") !== 0 && String(dr).indexOf("bridge-error") !== 0) {
+        try { toast(padToastEl, String(dr).slice(0, 80), 2500); } catch (eT2d) {}
+        return { via: String(dr), name: nmD2 };
+      }
+      shellLog("direct save failed (" + String(dr).slice(0, 60) + ") - trying share/download");
+    }
+  }
   var nm = await promptForName(defaultName);
   if (nm == null) return { via: "cancelled" };
   try {
@@ -1030,6 +1046,24 @@ async function savePngWithDialog(dataUrl, defaultName) {
   var dl = await saveBlobWithDialog(blob, dataUrl, defaultName, "image/png");
   if (dl.via === "cancelled") return dl;
   return dl;
+}
+async function shellFileAccess() {
+  if (!window.BMApk || typeof window.BMApk.openAllFilesSettings !== "function") {
+    try { toast(padToastEl, "this page saves via download/share - nothing to enable", 3500); } catch (eFA) {}
+    shellLog("no app bridge here - saves use share/download, no permission needed");
+    return "page";
+  }
+  var g = false;
+  try { g = !!(window.BMApk.hasAllFiles && window.BMApk.hasAllFiles()); } catch (eFG) { g = false; }
+  if (g) {
+    try { toast(padToastEl, "All-files access is ON - saves go straight to Downloads", 3000); } catch (eFA2) {}
+    shellLog("all-files access ON");
+    return "on";
+  }
+  try { toast(padToastEl, "opening All-files access - turn ON BM-Web, then come back", 5000); } catch (eFA3) {}
+  shellLog("opening All-files access settings - turn ON BM-Web");
+  try { return String(window.BMApk.openAllFilesSettings()); }
+  catch (eFO) { return "bridge-error:" + String((eFO && eFO.message) || eFO).slice(0, 60); }
 }
 async function shellExportMovie() {
   if (!l2host.inst) throw new Error("not-started");
@@ -1434,6 +1468,8 @@ movieBtn.addEventListener("click", () => {
   shellExportMovie().catch((e) => { shellLog("movie export err " + e.message); });
 });
 movieLoadBtn.addEventListener("click", () => { movieInput.click(); });
+const fileAccessBtn = document.getElementById("fileAccessBtn");
+if (fileAccessBtn) fileAccessBtn.addEventListener("click", () => { shellFileAccess().catch(replayErr("files err")); });
 movieInput.addEventListener("change", () => {
   const f = movieInput.files && movieInput.files[0];
   movieInput.value = "";
@@ -1565,7 +1601,15 @@ try {
         } catch (eU) {}
       }
     })();
-} catch (e) {}
+  } catch (e) {}
+  try {
+    if (window.BMApk && window.BMApk.hasAllFiles) {
+      var bg = false;
+      try { bg = !!window.BMApk.hasAllFiles(); } catch (eBG) { bg = true; }
+      if (!bg) { try { toast(padToastEl, "tap Files button once to enable direct saves", 6000); } catch (eBT) {} shellLog("all-files access OFF - tap Files button for direct saves (share/download work regardless)"); }
+      else shellLog("all-files access ON - saves go straight to Downloads");
+    }
+  } catch (eB2) {}
 
 const fail6 = (s) => { document.title = "BM-L6-FAIL:" + s; };
 

@@ -98,7 +98,7 @@ MesenHost.prototype._pullFrame = function (pad) {
     var o = this._rgba;
     for (var i = 0, j = 0; i < VWORDS; i++, j += 4) {
       var px = src[i];
-      o[j] = px & 255; o[j + 1] = (px >> 8) & 255; o[j + 2] = (px >> 16) & 255; o[j + 3] = 255;
+      o[j] = (px >> 16) & 255; o[j + 1] = (px >> 8) & 255; o[j + 2] = px & 255; o[j + 3] = 255;
     }
     this._rgbaDirty = false;
     this._hash = fnvWords(src);

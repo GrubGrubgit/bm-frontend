@@ -48,13 +48,13 @@ export async function autoTrapReport(host, engineName, getCrc, tail, log) {
   if (typeof window !== "undefined") window.__bmLastTrapKey = key;
   try {
     var r = await buildBugReport(host, engineName, getCrc, tail, "auto-trap");
-    var dl = saveBugReport(r, "bmbug-f" + r.frame + "-" + (ti.name || "trap") + ".json");
+    var dl = await saveBugReport(r, "bmbug-f" + r.frame + "-" + (ti.name || "trap") + ".json");
     log("bugreport f=" + r.frame + " trap=" + (ti.name || "?") + " val=" + ti.val + " via " + dl.via);
   } catch (e2) { log("bugreport err " + String((e2 && e2.message) || e2).slice(0, 80)); }
 }
 export async function manualBugReport(host, engineName, getCrc, tail, log) {
   var r = await buildBugReport(host, engineName, getCrc, tail, "manual");
-  var dl = saveBugReport(r, "bmbug-f" + r.frame + "-manual.json");
+  var dl = await saveBugReport(r, "bmbug-f" + r.frame + "-manual.json");
   log("bugreport f=" + r.frame + " via " + dl.via + " -> Downloads/bmbug-f" + r.frame + "-manual.json");
   return r;
 }

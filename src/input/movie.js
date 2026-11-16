@@ -46,15 +46,23 @@ export function parseMovie(o) {
     engine: o.v === 2 ? String(o.engine || "unknown") : "unknown"
   };
 }
+// APK bridge: BMApk.saveMovie returns a status string ("saved ..." or
+// "FAILED: ..."). Returns null when no bridge exists. In an app context
+// (Cordova/file) without the bridge, anchor downloads are silently dropped
+// by the WebView, so report FAILED instead of lying about success.
+function apkSave(name, text) {
+  try {
+    if (window.BMApk && typeof window.BMApk.saveMovie === "function")
+      return "apk:" + String(window.BMApk.saveMovie(name, "data:application/json;base64," + btoa(text)));
+  } catch (e) { return "apk-error:" + String((e && e.message) || e).slice(0, 60); }
+  if ((typeof window.cordova !== "undefined") || location.protocol === "file:") return "FAILED-no-bridge";
+  return null;
+}
 export function downloadMovie(movie, fname) {
   const name = fname || ("bmmovie-f" + movie.frame + ".json");
   const text = JSON.stringify(movie);
-  try {
-    if (window.BMApk && typeof window.BMApk.saveMovie === "function") {
-      window.BMApk.saveMovie(name, "data:application/json;base64," + btoa(text));
-      return { frame: movie.frame, via: "apk" };
-    }
-  } catch (e) { /* fall through to anchor download */ }
+  const apkr = apkSave(name, text);
+  if (apkr !== null) return { frame: movie.frame, via: apkr };
   const blob = new Blob([text], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -79,12 +87,8 @@ export async function replayMovie(host, pads, onProgress) {
 }
 export function downloadJson(obj, fname) {
   const text = JSON.stringify(obj);
-  try {
-    if (window.BMApk && typeof window.BMApk.saveMovie === "function") {
-      window.BMApk.saveMovie(fname, "data:application/json;base64," + btoa(text));
-      return { fname: fname, via: "apk" };
-    }
-  } catch (e) {}
+  const apkr = apkSave(fname, text);
+  if (apkr !== null) return { fname: fname, via: apkr };
   const blob = new Blob([text], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

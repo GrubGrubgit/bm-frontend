@@ -855,6 +855,11 @@ async function shellLoad(slot) {
   return f;
   } finally { replay.busy = false; }
 }
+function dlFailed(via) { return /^(apk:FAILED|FAILED|apk-error)/.test(String(via || "")); }
+function dlOkLine(what, via, where) {
+  if (dlFailed(via)) return what + " NOT SAVED (" + via + ") - bridge missing, file did not reach Downloads";
+  return what + " via " + via + " -> Downloads/" + where;
+}
 async function shellExportMovie() {
   if (!l2host.inst) throw new Error("not-started");
   if (replay.recording) {
@@ -866,7 +871,7 @@ async function shellExportMovie() {
   const crc = await currentRomCrc();
   const m = makeMovieV2(pads, crc, { start: 0, anchorHash: null, engine: prefs.engine });
   const dl = downloadMovie(m, "bmmovie-f" + m.frame + ".json");
-  shellLog("movie exported f=" + m.frame + " rom=" + crc + " via " + dl.via + " -> Downloads/bmmovie-f" + m.frame + ".json");
+  shellLog(dlOkLine("movie exported f=" + m.frame + " rom=" + crc, dl.via, "bmmovie-f" + m.frame + ".json"));
   return m;
 }
 async function shellImportMovie(file) {
@@ -1119,7 +1124,7 @@ async function replayToggleRecord() {
     const pads = l2host.padLog.slice(0, l2host.frame());
     const m = makeMovieV2(pads, await currentRomCrc(), { start: replay.recording.start, anchorHash: replay.recording.hash, engine: prefs.engine });
     const dl = downloadMovie(m, "bmmovie-f" + m.frame + "-take" + m.start + ".json");
-    shellLog("take saved f=" + m.frame + " take@" + m.start + " anchor=" + m.anchorHash + " via " + dl.via);
+    shellLog(dlOkLine("take saved f=" + m.frame + " take@" + m.start + " anchor=" + m.anchorHash, dl.via, "bmmovie-f" + m.frame + "-take" + m.start + ".json"));
     replay.recording = null;
     updateReplayStatus();
     return m.frame;
@@ -1315,6 +1320,11 @@ setInterval(() => {
   try { if (shellStatusEl) shellStatusEl.textContent = fmtStatus(window.BM.stats()); } catch (e) {}
 }, 500);
 shellLog("shell ready: start/reset/pause + slots + volume + scale/filter/fullscreen");
+try {
+  const hasBridge = !!(window.BMApk && typeof window.BMApk.saveMovie === "function");
+  const inApp = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+  shellLog("BMApk bridge: " + (hasBridge ? "present" : "MISSING" + (inApp ? " - Movie/Record/Report files will NOT save in this build" : " (browser: anchor downloads used)")));
+} catch (e) {}
 
 const fail6 = (s) => { document.title = "BM-L6-FAIL:" + s; };
 

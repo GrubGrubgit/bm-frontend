@@ -1543,9 +1543,18 @@ setInterval(() => {
 }, 500);
 shellLog("shell ready: start/reset/pause + slots + volume + scale/filter/fullscreen");
 try {
-    fetch("PACKAGING.json").then(r => r.ok ? r.json() : null).then(q => {
-      if (q) { window.__bmWww = "www v" + q.version; shellLog("www v" + q.version + " git " + (q.git || "?") + " built " + (q.built || "?")); }
-    }).catch(() => {});
+    (async function () {
+      var urls = ["PACKAGING.json"];
+      try { if (window.__BM_BASE) urls.push(window.__BM_BASE + "PACKAGING.json"); } catch (eB) {}
+      for (var ui = 0; ui < urls.length; ui++) {
+        try {
+          var rr = await fetch(urls[ui]);
+          if (!rr.ok) continue;
+          var qq = await rr.json();
+          if (qq) { window.__bmWww = "www v" + qq.version; shellLog("www v" + qq.version + " git " + (qq.git || "?") + " built " + (qq.built || "?")); return; }
+        } catch (eU) {}
+      }
+    })();
 } catch (e) {}
 
 const fail6 = (s) => { document.title = "BM-L6-FAIL:" + s; };

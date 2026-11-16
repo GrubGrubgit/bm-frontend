@@ -1396,12 +1396,13 @@ try {
   const hasBridge = !!(window.BMApk && typeof window.BMApk.saveMovie === "function");
   const inApp = (typeof window.cordova !== "undefined") || location.protocol === "file:";
   fetch("PACKAGING.json").then(r => r.ok ? r.json() : null).then(q => {
-    if (q) shellLog("www v" + q.version + " git " + (q.git || "?") + " built " + (q.built || "?"));
+    if (q) { window.__bmWww = "www v" + q.version; shellLog("www v" + q.version + " git " + (q.git || "?") + " built " + (q.built || "?")); }
   }).catch(() => {});
   var hasFile = !!(window.BMApk && typeof window.BMApk.saveFile === "function");
   var hasMovie = !!(window.BMApk && typeof window.BMApk.saveMovie === "function");
   var canPerm = !!(window.BMApk && typeof window.BMApk.requestPermission === "function");
   var inApp2 = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+  window.__bmBridge = "apk" + (inApp2 ? "+" : "-") + " saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no");
   shellLog("BMApk bridge: saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " requestPermission=" + (canPerm ? "yes" : "no") + (inApp2 ? " (APK/file)" : " (browser: anchor downloads used)"));
   if (inApp2 && !hasFile && !hasMovie) shellLog("saves will NOT reach Downloads in this build - no bridge; update the APK");
 } catch (e) {}

@@ -296,6 +296,7 @@ src = stripped
 open(p, 'w').write(src)
 bridge = ('package dev.bmweb.frontend;' + chr(10)
   + 'import android.os.Build;' + chr(10)
+  + 'import android.os.Environment;' + chr(10)
   + 'import android.net.Uri;' + chr(10)
   + 'import android.provider.MediaStore;' + chr(10)
   + 'import android.webkit.JavascriptInterface;' + chr(10)

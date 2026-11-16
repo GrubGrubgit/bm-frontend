@@ -101,13 +101,27 @@ const mesenHost = new MesenHost();
 let l2host = wasmHost;
 let l2pack = null;
 async function l2ensurePack() {
+  // Picker-only: the app NEVER ships a ROM. The user supplies their own
+  // ROM file via the file picker; the validated pack is cached in IDB.
   if (l2pack) return l2pack;
   const cached = await loadPack();
   if (cached && validatePack(cached).ok) { l2pack = cached; return l2pack; }
-  const resp = await fetch("data/default.nes");
-  if (!resp.ok) throw new Error("default-rom-fetch:" + resp.status);
+  throw new Error("no-rom: use the picker to supply your own ROM file");
+}
+// Headless/dev-test helper ONLY (localhost serve.js): boots the device-local
+// reference ROM via the /testrom.nes alias so ?headless&test=l* can run with
+// no picker. Never used by the shipped UI paths (shellStart/shellReset stay
+// picker-only); the alias exists only on the dev server, never in www/APK.
+async function l2ensurePackForTest() {
+  if (l2pack) return l2pack;
+  const cached = await loadPack();
+  if (cached && validatePack(cached).ok) { l2pack = cached; return l2pack; }
+  const host = location.hostname;
+  if (host !== "127.0.0.1" && host !== "localhost") throw new Error("no-rom: use the picker to supply your own ROM file");
+  const resp = await fetch("testrom.nes");
+  if (!resp.ok) throw new Error("testrom-fetch:" + resp.status);
   const bytes = new Uint8Array(await resp.arrayBuffer());
-  const r = buildPack(bytes, "default");
+  const r = buildPack(bytes, "testrom");
   if (!r.ok) throw new Error("pack:" + r.errors.join(" "));
   if (!validatePack(r.pack).ok) throw new Error("pack-invalid");
   l2pack = r.pack;
@@ -134,7 +148,7 @@ async function selfTestL2() {
   document.title = "BM-L2-RUNNING";
   try {
     statusEl.textContent = "L2: loading pack";
-    const pack = await l2ensurePack();
+    const pack = await l2ensurePackForTest();
     statusEl.textContent = "L2: booting engine";
     await l2host.spawn(pack, "build/game.wasm");
     const A = await l2host.go(40, 0);
@@ -253,7 +267,7 @@ async function selfTestL3() {
   document.title = "BM-L3-RUNNING";
   try {
     statusEl.textContent = "L3: boot engine";
-    const pack = await l2ensurePack();
+    const pack = await l2ensurePackForTest();
     await l2host.spawn(pack, "build/game.wasm");
     await l2host.go(39, 0);
     if (l2host.frame() !== 39) return fail3("frame:" + l2host.frame());
@@ -399,7 +413,7 @@ async function selfTestL4() {
   document.title = "BM-L4-RUNNING";
   try {
     statusEl.textContent = "L4: boot engine";
-    const pack = await l2ensurePack();
+    const pack = await l2ensurePackForTest();
     await l2host.spawn(pack, "build/game.wasm");
     statusEl.textContent = "L4: 60s capture (start@2700)";
     const byf = new Map();
@@ -558,7 +572,7 @@ async function selfTestL5() {
     agentPad.setPad(0);
     if (padBus.getMask() !== 0) return fail5("combine-clear:" + padBus.getMask().toString(16));
     statusEl.textContent = "L5: agent 60s run (start@2700, hold L+A)";
-    const pack = await l2ensurePack();
+    const pack = await l2ensurePackForTest();
     await l2host.spawn(pack, "build/game.wasm");
     for (let f = 1; f < 2700; f++) {
       agentPad.setPad(0);
@@ -1064,7 +1078,7 @@ async function selfTestL6() {
 async function selfTestL6Save() {
   document.title = "BM-L6-RUNNING";
   try {
-    const pack = await l2ensurePack();
+    const pack = await l2ensurePackForTest();
     await savePack(pack);
     await window.BM.start();
     await window.BM.pause(true);
@@ -1111,7 +1125,7 @@ const failM = (s) => { document.title = "BM-MOVIE-FAIL:" + s; };
 async function selfTestMovie() {
   document.title = "BM-MOVIE-RUNNING";
   try {
-    const pack = await l2ensurePack();
+    const pack = await l2ensurePackForTest();
     await l2host.spawn(pack, "build/game.wasm");
     for (let f = 1; f < 2700; f++) await l2host.go(1, 0);
     await l2host.go(5, 8);
@@ -1137,7 +1151,7 @@ const failMesen = (s) => { document.title = "BM-MESEN-FAIL:" + s; };
 async function selfTestMesen() {
   document.title = "BM-MESEN-RUNNING";
   try {
-    const pack = await l2ensurePack();
+    const pack = await l2ensurePackForTest();
     const h = new MesenHost();
     await h.spawn(pack);
     const A = await h.go(40, 0);

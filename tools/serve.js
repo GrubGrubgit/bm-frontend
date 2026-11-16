@@ -17,7 +17,6 @@ function sendFile(res, f, type) {
 http.createServer((req, res) => {
   let p = decodeURIComponent(req.url.split("?")[0]);
   if (p === "/testrom.nes") { sendFile(res, TESTROM, "application/octet-stream"); return; }
-  if (p === "/data/default.nes") { sendFile(res, TESTROM, "application/octet-stream"); return; }
   if (p === "/pads2.bin") { sendFile(res, PADS2, "application/octet-stream"); return; }
   if (p.endsWith("/")) p += "index.html";
   const norm = path.normalize(p);

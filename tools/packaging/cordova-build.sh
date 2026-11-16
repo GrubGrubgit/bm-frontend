@@ -10,10 +10,6 @@ WWW="$REPO/dist/www"
 CFG="$REPO/tools/packaging/cordova-config.xml"
 test -d "$WWW" || { echo "run make-www.py first (missing $WWW)"; exit 1; }
 test -f "$CFG" || { echo "missing $CFG"; exit 1; }
-ROM="$REPO/../work/roms-dev/blaster-master-usa.nes"
-test -f "$ROM" || { echo "missing dev ROM $ROM"; exit 1; }
-mkdir -p "$WWW/data"
-python3 "$REPO/tools/embed_default_rom.py" "$ROM" "$WWW/data/default.nes"
 
 # Use the REAL Termux home so SDK/Gradle/npm caches + debug key are shared
 # (the bridge session HOME is an isolated session-home with empty caches).

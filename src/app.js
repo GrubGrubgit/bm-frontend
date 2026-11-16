@@ -104,10 +104,10 @@ async function l2ensurePack() {
   if (l2pack) return l2pack;
   const cached = await loadPack();
   if (cached && validatePack(cached).ok) { l2pack = cached; return l2pack; }
-  const resp = await fetch("testrom.nes");
-  if (!resp.ok) throw new Error("testrom-fetch:" + resp.status);
+  const resp = await fetch("data/default.nes");
+  if (!resp.ok) throw new Error("default-rom-fetch:" + resp.status);
   const bytes = new Uint8Array(await resp.arrayBuffer());
-  const r = buildPack(bytes, "testrom");
+  const r = buildPack(bytes, "default");
   if (!r.ok) throw new Error("pack:" + r.errors.join(" "));
   if (!validatePack(r.pack).ok) throw new Error("pack-invalid");
   l2pack = r.pack;

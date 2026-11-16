@@ -19,7 +19,7 @@ export function fmtStatus(s) {
     " | eng " + (s.engine || "wasm") + " " + s.scale + "/" + s.filter +
     " | vol " + Math.round(s.volume * 100) + "%" + (s.muted ? " (muted)" : "") +
     " | slot " + s.slot + (s.running ? (s.paused ? " | PAUSED" : " | RUNNING") : " | stopped") +
-  " | " + (window.__bmWww || "www?") + " " + (window.__bmBridge || "bridge?");
+  " | " + (window.__bmWww || "www v?");
 }
 export function toast(toastEl, msg, ms) {
   if (!toastEl) return;

@@ -976,7 +976,10 @@ function anchorSaveBlob(blob, dataUrlOrNull, name) {
   if (url) setTimeout(function () { try { URL.revokeObjectURL(url); } catch (e2) {} }, 30000);
 }
 async function saveBlobWithDialog(blob, dataUrlOrNull, defaultName, mime) {
-  if (typeof window.showSaveFilePicker === "function") {
+  // File System Access picker is desktop-only: inside the app WebView it can
+  // exist yet never settle (no usable picker UI), freezing the stop path with
+  // zero logging. In-app always uses the native folder/direct/share paths.
+  if (typeof window.showSaveFilePicker === "function" && !window.BMApk) {
     try {
       var acc = {}; acc[mime] = [defaultName.slice(defaultName.lastIndexOf(".")) || ".bin"];
       var h = await window.showSaveFilePicker({ suggestedName: defaultName, types: [{ description: "BM file", accept: acc }] });
@@ -1002,6 +1005,7 @@ async function saveBlobWithDialog(blob, dataUrlOrNull, defaultName, mime) {
     if (hasDir) {
       var nmD = await promptForName(defaultName);
       if (nmD == null) return { via: "cancelled" };
+      shellLog("name ok (" + nmD + ") - writing to save folder...");
       var wr;
       try { wr = window.BMApk.saveFileToFolder(nmD, mime, dataUrlOrNull); }
       catch (eW) { wr = "bridge-error:" + String((eW && eW.message) || eW).slice(0, 60); }
@@ -1404,6 +1408,7 @@ async function replayToggleRecord() {
     var m = null;
     try { m = makeMovieV2(pads, await currentRomCrc(), { start: replay.recording.start, anchorHash: replay.recording.hash, engine: prefs.engine }); }
     catch (eM) { m = { app: "bm-movie", v: 2, rom: "unknown", frame: 0, start: 0, anchorHash: null, engine: "unknown", pads: "", buildErr: String((eM && eM.message) || eM).slice(0, 80) }; shellLog("movie build failed - saving raw take instead"); }
+    shellLog("take built f=" + m.frame + " (" + pads.length + " pads) - opening name dialog...");
     var tdl = await saveJsonWithDialog(m, "bmmovie-f" + m.frame + "-take" + m.start + ".json");
     var tshown = tdl.name || ("bmmovie-f" + m.frame + "-take" + m.start + ".json");
     window.__bmLastTake = m;

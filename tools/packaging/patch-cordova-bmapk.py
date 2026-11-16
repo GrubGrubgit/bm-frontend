@@ -9,9 +9,21 @@
 # some WebView versions, and the String return lets JS log the truth
 # (saved ... vs FAILED: ...) instead of guessing.
 import sys
+import json
+from pathlib import Path
 
 p = sys.argv[1]
 src = open(p).read()
+REPO2 = None
+for a in Path(p).resolve().parents:
+    if (a / 'dist' / 'www' / 'PACKAGING.json').exists():
+        REPO2 = a
+        break
+try:
+    _pack = json.loads((REPO2 / 'dist' / 'www' / 'PACKAGING.json').read_text())
+    VERSTR = str(_pack.get('version', '?')) + '+' + str(_pack.get('git', '?'))
+except Exception as e:
+    VERSTR = 'unknown'
 if 'BMApkBridge' in src:
     print('already patched')
     sys.exit(0)
@@ -43,10 +55,12 @@ assert act2 in src
 src = src.replace(act2, act2new, 1)
 
 L = []
-L.append('class BMApkBridge {')
+L.append('public class BMApkBridge {')
 L.append('    private final android.app.Activity act;')
 L.append('    private final android.webkit.WebView wv;')
 L.append('    BMApkBridge(android.app.Activity act, android.webkit.WebView wv) { this.act = act; this.wv = wv; }')
+L.append('    @JavascriptInterface')
+L.append('    public String apkVersion() { return "' + VERSTR + '"; }')
 L.append('    @JavascriptInterface')
 L.append('    public String saveMovie(String name, String dataUrl) {')
 L.append('        String safe = String.valueOf(name).replaceAll("[^A-Za-z0-9._-]", "_");')

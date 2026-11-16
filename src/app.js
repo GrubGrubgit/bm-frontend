@@ -1107,9 +1107,16 @@ async function savePngWithDialog(dataUrl, defaultName) {
   return dl;
 }
 async function shellPickFolder() {
+  var inAppF = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+  if (!inAppF) {
+    shellLog("browser mode: no app folder here - files download to Downloads instead");
+    try { toast(padToastEl, "browser mode: files download to Downloads", 3000); } catch (eF0b) {}
+    return "browser";
+  }
   if (!window.BMApk || typeof window.BMApk.pickSaveFolder !== "function") {
-    shellLog("folder pick needs the latest APK");
-    try { toast(padToastEl, "folder pick needs the latest APK", 3000); } catch (eF0) {}
+    var haveV = window.__bmApkV || "unknown";
+    shellLog("folder pick needs app 0.2.29+ (this app: " + haveV + ") - reinstall the APK from Downloads");
+    try { toast(padToastEl, "this app: " + haveV + " - reinstall APK from Downloads", 4000); } catch (eF0) {}
     return "no-bridge";
   }
   try { toast(padToastEl, "pick your save folder (one-time setup)...", 2500); } catch (eF1) {}
@@ -1638,8 +1645,8 @@ swapXYInput.addEventListener("change", () => {
 setInterval(() => {
   try {
     if (!shellStatusEl) return;
-    if (window.__bmTrapBanner) shellStatusEl.textContent = window.__bmTrapBanner + " - paused; Report saves bmbug, Reset restarts | " + fmtStatus(window.BM.stats());
-    else shellStatusEl.textContent = fmtStatus(window.BM.stats());
+    if (window.__bmTrapBanner) shellStatusEl.textContent = window.__bmTrapBanner + " - paused; Report saves bmbug, Reset restarts | " + fmtStatus(window.BM.stats()) + " | " + (window.__bmApkV || "") + " " + (window.__bmWww || "");
+    else shellStatusEl.textContent = fmtStatus(window.BM.stats()) + " | " + (window.__bmApkV || "") + " " + (window.__bmWww || "");
   } catch (e) {}
 }, 500);
 shellLog("shell ready: start/reset/pause + slots + volume + scale/filter/fullscreen");
@@ -1656,8 +1663,11 @@ try {
   var hasDir = false;
   try { hasDir = !!(window.BMApk && window.BMApk.hasSaveFolder && window.BMApk.hasSaveFolder()); } catch (eHD) {}
   var inApp2 = (typeof window.cordova !== "undefined") || location.protocol === "file:";
-  window.__bmBridge = "apk" + (inApp2 ? "+" : "-") + " saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no") + " saveDir=" + (hasDir ? "yes" : "no");
-  shellLog("BMApk bridge: saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no") + " saveDir=" + (hasDir ? "yes" : "no") + " requestPermission=" + (canPerm ? "yes" : "no") + (inApp2 ? " (APK/file)" : " (browser: anchor downloads used)"));
+  var apkV = "legacy";
+  try { apkV = (window.BMApk && window.BMApk.apkVersion) ? String(window.BMApk.apkVersion()) : "legacy"; } catch (eAV) { apkV = "legacy"; }
+  window.__bmApkV = inApp2 ? ("APK " + apkV) : "browser";
+  window.__bmBridge = "apk" + (inApp2 ? "+" : "-") + " saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no") + " saveDir=" + (hasDir ? "yes" : "no") + " " + window.__bmApkV;
+  shellLog("BMApk bridge: saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no") + " saveDir=" + (hasDir ? "yes" : "no") + " " + window.__bmApkV + " requestPermission=" + (canPerm ? "yes" : "no") + (inApp2 ? " (APK/file)" : " (browser: anchor downloads used)"));
   if (inApp2 && !hasFile && !hasMovie) shellLog("saves will NOT reach Downloads in this build - no bridge; update the APK");
 } catch (e) {}
 

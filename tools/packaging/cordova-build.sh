@@ -41,6 +41,21 @@ cordova create "$WORK" dev.bmweb.frontend "BM-Web" --no-telemetry
 rm -rf "$WORK/www"
 cp -r "$WWW" "$WORK/www"
 cp "$CFG" "$WORK/config.xml"
+# Stamp the real version into the APK (versionName shows in installer/App info,
+# versionCode bumps every build so Android treats it as an update).
+VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$WWW/PACKAGING.json")"
+VCODE="$(git -C "$REPO" rev-list --count HEAD)"
+python3 - "$WORK/config.xml" "$VER" "$VCODE" <<'PYEOF'
+import sys
+f, ver, code = sys.argv[1], sys.argv[2], sys.argv[3]
+s = open(f).read()
+assert s.count('version="0.0.0"') == 1, 'version anchor'
+s = s.replace('version="0.0.0"', 'version="' + ver + '"', 1)
+assert 'android-versionCode' not in s
+s = s.replace('<widget id="dev.bmweb.frontend"', '<widget id="dev.bmweb.frontend" android-versionCode="' + code + '"', 1)
+open(f, 'w').write(s)
+print('stamped config ' + ver + ' code ' + code)
+PYEOF
 cd "$WORK"
 cordova platform add android@15.1.0
 

@@ -292,7 +292,7 @@ L.append('}')
 cls = chr(10).join(L) + chr(10)
 stripped = src.rstrip()
 assert stripped.endswith('}')
-src = stripped + chr(10) + cls
+src = stripped
 open(p, 'w').write(src)
 bridge = ('package dev.bmweb.frontend;' + chr(10)
   + 'import android.os.Build;' + chr(10)

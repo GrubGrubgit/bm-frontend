@@ -679,6 +679,17 @@ let shellLastT = 0;
 async function shellStepOnce() {
   if (typeof replay !== "undefined" && replay.mode === "playing") return replayStepOnce();
   const mask = padBus.getMask();
+  try {
+    if ((mask & 8) && !(window.__bmPrevMask & 8)) {
+      var sf = 0; try { sf = l2host.frame(); } catch (eSF) {}
+      shellLog("start pressed f=" + sf);
+      if (sf > 2500 && (sf - (window.__bmStartToastF || -10000)) > 300) {
+        window.__bmStartToastF = sf;
+        try { toast(padToastEl, "Start: weapon menu / pause - Start again resumes", 3500); } catch (eST) {}
+      }
+    }
+  } catch (eSE) {}
+  window.__bmPrevMask = mask;
   let h;
   try {
     h = await Promise.race([l2host.go(1, mask), new Promise((rr, jj) => setTimeout(() => jj(new Error('go-stall')), 2500))]);
@@ -718,8 +729,8 @@ async function presentFrame() {
       else { window.__bmLastD = wd; window.__bmStaticN = 0; }
       if (window.__bmStaticN >= 320 && !window.__bmStaticHint) {
         window.__bmStaticHint = true;
-        shellLog("picture static 320f while running - if the game waits, press STA/START; Reset restarts");
-        toast(padToastEl, "no picture change - try STA/START, or Reset", 8000);
+        shellLog("picture unchanged 320f - still screens are normal (title cards, weapon menu, quiet rooms); Start opens/closes the weapon menu, Reset restarts");
+        try { toast(padToastEl, "still picture - often normal (title/menu); Start toggles weapon menu", 5000); } catch (eSH) {}
       }
     } catch (e2) {}
   }

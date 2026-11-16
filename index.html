@@ -28,7 +28,7 @@ button{padding:10px 14px;margin:2px}
 <div id="shellStatus">shell: stopped</div>
 <div id="padToast" hidden></div>
 <h3>Game (L6 shell)</h3>
-<p style="font-size:14px">Movie records automatically while you play - tap Movie↓ to save it. Reset restarts instantly. Start begins play (tap = audio unlock).</p>
+<p style="font-size:14px">Movie records automatically while you play - tap Movie↓ to save it. Reset restarts instantly. Start begins play (tap = audio unlock). Movie up-arrow loads a replay: R Play/Pause/Restart/Stop control it (pause keeps a savestate and hands you manual control, Record captures a new take).</p>
 <div id="shellGrid">
 <button id="startBtn">Start</button>
 <button id="resetBtn">Reset</button>
@@ -44,6 +44,13 @@ button{padding:10px 14px;margin:2px}
 <button id="reportBtn">Report</button>
 <button id="movieLoadBtn">Movie↑</button>
 <input id="movieInput" type="file" accept=".json,application/json" hidden>
+</div>
+<div class="shellRow">
+<button id="rPlayBtn">R Play</button>
+<button id="rPauseBtn">R Pause</button>
+<button id="rRestartBtn">R Restart</button>
+<button id="rStopBtn">R Stop</button>
+<button id="recBtn">Record</button>
 </div>
 <div class="shellRow">
 <label>scale <select id="scaleSel"><option value="integer">Integer</option><option value="fit">Fit</option><option value="fill">Fill</option><option value="stretch">Stretch</option></select></label>

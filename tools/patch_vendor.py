@@ -32,15 +32,20 @@ def main():
     co = co.replace(A1, R1).replace(A2, R2)
     nstub = co.count("(void) { __builtin_trap(); }")
     assert nstub == 7, nstub
-    ndef = co.count("default: __builtin_trap();")
-    assert ndef == 1, ndef
+    lines = co.split(chr(10))
+    defidx = [i for i, ln in enumerate(lines) if ln.strip() == "default: __builtin_trap();"]
+    assert len(defidx) == 1, defidx
+    enc = next(lines[i] for i in range(defidx[0], -1, -1) if lines[i].startswith("static void "))
+    assert "b7_vec_007A" in enc, enc
     tls = []
-    for ln in co.split(chr(10)):
+    for ln in lines:
         if "(void) { __builtin_trap(); }" in ln:
             nm = ln.split("static void ")[1].split("(void)")[0]
             ln = "static void " + nm + "(void) { bm_trap(0, " + chr(34) + nm + chr(34) + "); }"
         if ln.strip() == "default: __builtin_trap();":
-            ln = ln.replace("__builtin_trap();", "bm_trap(_v, (const char*)0);")
+            # ($007A) dispatcher: the unmapped runtime vector IS the news.
+            # Name it so the app can display/log it (was anonymous NULL).
+            ln = ln.replace("__builtin_trap();", "bm_trap(_v, " + chr(34) + "vec007A-unmapped" + chr(34) + ");")
         tls.append(ln)
     co = chr(10).join(tls)
     (OUT / "combined_off.c").write_text(co)

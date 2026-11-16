@@ -609,8 +609,8 @@ if (qs.has("headless")) {
 // 60fps pacing lives here (rAF loop stepping the L2 host with the live bus
 // mask, video present + audio push per frame). Determinism + replay save/
 // load are L2 properties this layer reuses, never reimplements.
-import { autoTrapReport, manualBugReport } from "./ui/report.js";
-import { makeMovie, parseMovie, downloadMovie, replayMovie, downloadJson } from "./input/movie.js";
+import { autoTrapReport, manualBugReport, formatTrapBanner } from "./ui/report.js";
+import { makeMovie, makeMovieV2, parseMovie, downloadMovie, replayMovie, downloadJson } from "./input/movie.js";
 import { loadPrefs, savePrefs } from "./ui/prefs.js";
 import { wireInstall } from "./ui/pwa.js";
 import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
@@ -677,6 +677,7 @@ let shellRunning = false, shellPaused = false, shellStepping = false, shellRaf =
 let shellFpsCount = 0, shellFpsT0 = 0, shellFps = 0;
 let shellLastT = 0;
 async function shellStepOnce() {
+  if (typeof replay !== "undefined" && replay.mode === "playing") return replayStepOnce();
   const mask = padBus.getMask();
   let h;
   try {
@@ -685,6 +686,10 @@ async function shellStepOnce() {
     if (String((e && e.message) || e).indexOf('go-stall') >= 0) shellLog('STALL go>2500ms f=' + l2host.frame());
     throw e;
   }
+  await presentFrame();
+  return h;
+}
+async function presentFrame() {
   try {
     if (l2host === mesenHost) {
       if (pcmPlayer && pcmPlayer.node) pcmPlayer.pushSamples(l2host.frame(), l2host.pcmDrain());
@@ -725,7 +730,7 @@ async function shellStepOnce() {
     shellFps = shellFpsCount * 1000 / (now - shellFpsT0);
     shellFpsCount = 0; shellFpsT0 = now;
   }
-  return h;
+  return;
 }
 function shellLoop() {
   if (!shellRunning) { shellRaf = 0; return; }
@@ -733,13 +738,43 @@ function shellLoop() {
     (async () => {
       var nowT = 0;
       try { nowT = performance.now(); } catch (e) { nowT = 0; }
-      if (!shellPaused && !shellStepping && (shellLastT === 0 || nowT - shellLastT >= 16.0)) {
+      if (!shellPaused && !shellStepping && !replay.busy && (shellLastT === 0 || nowT - shellLastT >= 16.0)) {
         if (nowT !== 0) shellLastT = nowT;
         shellStepping = true;
-        try { await shellStepOnce(); } catch (e) { shellLog("step err " + String((e && e.message) || e)); try { shellStatusEl.textContent = "shell f=" + l2host.frame() + " err=" + String((e && e.message) || e).slice(0, 60); } catch (e2) {} try { shellAutoTrapReport(); } catch (e3) {} } finally { shellStepping = false; }
+        try { await shellStepOnce(); } catch (e) { shellOnStepErr(e); try { shellAutoTrapReport(); } catch (e3) {} } finally { shellStepping = false; }
       }
     })().then(() => shellLoop(), () => shellLoop());
   });
+}
+// Every engine fault surfaces HERE with its identity: wasm traps carry
+// {name, val} (named stub, or vec007A-unmapped + faulting vector address),
+// replay guards throw loud anchor/load mismatches. A trap auto-pauses the
+// shell so the state freezes for inspection instead of ticking into the
+// fault every frame; Report still auto-saves the bmbug with movie+snap.
+function shellOnStepErr(e) {
+  var ti = null;
+  try { ti = (l2host.trapInfo && l2host.trapInfo()) || null; } catch (e4) {}
+  if (ti) {
+    var key = l2host.frame() + ":" + (ti.name || "-") + ":" + ti.val;
+    if (window.__bmTrapBannerKey !== key) {
+      window.__bmTrapBannerKey = key;
+      var b = formatTrapBanner(ti, l2host.frame(), prefs.engine);
+      shellLog(b);
+      try { shellStatusEl.textContent = b + " - paused; Report saves bmbug, Reset restarts"; } catch (e2) {}
+      try { document.title = "BM-" + b.slice(0, 60); } catch (e3) {}
+      shellLog("auto-paused on trap - state frozen for inspection");
+    }
+    if (replay.movie) replay.trapped = true;
+    if (replay.movie && replay.mode === "playing") replay.mode = "paused";
+    try { shellPause(true); } catch (e5) {}
+  } else {
+    shellLog("step err " + String((e && e.message) || e));
+    try { shellStatusEl.textContent = "shell f=" + l2host.frame() + " err=" + String((e && e.message) || e).slice(0, 60); } catch (e2) {}
+    if (replay.movie && replay.mode === "playing") {
+      replay.mode = "paused";
+      try { shellPause(true); } catch (e6) {}
+    }
+  }
 }
 async function shellStart() {
   if (shellRunning && !shellPaused) return l2host.frame();
@@ -760,6 +795,9 @@ async function shellStart() {
   return l2host.frame();
 }
 async function shellStop() {
+  if (replay.movie) shellLog("replay cleared by stop");
+  replay.movie = null; replay.mode = "idle"; replay.recording = null; replay.pauseSave = null; replay.trapped = false;
+  anchorSave = null;
   shellRunning = false; shellPaused = false;
   if (shellRaf) { cancelAnimationFrame(shellRaf); shellRaf = 0; }
   try { l2host.terminate(); } catch (e) {}
@@ -770,6 +808,9 @@ async function shellStop() {
   return -1;
 }
 async function shellReset() {
+  if (replay.movie) shellLog("replay cleared by reset (Movie up-arrow to reload)");
+  replay.movie = null; replay.mode = "idle"; replay.recording = null; replay.pauseSave = null; replay.trapped = false;
+  anchorSave = null;
   const pack = await l2ensurePack();
   await l2host.spawn(pack, "build/game.wasm");
   window.__bmStaticHint = false; window.__bmStaticN = 0;
@@ -791,55 +832,45 @@ function shellPause(on) {
 async function shellSave(slot) {
   const s = slot || prefs.slot;
   const d = await l2host.save(s);
-  shellLog("saved slot " + s + " f=" + d.frame);
+  anchorSave = { slot: s, frame: d.frame, hash: d.hash || null };
+  shellLog("saved slot " + s + " f=" + d.frame + (d.hash ? " hash=" + d.hash : ""));
   return d;
 }
 async function shellLoad(slot) {
+  replay.busy = true;
+  try {
   const s = slot || prefs.slot;
-  const f = await l2host.load(s);
+  await replayEnsureSpawned();
+  replayProgress.last = -1;
+  const f = await l2host.load(s, replayProgress);
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
   try { if (pcmPlayer) pcmPlayer.reset(); } catch (e2) {}
   ensureVideo();
   video.upload(l2host.videoBytes());
   video.present();
-  shellLog("loaded slot " + s + " f=" + f);
+  anchorSave = { slot: s, frame: f, hash: hash16() };
+  if (replay.movie) { replay.mode = "idle"; shellLog("replay unloaded by manual load (anchor now save " + s + " f=" + f + ")"); }
+  shellLog("loaded slot " + s + " f=" + f + " hash=" + anchorSave.hash);
+  updateReplayStatus();
   return f;
+  } finally { replay.busy = false; }
 }
 async function shellExportMovie() {
   if (!l2host.inst) throw new Error("not-started");
+  if (replay.recording) {
+    shellLog("finalizing active take for export...");
+    await replayToggleRecord();
+    return null;
+  }
   const pads = l2host.padLog.slice(0, l2host.frame());
-  let crc = "unknown";
-  try { const id = await loadRomId(); if (id && id.crc32) crc = id.crc32; } catch (e) {}
-  const m = makeMovie(pads, crc);
+  const crc = await currentRomCrc();
+  const m = makeMovieV2(pads, crc, { start: 0, anchorHash: null, engine: prefs.engine });
   const dl = downloadMovie(m, "bmmovie-f" + m.frame + ".json");
   shellLog("movie exported f=" + m.frame + " rom=" + crc + " via " + dl.via + " -> Downloads/bmmovie-f" + m.frame + ".json");
   return m;
 }
 async function shellImportMovie(file) {
-  const text = await file.text();
-  const parsed = parseMovie(JSON.parse(text));
-  shellPause(true);
-  try {
-    let crc = "unknown";
-    try { const id = await loadRomId(); if (id && id.crc32) crc = id.crc32; } catch (e2) {}
-    if (String(parsed.rom) !== String(crc)) shellLog("movie rom " + parsed.rom + " vs current " + crc + " (replaying anyway)");
-    shellLog("movie replay " + parsed.pads.length + "f from boot...");
-    let last = -1;
-    const f = await replayMovie(l2host, parsed.pads, function (i, n) {
-      const pc = Math.floor(i * 10 / n);
-      if (pc !== last) { last = pc; shellLog("replay " + (pc * 10) + "%"); }
-    });
-    try { if (audioPlayer) audioPlayer.reset(); } catch (e3) {}
-    try { if (pcmPlayer) pcmPlayer.reset(); } catch (e4) {}
-    ensureVideo();
-    video.upload(l2host.videoBytes());
-    video.present();
-    shellLog("movie done f=" + f + " hash=" + l2host.hash().toString(16));
-    return f;
-  } catch (e4) {
-    shellLog("movie err " + String((e4 && e4.message) || e4).slice(0, 80));
-    throw e4;
-  }
+  return replayLoadFile(file);
 }
 function shellScreenshot() {
   if (!l2host.inst) throw new Error("not-started");
@@ -857,6 +888,273 @@ async function shellFrame() {
   video.present();
   return { frame: r.frame, hash: (r.hash >>> 0) };
 }
+// ---- Replay controller + take recorder (L6 movie UX) ----
+// A replay = parsed movie + anchor + mode. Anchor = where pads[0] executes:
+// boot (fresh spawn, frame 0) or a loaded savestate slot (frame M).
+// v2 movies are self-contained: pads = FULL history boot->end, start = take
+// offset, anchorHash = engine hash at take start. Replay always runs from
+// boot through all pads; reaching start with a different hash throws
+// anchor-mismatch instead of silently desyncing. v1 movies (old shares,
+// retroarch imports) have no prefix: with a save anchor their pads apply
+// FROM that save (unverifiable, logged as such), else from boot.
+// Pause (R Pause) auto-saves the exact paused state and hands control to the
+// live pad: manual play continues from there, optionally under Record (new
+// take anchored at the pause point). Play resumes instantly when the state
+// still matches the pause save, else restores it first. Stop halts
+// advancement and keeps a safety savestate; Play after stop/initial load
+// resets to the anchor and replays from the top.
+const REPLAY_PAUSE_SLOT = "replay-pause";
+let replay = { movie: null, anchor: { kind: "boot" }, mode: "idle", trapped: false, recording: null, pauseSave: null, busy: false };
+let anchorSave = null;
+function hash16() { return (l2host.hash() >>> 0).toString(16); }
+async function currentRomCrc() {
+  try { const id = await loadRomId(); if (id && id.crc32) return String(id.crc32); } catch (e) {}
+  return "unknown";
+}
+function replayProgress(i, n) {
+  const pc = Math.floor(i * 100 / n);
+  if (pc !== replayProgress.last) { replayProgress.last = pc; shellLog("replay " + pc + "%"); }
+}
+replayProgress.last = -1;
+function replayAnchorText() {
+  if (replay.anchor.kind === "save") return "save " + replay.anchor.slot + " f=" + replay.anchor.frame;
+  return "boot";
+}
+function updateReplayStatus() {
+  try {
+    if (!replay.movie) return;
+    const total = replay.movie.pads.length;
+    const idx = replayIndex();
+    const rec = replay.recording ? (" rec take@" + replay.recording.start) : "";
+    shellStatusEl.textContent = "replay " + replay.mode + " " + idx + "/" + total + " anchor:" + replayAnchorText() + rec;
+  } catch (e) {}
+}
+function replayIndex() {
+  if (!replay.movie) return 0;
+  const base = replay.movie.version === 2 ? 0 : (replay.anchor.kind === "save" ? replay.anchor.frame : 0);
+  return Math.max(0, l2host.frame() - base);
+}
+async function replayEnsureSpawned() {
+  const pack = await l2ensurePack();
+  if (!l2host.inst) await l2host.spawn(pack, "build/game.wasm");
+  return pack;
+}
+// Advance the live engine from its current frame to targetFrame (pads from
+// the movie), with progress + optional anchor-hash verification at arrival.
+async function replayAdvanceTo(targetFrame, anchorHash) {
+  const m = replay.movie;
+  const base = m.version === 2 ? 0 : (replay.anchor.kind === "save" ? replay.anchor.frame : 0);
+  replayProgress.last = -1;
+  while (l2host.frame() < targetFrame) {
+    const idx = l2host.frame() - base;
+    if (idx < 0 || idx >= m.pads.length) throw new Error("replay-range idx=" + idx + " f=" + l2host.frame());
+    const q = m.pads[idx];
+    let j = idx + 1;
+    const want = targetFrame - l2host.frame();
+    while (j < m.pads.length && m.pads[j] === q && (j - idx) < want && (j - idx) < 600) j++;
+    await l2host.go(j - idx, q);
+    replayProgress(l2host.frame() - base, m.pads.length);
+  }
+  if (anchorHash != null) {
+    const got = hash16();
+    if (got !== String(anchorHash)) throw new Error("anchor-mismatch expect=" + anchorHash + " got=" + got + " (wrong ROM/save?)");
+    shellLog("replay anchor ok f=" + l2host.frame() + " hash=" + got);
+  }
+  ensureVideo();
+  video.upload(l2host.videoBytes());
+  video.present();
+}
+// Position engine + index for PLAY-from-top (anchor start, pads from 0).
+async function replayPositionForPlay() {
+  const m = replay.movie;
+  if (m.version === 1 && replay.anchor.kind === "save") {
+    replayProgress.last = -1;
+    await l2host.load(replay.anchor.slot, replayProgress);
+    return;
+  }
+  const pack = await l2ensurePack();
+  await l2host.spawn(pack, "build/game.wasm");
+}
+async function replayLoadParsed(m) {
+  replay.busy = true;
+  try {
+  await replayEnsureSpawned();
+  if (anchorSave && anchorSave.slot != null) replay.anchor = { kind: "save", slot: anchorSave.slot, frame: anchorSave.frame, hash: anchorSave.hash };
+  else replay.anchor = { kind: "boot" };
+  replay.movie = m;
+  replay.trapped = false;
+  replay.pauseSave = null;
+  window.__bmTrapBannerKey = "";
+  shellLog("replay loaded " + m.pads.length + "f v" + m.version + " anchor:" + replayAnchorText());
+  if (m.version === 2 && replay.anchor.kind === "save" && replay.anchor.frame === m.start && replay.anchor.hash && m.anchorHash && replay.anchor.hash === m.anchorHash) {
+    shellLog("replay anchor = loaded save (verified), fast restore");
+    replayProgress.last = -1;
+    await l2host.load(replay.anchor.slot, replayProgress);
+  } else if (m.version === 2 && m.start > 0) {
+    shellLog("replay self-contained prefix, advancing to take@" + m.start);
+    const pack = await l2ensurePack();
+    await l2host.spawn(pack, "build/game.wasm");
+    await replayAdvanceTo(m.start, m.anchorHash);
+  } else if (m.version === 2) {
+    if (replay.anchor.kind === "save") shellLog("replay save anchor is not the take anchor - using self-contained prefix instead");
+    const pack = await l2ensurePack();
+    await l2host.spawn(pack, "build/game.wasm");
+    await replayAdvanceTo(m.start, m.anchorHash);
+  } else {
+    if (replay.anchor.kind === "save") {
+      shellLog("v1 replay: no anchor hash, starting from save (unverifiable)");
+      replayProgress.last = -1; await l2host.load(replay.anchor.slot, replayProgress);
+    } else { const pack = await l2ensurePack(); await l2host.spawn(pack, "build/game.wasm"); }
+  }
+  replay.mode = "loaded";
+  if (!shellRunning) { shellRunning = true; if (!shellRaf) shellLoop(); }
+  shellPause(true);
+  updateReplayStatus();
+  ensureVideo();
+  video.upload(l2host.videoBytes());
+  video.present();
+  return l2host.frame();
+  } finally { replay.busy = false; }
+}
+async function replayLoadFile(file) {
+  replay.busy = true;
+  try {
+  const text = await file.text();
+  const m = parseMovie(JSON.parse(text));
+  const crc = await currentRomCrc();
+  if (String(m.rom) !== String(crc)) shellLog("movie rom " + m.rom + " vs current " + crc + " (replaying anyway)");
+  try {
+    return await replayLoadParsed(m);
+  } catch (e) {
+    replay.movie = null; replay.mode = "idle";
+    shellLog("replay load err " + String((e && e.message) || e).slice(0, 80));
+    updateReplayStatus();
+    throw e;
+  }
+  } finally { replay.busy = false; }
+}
+async function replayPlay() {
+  replay.busy = true;
+  try {
+  if (!replay.movie) { shellLog("replay: no movie loaded (Movie up-arrow first)"); return l2host.frame(); }
+  if (replay.mode === "playing") return l2host.frame();
+  if (replay.recording) { shellLog("replay: stop recording first (Record off)"); return l2host.frame(); }
+  if (replay.mode === "paused" && !replay.trapped && replay.pauseSave) {
+    const ps = replay.pauseSave;
+    if (l2host.frame() === ps.frame && hash16() === ps.hash) {
+      replay.mode = "playing";
+      try { shellPaused = false; pauseBtn.textContent = "Pause"; } catch (e) {}
+      if (!shellRunning) shellRunning = true;
+      if (!shellRaf) shellLoop();
+      shellLog("replay resume f=" + ps.frame);
+      updateReplayStatus();
+      return l2host.frame();
+    }
+    shellLog("replay diverged since pause - restoring pause state f=" + ps.frame);
+    replayProgress.last = -1;
+    await l2host.load(REPLAY_PAUSE_SLOT, replayProgress);
+    replay.mode = "playing";
+    try { shellPaused = false; pauseBtn.textContent = "Pause"; } catch (e) {}
+    if (!shellRunning) shellRunning = true;
+    if (!shellRaf) shellLoop();
+    updateReplayStatus();
+    return l2host.frame();
+  }
+  replayProgress.last = -1;
+  await replayPositionForPlay();
+  replay.trapped = false;
+  window.__bmTrapBannerKey = "";
+  replay.mode = "playing";
+  try { shellPaused = false; pauseBtn.textContent = "Pause"; } catch (e) {}
+  if (!shellRunning) shellRunning = true;
+  if (!shellRaf) shellLoop();
+  shellLog("replay play from " + replayAnchorText());
+  updateReplayStatus();
+  return l2host.frame();
+  } finally { replay.busy = false; }
+}
+async function replayPause() {
+  replay.busy = true;
+  try {
+  if (!replay.movie || replay.mode !== "playing") { shellLog("replay: nothing playing to pause"); return l2host.frame(); }
+  const data = await l2host.save(REPLAY_PAUSE_SLOT);
+  replay.pauseSave = { frame: data.frame, hash: data.hash, idx: replayIndex() };
+  replay.mode = "paused";
+  shellLog("replay paused f=" + data.frame + " hash=" + data.hash + " (savestate kept) - drive manually or Record, R Play resumes");
+  updateReplayStatus();
+  return data.frame;
+  } finally { replay.busy = false; }
+}
+async function replayRestart() {
+  replay.busy = true;
+  try {
+  if (!replay.movie) { shellLog("replay: no movie loaded"); return l2host.frame(); }
+  replayProgress.last = -1;
+  await replayPositionForPlay();
+  replay.trapped = false;
+  window.__bmTrapBannerKey = "";
+  replay.mode = "playing";
+  try { shellPaused = false; pauseBtn.textContent = "Pause"; } catch (e) {}
+  if (!shellRunning) shellRunning = true;
+  if (!shellRaf) shellLoop();
+  shellLog("replay restart from " + replayAnchorText());
+  updateReplayStatus();
+  return l2host.frame();
+  } finally { replay.busy = false; }
+}
+async function replayStop() {
+  replay.busy = true;
+  try {
+  if (!replay.movie || replay.mode === "idle") { shellLog("replay: nothing to stop"); return l2host.frame(); }
+  const data = await l2host.save(REPLAY_PAUSE_SLOT);
+  replay.pauseSave = { frame: data.frame, hash: data.hash, idx: replayIndex() };
+  replay.mode = "stopped";
+  shellLog("replay stopped f=" + data.frame + " (savestate kept) - R Play restarts from " + replayAnchorText());
+  updateReplayStatus();
+  return data.frame;
+  } finally { replay.busy = false; }
+}
+async function replayToggleRecord() {
+  if (replay.recording) {
+    const pads = l2host.padLog.slice(0, l2host.frame());
+    const m = makeMovieV2(pads, await currentRomCrc(), { start: replay.recording.start, anchorHash: replay.recording.hash, engine: prefs.engine });
+    const dl = downloadMovie(m, "bmmovie-f" + m.frame + "-take" + m.start + ".json");
+    shellLog("take saved f=" + m.frame + " take@" + m.start + " anchor=" + m.anchorHash + " via " + dl.via);
+    replay.recording = null;
+    updateReplayStatus();
+    return m.frame;
+  }
+  if (!l2host.inst) { shellLog("record: Start first"); return -1; }
+  if (replay.mode === "playing") { shellLog("record: pause the replay first (R Pause)"); return -1; }
+  replay.recording = { start: l2host.frame(), hash: hash16() };
+  shellLog("recording take@" + replay.recording.start + " anchor=" + replay.recording.hash + " - drive, Record again to save");
+  updateReplayStatus();
+  return replay.recording.start;
+}
+// One paced replay frame: movie pad for the current engine frame, anchor
+// verification at the take start, clean end-of-movie stop.
+async function replayStepOnce() {
+  const m = replay.movie;
+  const base = m.version === 2 ? 0 : (replay.anchor.kind === "save" ? replay.anchor.frame : 0);
+  const idx = l2host.frame() - base;
+  if (idx < 0) throw new Error("replay-behind-anchor f=" + l2host.frame());
+  if (idx >= m.pads.length) {
+    replay.mode = "ended";
+    try { shellPause(true); } catch (e) {}
+    shellLog("replay ended f=" + l2host.frame() + " hash=" + hash16());
+    updateReplayStatus();
+    await presentFrame();
+    return 0;
+  }
+  if (m.version === 2 && m.anchorHash != null && idx === m.start && l2host.frame() !== 0) {
+    const got = hash16();
+    if (got !== String(m.anchorHash)) throw new Error("anchor-mismatch expect=" + m.anchorHash + " got=" + got + " (wrong ROM/save?)");
+  }
+  const h = await Promise.race([l2host.go(1, m.pads[idx]), new Promise((rr, jj) => setTimeout(() => jj(new Error("go-stall")), 2500))]);
+  await presentFrame();
+  if ((l2host.frame() & 31) === 0) updateReplayStatus();
+  return h;
+}
 window.BM.start = shellStart;
 window.BM.stop = shellStop;
 window.BM.reset = shellReset;
@@ -865,6 +1163,12 @@ window.BM.save = shellSave;
 window.BM.load = shellLoad;
 window.BM.exportMovie = shellExportMovie;
 window.BM.importMovieFile = shellImportMovie;
+window.BM.replayPlay = replayPlay;
+window.BM.replayPause = replayPause;
+window.BM.replayRestart = replayRestart;
+window.BM.replayStop = replayStop;
+window.BM.toggleRecord = replayToggleRecord;
+window.BM.replayStatus = function () { return { mode: replay.mode, idx: replayIndex(), total: replay.movie ? replay.movie.pads.length : 0, anchor: replayAnchorText(), recording: !!replay.recording, trapped: replay.trapped }; };
 window.BM.replayMovieData = async function (m) {
   const parsed = parseMovie(m);
   shellPause(true);
@@ -885,13 +1189,18 @@ window.BM.stats = ((prev) => () => Object.assign(prev(), {
   engine: prefs.engine
 }))(window.BM.stats);
 startBtn.addEventListener("click", () => {
+  if (replay.movie && replay.mode !== "idle") { shellLog("replay loaded - R Play / R Stop control playback (manual Start paused)"); return; }
   shellStart().catch((e) => { shellLog("start err " + e.message); statusEl.textContent = "start err " + e.message; });
 });
 stopBtn.addEventListener("click", () => { shellStop(); });
 resetBtn.addEventListener("click", () => {
   shellReset().catch((e) => { shellLog("reset err " + e.message); statusEl.textContent = "reset err " + e.message; });
 });
-pauseBtn.addEventListener("click", () => { shellPause(); });
+pauseBtn.addEventListener("click", () => {
+  if (replay.movie && replay.mode === "playing") { replayPause().catch((e) => { shellLog("replay pause err " + e.message); }); return; }
+  if (replay.movie && replay.mode === "paused") { replayPlay().catch((e) => { shellLog("replay play err " + e.message); }); return; }
+  shellPause();
+});
 saveBtn.addEventListener("click", () => {
   shellSave().catch((e) => { shellLog("save err " + e.message); });
 });
@@ -906,6 +1215,23 @@ movieInput.addEventListener("change", () => {
   const f = movieInput.files && movieInput.files[0];
   movieInput.value = "";
   if (f) shellImportMovie(f).catch(() => {});
+});
+const rPlayBtn = document.getElementById("rPlayBtn");
+const rPauseBtn = document.getElementById("rPauseBtn");
+const rRestartBtn = document.getElementById("rRestartBtn");
+const rStopBtn = document.getElementById("rStopBtn");
+const recBtn = document.getElementById("recBtn");
+function replayErr(tag) {
+  return (e) => { shellLog(tag + " " + String((e && e.message) || e).slice(0, 80)); try { shellStatusEl.textContent = tag + " " + String((e && e.message) || e).slice(0, 60); } catch (e2) {} };
+}
+if (rPlayBtn) rPlayBtn.addEventListener("click", () => { replayPlay().catch(replayErr("replay play err")); });
+if (rPauseBtn) rPauseBtn.addEventListener("click", () => { replayPause().catch(replayErr("replay pause err")); });
+if (rRestartBtn) rRestartBtn.addEventListener("click", () => { replayRestart().catch(replayErr("replay restart err")); });
+if (rStopBtn) rStopBtn.addEventListener("click", () => { replayStop().catch(replayErr("replay stop err")); });
+if (recBtn) recBtn.addEventListener("click", () => {
+  replayToggleRecord().then(() => {
+    try { recBtn.textContent = replay.recording ? "StopRec" : "Record"; } catch (e) {}
+  }).catch(replayErr("record err"));
 });
 shotBtn.addEventListener("click", () => {
   try { const u = shellScreenshot(); shellLog("shot " + u.length + "B"); toast(padToastEl, "shot " + u.length + "B", 1500); }
@@ -1024,6 +1350,8 @@ async function selfTestL6() {
     volumeInput.value = String(Math.round(prefs.volume * 100));
     syncAudioToPrefs(); applyVideoPrefs();
     statusEl.textContent = "L6: shell session via BM.start";
+    const seedPack = await l2ensurePackForTest();
+    await savePack(seedPack);
     await window.BM.start();
     await window.BM.pause(true);
     if (l2host.frame() !== 0) return fail6("start-frame:" + l2host.frame());
@@ -1122,6 +1450,81 @@ if (qs.has("headless")) {
   else if (t6 === "l6reload") selfTestL6Reload();
 }
 const failM = (s) => { document.title = "BM-MOVIE-FAIL:" + s; };
+const failR = (s) => { document.title = "BM-REPLAY-FAIL:" + s; };
+async function playToEnd(cap) {
+  let n = 0;
+  while (replay.mode === "playing") {
+    if (++n > cap) return failR("cap");
+    await replayStepOnce();
+  }
+  return null;
+}
+async function selfTestReplay() {
+  document.title = "BM-REPLAY-RUNNING";
+  try {
+    statusEl.textContent = "replay: scripted 300f run";
+    anchorSave = null;
+    replay.movie = null; replay.mode = "idle";
+    const pack = await l2ensurePackForTest();
+    await l2host.spawn(pack, "build/game.wasm");
+    const script = (f) => (f >= 40 && f < 45) ? 8 : ((f % 120 < 5) ? 65 : 0);
+    let f = 0;
+    while (f < 300) { const q = script(f); let j = f + 1; while (j < 300 && script(j) === q) j++; await l2host.go(j - f, q); f = j; }
+    if (l2host.frame() !== 300) return failR("run-frame:" + l2host.frame());
+    const endHash = hash16();
+    const hash150 = (l2host.hashLog[149] >>> 0).toString(16);
+    const pads = l2host.padLog.slice(0, 300);
+    const m = makeMovieV2(pads, "testcrc", { start: 150, anchorHash: hash150, engine: "wasm" });
+    const parsed = parseMovie(JSON.parse(JSON.stringify(m)));
+    if (parsed.version !== 2 || parsed.start !== 150 || parsed.anchorHash !== hash150) return failR("v2-rt");
+    statusEl.textContent = "replay: load (advance to take@150)";
+    await replayLoadParsed(parsed);
+    shellPause(true);
+    if (l2host.frame() !== 150) return failR("load-frame:" + l2host.frame());
+    if (hash16() !== hash150) return failR("load-hash");
+    if (replay.mode !== "loaded") return failR("load-mode:" + replay.mode);
+    statusEl.textContent = "replay: full play from anchor";
+    await replayPlay();
+    shellPause(true);
+    await playToEnd(2000);
+    if (replay.mode !== "ended") return failR("end-mode:" + replay.mode);
+    if (hash16() !== endHash) return failR("end-hash");
+    statusEl.textContent = "replay: pause at 50, diverge, resume";
+    await replayRestart();
+    shellPause(true);
+    while (l2host.frame() < 50) await replayStepOnce();
+    await replayPause();
+    shellPause(true);
+    if (!replay.pauseSave || replay.pauseSave.frame !== 50) return failR("pause-frame");
+    if (replay.pauseSave.hash !== hash16()) return failR("pause-hash");
+    await l2host.go(10, 65);
+    if (l2host.frame() !== 60) return failR("diverge-frame");
+    await replayPlay();
+    shellPause(true);
+    if (l2host.frame() !== 50) return failR("resume-frame:" + l2host.frame());
+    if (hash16() !== replay.pauseSave.hash) return failR("resume-hash");
+    await playToEnd(2000);
+    if (hash16() !== endHash) return failR("resume-end-hash");
+    statusEl.textContent = "replay: stop then play from top";
+    await replayRestart();
+    shellPause(true);
+    while (l2host.frame() < 30) await replayStepOnce();
+    await replayStop();
+    shellPause(true);
+    if (replay.mode !== "stopped") return failR("stop-mode");
+    await replayPlay();
+    shellPause(true);
+    await playToEnd(2000);
+    if (hash16() !== endHash) return failR("stopplay-hash");
+    statusEl.textContent = "replay: slot save/load verify";
+    await shellSave(8);
+    await shellLoad(8);
+    if (l2host.frame() !== 300) return failR("slot-frame:" + l2host.frame());
+    if (hash16() !== endHash) return failR("slot-hash");
+    statusEl.textContent = "replay self-test PASS";
+    document.title = "BM-REPLAY-PASS";
+  } catch (e) { failR("exc:" + String((e && e.message) || e).slice(0, 80)); }
+}
 async function selfTestMovie() {
   document.title = "BM-MOVIE-RUNNING";
   try {
@@ -1145,7 +1548,7 @@ async function selfTestMovie() {
 }
 if (qs.has("headless")) {
   const tm = qs.get("test");
-  if (tm === "movie") selfTestMovie();
+  if (tm === "movie") selfTestMovie(); else if (tm === "replay") selfTestReplay();
 }
 const failMesen = (s) => { document.title = "BM-MESEN-FAIL:" + s; };
 async function selfTestMesen() {
@@ -1173,6 +1576,23 @@ async function selfTestMesen() {
     const st = await replayMovie(h, parsed.pads, null);
     if (st !== 40) return failMesen("replay-frame:" + st);
     if (h.hash() !== h0) return failMesen("replay-hash");
+    // true-snapshot savestate roundtrip (v2): save at 40, run on, restore
+    await h.reset();
+    await h.go(40, 0);
+    const sh0 = (h.hash() >>> 0).toString(16);
+    const sd = await h.save(9);
+    if (sd.frame !== 40 || sd.hash !== sh0) return failMesen("snap-save");
+    if (!sd.snap || sd.snap.length < 1000) return failMesen("snap-blob");
+    await h.go(40, 0);
+    if (h.frame() !== 80) return failMesen("snap-frame:" + h.frame());
+    const lf = await h.load(9);
+    if (lf !== 40) return failMesen("snap-load-frame:" + lf);
+    if ((h.hash() >>> 0).toString(16) !== sh0) return failMesen("snap-load-hash");
+    const cf = await h.go(5, 0);
+    await h.reset();
+    await h.go(40, 0);
+    const df = await h.go(5, 0);
+    for (let i = 0; i < 5; i++) if (cf[i] !== df[i]) return failMesen("snap-continue");
     // input-responsiveness probe: park on the title, tap START, video must move
     await h.reset();
     for (let f = 0; f < 600; f++) await h.go(1, 0);

@@ -22,12 +22,29 @@ export function makeMovie(pads, romCrc) {
   const b = pads instanceof Uint8Array ? pads : Uint8Array.from(pads);
   return { app: "bm-movie", v: 1, rom: String(romCrc), frame: b.length, pads: encodePads(b) };
 }
+export function makeMovieV2(pads, romCrc, opts) {
+  const b = pads instanceof Uint8Array ? pads : Uint8Array.from(pads);
+  const o = opts || {};
+  const start = Math.max(0, Math.min(b.length, o.start | 0));
+  return {
+    app: "bm-movie", v: 2, rom: String(romCrc), frame: b.length, start: start,
+    anchorHash: o.anchorHash != null ? String(o.anchorHash) : null,
+    engine: o.engine || "unknown", pads: encodePads(b)
+  };
+}
 export function parseMovie(o) {
-  if (!o || o.app !== "bm-movie" || o.v !== 1) throw new Error("movie-format");
+  if (!o || o.app !== "bm-movie") throw new Error("movie-format");
   const pads = decodePads(o.pads);
   if (pads.length !== o.frame) throw new Error("movie-length");
   if (pads.length === 0) throw new Error("movie-empty");
-  return { pads: pads, frame: o.frame, rom: String(o.rom) };
+  if (o.v !== 1 && o.v !== 2) throw new Error("movie-format");
+  const start = o.v === 2 ? Math.max(0, Math.min(pads.length, o.start | 0)) : 0;
+  return {
+    pads: pads, frame: o.frame, rom: String(o.rom),
+    version: o.v, start: start,
+    anchorHash: o.v === 2 && o.anchorHash != null ? String(o.anchorHash) : null,
+    engine: o.v === 2 ? String(o.engine || "unknown") : "unknown"
+  };
 }
 export function downloadMovie(movie, fname) {
   const name = fname || ("bmmovie-f" + movie.frame + ".json");

@@ -8,6 +8,16 @@ function b64bytes(u8) {
   for (var i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
   return btoa(s);
 }
+// One-line human-readable trap banner for the shell log + status line.
+// Unmapped-vector traps carry the faulting address in val; named stubs carry
+// the code location in name (val 0). Never empty: there is always something
+// to show, which is the whole point (no more silent unreachable).
+export function formatTrapBanner(ti, frame, engine) {
+  var nm = ti && ti.name ? String(ti.name) : "unmapped-vector";
+  var vv = ti && typeof ti.val === "number" ? ti.val : 0;
+  var hex = ("0000" + (vv & 0xFFFF).toString(16)).slice(-4).toUpperCase();
+  return "TRAP " + nm + " val=$" + hex + " f=" + frame + " engine=" + engine;
+}
 export async function buildBugReport(host, engineName, getCrc, tail, why) {
   var pads = host.padLog.slice(0, host.frame());
   var crc = "unknown";

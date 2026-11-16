@@ -142,21 +142,35 @@ GameHost.prototype.step = async function (pad) {
 GameHost.prototype.reset = async function () {
   return this.spawn(this.pack, this.wasmUrl);
 };
+// Savestates are replay-anchored: pads + frame + rom are ALL the state the
+// deterministic engine needs (a suspended JSPI continuation cannot be
+// serialized, so restore = fresh spawn + fast-forward). v2 adds the engine
+// tag and the post-restore hash: load replays, then compares against the
+// saved hash and throws LOAD-MISMATCH instead of silently desyncing.
 GameHost.prototype.save = async function (slot) {
-  var data = { v: 1, frame: this.frame(), pads: this.padLog.slice(0, this.frame()) };
+  var data = { v: 2, engine: "wasm", frame: this.frame(), hash: (this.hash() >>> 0).toString(16), audioTotal: this.audioTotal, pads: this.padLog.slice(0, this.frame()) };
   await saveSlot(slot, data);
   return data;
 };
-GameHost.prototype.load = async function (slot) {
+GameHost.prototype.load = async function (slot, onProgress) {
   var data = await loadSlot(slot);
-  if (!data || data.v !== 1) throw new Error("no-save:" + slot);
+  if (!data || (data.v !== 1 && data.v !== 2)) throw new Error("no-save:" + slot);
+  if (data.v === 2 && data.engine && data.engine !== "wasm") throw new Error("save-engine:" + data.engine + " (current wasm)");
   await this.spawn(this.pack, this.wasmUrl);
-  var i = 0;
-  while (i < data.pads.length) {
+  var n = data.pads.length, i = 0, last = -1;
+  while (i < n) {
     var q = data.pads[i], j = i;
-    while (j < data.pads.length && data.pads[j] === q) j++;
+    while (j < n && data.pads[j] === q) j++;
     await this.go(j - i, q);
     i = j;
+    if (onProgress) {
+      var pc = Math.floor(i * 10 / n);
+      if (pc !== last) { last = pc; try { onProgress(i, n); } catch (e) {} }
+    }
+  }
+  if (data.v === 2 && data.hash != null) {
+    var got = (this.hash() >>> 0).toString(16);
+    if (got !== String(data.hash)) throw new Error("load-mismatch expect=" + data.hash + " got=" + got);
   }
   return this.frame();
 };

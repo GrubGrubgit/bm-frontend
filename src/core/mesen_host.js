@@ -143,21 +143,66 @@ MesenHost.prototype.pcmDrain = function () {
   this._au = [];
   return o;
 };
+function m64enc(u8) {
+  var s = "";
+  for (var i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+  return btoa(s);
+}
+function m64dec(b64) {
+  var s = atob(String(b64)), o = new Uint8Array(s.length);
+  for (var i = 0; i < s.length; i++) o[i] = s.charCodeAt(i) & 255;
+  return o;
+}
+// v2: TRUE snapshot via the core serialize API (retro_serialize is complete:
+// CPU/RAM/PPU/APU/input), verified exact by hash roundtrip test. Restore is
+// instant: loadstate into the live instance, no respawn, no replay.
+// v1 (pads-only replay) still loads via the legacy replay path.
 MesenHost.prototype.save = async function (slot) {
-  var data = { v: 1, frame: this.frame(), pads: this.padLog.slice(0, this.frame()) };
+  var mod = this.mod;
+  if (!mod || typeof mod._mesen_statesize !== "function") throw new Error("mesen-not-spawned");
+  var sz = mod._mesen_statesize();
+  var ptr = mod._malloc(sz);
+  var ok = 0;
+  try { ok = mod._mesen_save(ptr, sz) ? 1 : 0; } finally {}
+  var blob = new Uint8Array(mod.HEAPU8.subarray(ptr, ptr + sz)).slice();
+  try { mod._free(ptr); } catch (e) {}
+  if (!ok) throw new Error("mesen-snap-fail");
+  var data = { v: 2, engine: "mesen", frame: this.frame(), hash: (this.hash() >>> 0).toString(16), audioTotal: this.audioTotal, pads: this.padLog.slice(0, this.frame()), snap: m64enc(blob) };
   await saveSlot(slot, data);
   return data;
 };
-MesenHost.prototype.load = async function (slot) {
+MesenHost.prototype.load = async function (slot, onProgress) {
   var data = await loadSlot(slot);
-  if (!data || data.v !== 1) throw new Error("no-save:" + slot);
+  if (!data || (data.v !== 1 && data.v !== 2)) throw new Error("no-save:" + slot);
+  if (data.v === 2 && data.engine && data.engine !== "mesen") throw new Error("save-engine:" + data.engine + " (current mesen)");
+  if (data.v === 2 && data.snap) {
+    var mod = this.mod;
+    if (!mod) throw new Error("mesen-not-spawned (Start first, then Load)");
+    var blob = m64dec(data.snap);
+    var ptr = mod._malloc(blob.length);
+    try {
+      mod.HEAPU8.set(blob, ptr);
+      if (!mod._mesen_loadstate(ptr, blob.length)) throw new Error("mesen-unserialize");
+    } finally { try { mod._free(ptr); } catch (e) {} }
+    this.consumed = data.frame;
+    this.padLog = (data.pads || []).slice(0, data.frame);
+    this._hash = parseInt(String(data.hash || "0"), 16) >>> 0;
+    this.audioTotal = data.audioTotal | 0;
+    this._au = [];
+    this._rgbaDirty = true;
+    return this.frame();
+  }
   await this.spawn(this.pack);
-  var i = 0;
-  while (i < data.pads.length) {
+  var n = data.pads.length, i = 0, last = -1;
+  while (i < n) {
     var q = data.pads[i], j = i;
-    while (j < data.pads.length && data.pads[j] === q) j++;
+    while (j < n && data.pads[j] === q) j++;
     await this.go(j - i, q);
     i = j;
+    if (onProgress) {
+      var pc = Math.floor(i * 10 / n);
+      if (pc !== last) { last = pc; try { onProgress(i, n); } catch (e) {} }
+    }
   }
   return this.frame();
 };

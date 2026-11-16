@@ -6,7 +6,7 @@
 set -e
 cd "$(dirname "$0")/.."
 PIN=$(cat ENGINE_PIN)
-HEAD=$(git -C ../recomp rev-parse HEAD)
+HEAD=$(git -C ../recomp rev-parse --short HEAD)
 if [ "$PIN" != "$HEAD" ]; then echo "ENGINE_PIN $PIN != recomp HEAD $HEAD"; exit 1; fi
 python3 tools/patch_vendor.py
 python3 tools/patch_tailcalls.py

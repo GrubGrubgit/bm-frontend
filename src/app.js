@@ -827,6 +827,11 @@ async function shellStart() {
   return l2host.frame();
 }
 async function shellStop() {
+  if (replay.recording) {
+    try { toast(padToastEl, "finalizing take - opening save dialog...", 2500); } catch (e7) {}
+    shellLog("stop: finalizing active take first - save dialog opening...");
+    try { await replayToggleRecord(); } catch (e8) { shellLog("stop save err " + String((e8 && e8.message) || e8).slice(0, 80)); }
+  }
   if (replay.movie) shellLog("replay cleared by stop");
   replay.movie = null; replay.mode = "idle"; replay.recording = null; replay.pauseSave = null; replay.trapped = false;
   anchorSave = null;
@@ -840,6 +845,11 @@ async function shellStop() {
   return -1;
 }
 async function shellReset() {
+  if (replay.recording) {
+    try { toast(padToastEl, "finalizing take - opening save dialog...", 2500); } catch (e7b) {}
+    shellLog("reset: finalizing active take first - save dialog opening...");
+    try { await replayToggleRecord(); } catch (e8b) { shellLog("reset save err " + String((e8b && e8b.message) || e8b).slice(0, 80)); }
+  }
   if (replay.movie) shellLog("replay cleared by reset (Movie up-arrow to reload)");
   replay.movie = null; replay.mode = "idle"; replay.recording = null; replay.pauseSave = null; replay.trapped = false;
   anchorSave = null;
@@ -888,7 +898,7 @@ async function shellLoad(slot) {
   return f;
   } finally { replay.busy = false; }
 }
-function dlFailed(via) { return /^(apk:FAILED|FAILED|apk-error|apk:timeout)/.test(String(via || "")); }
+function dlFailed(via) { return /^(apk:FAILED|FAILED|apk-error|apk:timeout|timeout|apk:bad|bad-data|no-picker|apk:anchor-in-app)/.test(String(via || "")); }
 function dlOkLine(what, via, where) {
   if (dlFailed(via)) return what + " NOT SAVED (" + via + ") - file did not reach Downloads";
   return what + " via " + via + " -> Downloads/" + where;
@@ -912,7 +922,7 @@ async function ensureApkStoragePermission() {
 function dlFailedToast(what, via) {
   if (!dlFailed(via)) return;
   var inApp = (typeof window.cordova !== "undefined") || location.protocol === "file:";
-  if (inApp) toast(padToastEl, what + " NOT SAVED (" + via + ") - grant Files permission in App info, then tap again", 8000);
+  if (inApp) toast(padToastEl, what + " NOT SAVED (" + via + ") - install the latest APK from Downloads, then tap again", 8000);
   else toast(padToastEl, what + " NOT SAVED (" + via + ")", 5000);
   shellLog("hint: name the file in the save dialog (system picker) - nothing is lost, tap again to retry");
   try { ensureApkStoragePermission(); } catch (e) {}
@@ -988,6 +998,18 @@ async function saveBlobWithDialog(blob, dataUrlOrNull, defaultName, mime) {
       setTimeout(function () { if (window.__bmSavePending) { window.__bmSavePending = null; res("timeout-no-result"); } }, 180000);
     });
     if (verdict === "cancelled") return { via: "cancelled" };
+    if (verdict === "timeout-no-result" || String(verdict).indexOf("FAILED") === 0 || String(verdict).indexOf("no-picker") === 0 || String(verdict).indexOf("bad-data") === 0 || String(verdict).indexOf("apk-error") === 0) {
+      shellLog("system picker failed (" + String(verdict).slice(0, 60) + ") - trying named Downloads save instead");
+      if (window.BMApk && typeof window.BMApk.saveFile === "function") {
+        var fb;
+        try { fb = window.BMApk.saveFile(defaultName, mime, dataUrlOrNull); }
+        catch (e9) { fb = "apk-error:" + String((e9 && e9.message) || e9).slice(0, 60); }
+        return { via: String(fb) };
+      }
+      var nmf = await promptForName(defaultName);
+      if (nmf == null) return { via: "cancelled" };
+      return { via: "anchor:" + nmf };
+    }
     return { via: "apk:" + verdict };
   }
   if (dataUrlOrNull && window.BMApk && typeof window.BMApk.saveFile === "function") {
@@ -1010,11 +1032,18 @@ async function saveJsonWithDialog(obj, defaultName) {
   var text = JSON.stringify(obj);
   var blob = new Blob([text], { type: "application/json" });
   var durl = null;
-  try { durl = "data:application/json;base64," + btoa(text); } catch (e) {}
+  try { durl = await new Promise(function(res2) { var fr = new FileReader(); fr.onload = function() { var v = null; try { v = String(fr.result || ""); } catch (ee) {} res2(v); }; fr.onerror = function() { res2(null); }; try { fr.readAsDataURL(blob); } catch (ee2) { res2(null); } }); } catch (e) { durl = null; }
   var dl = await saveBlobWithDialog(blob, durl, defaultName, "application/json");
   if (dl.via === "cancelled") return dl;
   if (dl.via.indexOf("anchor:") === 0) {
     var nm = dl.via.slice(7);
+    var inAppJ = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+    if (inAppJ && durl && window.BMApk && typeof window.BMApk.saveFile === "function") {
+      var sfj;
+      try { sfj = window.BMApk.saveFile(nm, "application/json", durl); }
+      catch (e8j) { sfj = "apk-error:" + String((e8j && e8j.message) || e8j).slice(0, 60); }
+      return { via: String(sfj), name: nm };
+    }
     anchorSaveUrl(durl || ("data:application/json," + encodeURIComponent(text)), nm);
     return { via: "browser", name: nm };
   }
@@ -1033,6 +1062,13 @@ async function savePngWithDialog(dataUrl, defaultName) {
   if (dl.via === "cancelled") return dl;
   if (dl.via.indexOf("anchor:") === 0) {
     var nm = dl.via.slice(7);
+    var inAppP = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+    if (inAppP && window.BMApk && typeof window.BMApk.saveFile === "function") {
+      var sfp;
+      try { sfp = window.BMApk.saveFile(nm, "image/png", dataUrl); }
+      catch (e8p) { sfp = "apk-error:" + String((e8p && e8p.message) || e8p).slice(0, 60); }
+      return { via: String(sfp), name: nm };
+    }
     anchorSaveUrl(dataUrl, nm);
     return { via: "browser", name: nm };
   }
@@ -1302,6 +1338,8 @@ async function replayStop() {
 }
 async function replayToggleRecord() {
   if (replay.recording) {
+    try { toast(padToastEl, "finalizing take - opening save dialog...", 2500); } catch (e4) {}
+    shellLog("finalizing take - opening save dialog...");
     const pads = l2host.padLog.slice(0, l2host.frame());
     const m = makeMovieV2(pads, await currentRomCrc(), { start: replay.recording.start, anchorHash: replay.recording.hash, engine: prefs.engine });
     var tdl = await saveJsonWithDialog(m, "bmmovie-f" + m.frame + "-take" + m.start + ".json");
@@ -1405,7 +1443,7 @@ startBtn.addEventListener("click", () => {
   if (replay.movie && replay.mode !== "idle") { shellLog("replay loaded - R Play / R Stop control playback (manual Start paused)"); return; }
   shellStart().catch((e) => { shellLog("start err " + e.message); statusEl.textContent = "start err " + e.message; });
 });
-stopBtn.addEventListener("click", () => { shellStop(); });
+stopBtn.addEventListener("click", () => { try { toast(padToastEl, "stopping...", 1200); } catch (e6) {} shellStop().catch(replayErr("stop err")); });
 resetBtn.addEventListener("click", () => {
   shellReset().catch((e) => { shellLog("reset err " + e.message); statusEl.textContent = "reset err " + e.message; });
 });
@@ -1442,8 +1480,9 @@ if (rPauseBtn) rPauseBtn.addEventListener("click", () => { replayPause().catch(r
 if (rRestartBtn) rRestartBtn.addEventListener("click", () => { replayRestart().catch(replayErr("replay restart err")); });
 if (rStopBtn) rStopBtn.addEventListener("click", () => { replayStop().catch(replayErr("replay stop err")); });
 if (recBtn) recBtn.addEventListener("click", () => {
+  try { toast(padToastEl, replay.recording ? "finalizing take - opening save dialog..." : "starting synced take...", 2000); } catch (e5) {}
   replayToggleRecord().then(() => {
-    try { recBtn.textContent = replay.recording ? "StopRec" : "Record"; } catch (e) {}
+    try { recBtn.textContent = replay.recording ? "Stop+Save" : "Record"; } catch (e) {}
   }).catch(replayErr("record err"));
 });
 shotBtn.addEventListener("click", async () => {
@@ -1550,9 +1589,10 @@ try {
   var hasFile = !!(window.BMApk && typeof window.BMApk.saveFile === "function");
   var hasMovie = !!(window.BMApk && typeof window.BMApk.saveMovie === "function");
   var canPerm = !!(window.BMApk && typeof window.BMApk.requestPermission === "function");
+  var hasDlg = !!(window.BMApk && typeof window.BMApk.saveFileWithDialog === "function");
   var inApp2 = (typeof window.cordova !== "undefined") || location.protocol === "file:";
-  window.__bmBridge = "apk" + (inApp2 ? "+" : "-") + " saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no");
-  shellLog("BMApk bridge: saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " requestPermission=" + (canPerm ? "yes" : "no") + (inApp2 ? " (APK/file)" : " (browser: anchor downloads used)"));
+  window.__bmBridge = "apk" + (inApp2 ? "+" : "-") + " saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no");
+  shellLog("BMApk bridge: saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no") + " requestPermission=" + (canPerm ? "yes" : "no") + (inApp2 ? " (APK/file)" : " (browser: anchor downloads used)"));
   if (inApp2 && !hasFile && !hasMovie) shellLog("saves will NOT reach Downloads in this build - no bridge; update the APK");
 } catch (e) {}
 

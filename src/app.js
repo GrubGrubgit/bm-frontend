@@ -926,20 +926,26 @@ function dlFailedToast(what, via) {
   var inApp = (typeof window.cordova !== "undefined") || location.protocol === "file:";
   if (inApp) toast(padToastEl, what + " NOT SAVED (" + via + ") - install the latest APK from Downloads, then tap again", 8000);
   else toast(padToastEl, what + " NOT SAVED (" + via + ")", 5000);
-  shellLog("hint: name the file in the save dialog (system picker) - nothing is lost, tap again to retry");
+  shellLog("hint: pick a save folder once (Folder button), then name each file - nothing is lost, tap again to retry");
   try { ensureApkStoragePermission(); } catch (e) {}
 }
-// Save-dialog plumbing: every MANUAL save (Record-stop, Movie export,
-// Shot, Report tap) offers a real system save dialog when one exists, so
-// the user names the file and picks where it goes. No storage permission
-// is needed on any path: the system picker grant IS the permission (SAF
-// picker in the APK, File System Access picker in desktop browsers,
-// plain download otherwise). Auto-reports (trap/fault) stay silent and
-// use the no-dialog path - a popup opening mid-crash would be hostile.
+// Save plumbing: every MANUAL save (Record-stop, Movie export, Shot,
+// Report tap) names the file in a dialog and stores it in a folder the
+// user chose. APK primary path: one-time system folder pick (remembered
+// per install), then a name dialog per save written straight into that
+// folder - no per-save system UI to dismiss or misfire. Fallbacks, in
+// order: system file picker, silent Downloads save, in-page name prompt.
+// No storage permission is needed on any path. Auto-reports (trap/fault)
+// stay silent - a popup opening mid-crash would be hostile.
 window.__bmSavePending = null;
 window.__bmSaveResult = function (msg) {
   var cb = window.__bmSavePending; window.__bmSavePending = null;
   if (cb) { try { cb(String(msg)); } catch (e) {} }
+}
+window.__bmFolderPending = null;
+window.__bmFolderResult = function (msg) {
+  var cb2 = window.__bmFolderPending; window.__bmFolderPending = null;
+  if (cb2) { try { cb2(String(msg)); } catch (e) {} }
 }
 function promptForName(defaultName) {
   return new Promise(function (res) {
@@ -970,6 +976,7 @@ function promptForName(defaultName) {
     try { inp.focus(); inp.select(); } catch (e) {}
   });
 }
+window.BM.promptName = promptForName;
 function anchorSaveUrl(dataUrl, name) {
   var a = document.createElement("a");
   a.href = dataUrl; a.download = name;
@@ -988,6 +995,29 @@ async function saveBlobWithDialog(blob, dataUrlOrNull, defaultName, mime) {
     } catch (e) {
       if (e && e.name === "AbortError") return { via: "cancelled" };
       shellLog("save dialog failed, trying app save");
+    }
+  }
+  if (dataUrlOrNull && window.BMApk && typeof window.BMApk.saveFileToFolder === "function") {
+    var hasDir = false;
+    try { hasDir = !!(window.BMApk.hasSaveFolder && window.BMApk.hasSaveFolder()); } catch (eH) {}
+    if (!hasDir && typeof window.BMApk.pickSaveFolder === "function") {
+      shellLog("no save folder yet - opening folder picker (one-time setup, remembered after)");
+      try { toast(padToastEl, "pick a save folder (one-time setup)...", 2500); } catch (eT0) {}
+      var fr0 = await shellPickFolder();
+      if (String(fr0).indexOf("folder:") === 0) hasDir = true;
+      else shellLog("folder pick skipped (" + String(fr0).slice(0, 50) + ") - trying system file picker instead");
+    }
+    if (hasDir) {
+      var nmD = await promptForName(defaultName);
+      if (nmD == null) return { via: "cancelled" };
+      var wr;
+      try { wr = window.BMApk.saveFileToFolder(nmD, mime, dataUrlOrNull); }
+      catch (eW) { wr = "apk-error:" + String((eW && eW.message) || eW).slice(0, 60); }
+      if (String(wr).indexOf("FAILED") !== 0 && String(wr).indexOf("apk-error") !== 0) {
+        try { toast(padToastEl, "saved " + nmD, 2500); } catch (eT2) {}
+        return { via: String(wr), name: nmD };
+      }
+      shellLog("folder save failed (" + String(wr).slice(0, 60) + ") - trying system file picker instead");
     }
   }
   if (dataUrlOrNull && window.BMApk && typeof window.BMApk.saveFileWithDialog === "function") {
@@ -1075,6 +1105,29 @@ async function savePngWithDialog(dataUrl, defaultName) {
     return { via: "browser", name: nm };
   }
   return dl;
+}
+async function shellPickFolder() {
+  if (!window.BMApk || typeof window.BMApk.pickSaveFolder !== "function") {
+    shellLog("folder pick needs the latest APK");
+    try { toast(padToastEl, "folder pick needs the latest APK", 3000); } catch (eF0) {}
+    return "no-bridge";
+  }
+  try { toast(padToastEl, "pick your save folder (one-time setup)...", 2500); } catch (eF1) {}
+  var fr = await new Promise(function(resF) {
+    window.__bmFolderPending = resF;
+    var rF;
+    try { rF = window.BMApk.pickSaveFolder(); }
+    catch (eF2) { window.__bmFolderPending = null; resF("apk-error:" + String((eF2 && eF2.message) || eF2).slice(0, 60)); return; }
+    if (String(rF) !== "folder:opened") { window.__bmFolderPending = null; resF(String(rF)); return; }
+    setTimeout(function () { if (window.__bmFolderPending) { window.__bmFolderPending = null; resF("timeout-no-result"); } }, 180000);
+  });
+  var hd = false;
+  try { hd = !!(window.BMApk.hasSaveFolder && window.BMApk.hasSaveFolder()); } catch (eF6) {}
+  shellLog("save folder now: " + (hd ? "set" : "not set") + " (" + String(fr).slice(0, 60) + ")");
+  if (String(fr).indexOf("folder:") === 0) { try { toast(padToastEl, "save folder set", 2500); } catch (eF3) {} }
+  else if (fr === "cancelled" || String(fr).indexOf("cancelled") === 0) { try { toast(padToastEl, "folder pick cancelled", 2500); } catch (eF7) {} }
+  else { try { toast(padToastEl, "folder pick failed: " + String(fr).slice(0, 50), 4000); } catch (eF4) {} }
+  return fr;
 }
 async function shellExportMovie() {
   if (!l2host.inst) throw new Error("not-started");
@@ -1353,7 +1406,7 @@ async function replayToggleRecord() {
     var tdl = await saveJsonWithDialog(m, "bmmovie-f" + m.frame + "-take" + m.start + ".json");
     var tshown = tdl.name || ("bmmovie-f" + m.frame + "-take" + m.start + ".json");
     window.__bmLastTake = m;
-    if (tdl.via === "cancelled") shellLog("take save cancelled - take kept, Record again to save");
+    if (tdl.via === "cancelled") shellLog("take save cancelled - take kept, tap Movie-down-arrow to save it");
     else shellLog(dlOkLine("take saved f=" + m.frame + " take@" + m.start + " anchor=" + m.anchorHash, tdl.via, tshown));
     if (dlFailed(tdl.via)) dlFailedToast("take", tdl.via);
     else if (tdl.via !== "cancelled") toast(padToastEl, "take saved f=" + m.frame, 2500);
@@ -1470,6 +1523,8 @@ movieBtn.addEventListener("click", () => {
   shellExportMovie().catch((e) => { shellLog("movie export err " + e.message); });
 });
 movieLoadBtn.addEventListener("click", () => { movieInput.click(); });
+const folderBtn = document.getElementById("folderBtn");
+if (folderBtn) folderBtn.addEventListener("click", () => { shellPickFolder().catch(replayErr("folder err")); });
 movieInput.addEventListener("change", () => {
   const f = movieInput.files && movieInput.files[0];
   movieInput.value = "";
@@ -1598,9 +1653,11 @@ try {
   var hasMovie = !!(window.BMApk && typeof window.BMApk.saveMovie === "function");
   var canPerm = !!(window.BMApk && typeof window.BMApk.requestPermission === "function");
   var hasDlg = !!(window.BMApk && typeof window.BMApk.saveFileWithDialog === "function");
+  var hasDir = false;
+  try { hasDir = !!(window.BMApk && window.BMApk.hasSaveFolder && window.BMApk.hasSaveFolder()); } catch (eHD) {}
   var inApp2 = (typeof window.cordova !== "undefined") || location.protocol === "file:";
-  window.__bmBridge = "apk" + (inApp2 ? "+" : "-") + " saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no");
-  shellLog("BMApk bridge: saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no") + " requestPermission=" + (canPerm ? "yes" : "no") + (inApp2 ? " (APK/file)" : " (browser: anchor downloads used)"));
+  window.__bmBridge = "apk" + (inApp2 ? "+" : "-") + " saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no") + " saveDir=" + (hasDir ? "yes" : "no");
+  shellLog("BMApk bridge: saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no") + " saveDir=" + (hasDir ? "yes" : "no") + " requestPermission=" + (canPerm ? "yes" : "no") + (inApp2 ? " (APK/file)" : " (browser: anchor downloads used)"));
   if (inApp2 && !hasFile && !hasMovie) shellLog("saves will NOT reach Downloads in this build - no bridge; update the APK");
 } catch (e) {}
 

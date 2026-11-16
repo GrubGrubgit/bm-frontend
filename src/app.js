@@ -901,6 +901,22 @@ async function shellLoad(slot) {
   } finally { replay.busy = false; }
 }
 function dlFailed(via) { return /^(apk:FAILED|FAILED|apk-error|apk:timeout|timeout|apk:bad|bad-data|no-picker|apk:anchor-in-app)/.test(String(via || "")); }
+function bmInApp() {
+  try {
+    if (typeof window.cordova !== "undefined") return true;
+    if (location.protocol === "file:") return true;
+    var b = window.BMApk;
+    if (b && (typeof b.saveFile === "function" || typeof b.saveMovie === "function" || typeof b.saveFileWithDialog === "function" || typeof b.saveFileToFolder === "function" || typeof b.pickSaveFolder === "function" || typeof b.hasSaveFolder === "function" || typeof b.apkVersion === "function")) return true;
+  } catch (eBI) {}
+  return false;
+}
+function bmBridgeKeys() {
+  try {
+    if (!window.BMApk) return "(no BMApk object)";
+    var ks = Object.keys(window.BMApk);
+    return ks.length ? ks.join(",") : "(BMApk present, zero enumerable keys)";
+  } catch (eBK) { return "(keys unreadable)"; }
+}
 function dlOkLine(what, via, where) {
   if (dlFailed(via)) return what + " NOT SAVED (" + via + ") - file did not reach Downloads";
   return what + " via " + via + " -> Downloads/" + where;
@@ -923,7 +939,7 @@ async function ensureApkStoragePermission() {
 }
 function dlFailedToast(what, via) {
   if (!dlFailed(via)) return;
-  var inApp = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+  var inApp = bmInApp();
   if (inApp) toast(padToastEl, what + " NOT SAVED (" + via + ") - install the latest APK from Downloads, then tap again", 8000);
   else toast(padToastEl, what + " NOT SAVED (" + via + ")", 5000);
   shellLog("hint: pick a save folder once (Folder button), then name each file - nothing is lost, tap again to retry");
@@ -1069,7 +1085,7 @@ async function saveJsonWithDialog(obj, defaultName) {
   if (dl.via === "cancelled") return dl;
   if (dl.via.indexOf("anchor:") === 0) {
     var nm = dl.via.slice(7);
-    var inAppJ = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+    var inAppJ = bmInApp();
     if (inAppJ && durl && window.BMApk && typeof window.BMApk.saveFile === "function") {
       var sfj;
       try { sfj = window.BMApk.saveFile(nm, "application/json", durl); }
@@ -1094,7 +1110,7 @@ async function savePngWithDialog(dataUrl, defaultName) {
   if (dl.via === "cancelled") return dl;
   if (dl.via.indexOf("anchor:") === 0) {
     var nm = dl.via.slice(7);
-    var inAppP = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+    var inAppP = bmInApp();
     if (inAppP && window.BMApk && typeof window.BMApk.saveFile === "function") {
       var sfp;
       try { sfp = window.BMApk.saveFile(nm, "image/png", dataUrl); }
@@ -1107,7 +1123,7 @@ async function savePngWithDialog(dataUrl, defaultName) {
   return dl;
 }
 async function shellPickFolder() {
-  var inAppF = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+  var inAppF = bmInApp();
   if (!inAppF) {
     shellLog("browser mode: no app folder here - files download to Downloads instead");
     try { toast(padToastEl, "browser mode: files download to Downloads", 3000); } catch (eF0b) {}
@@ -1652,7 +1668,7 @@ setInterval(() => {
 shellLog("shell ready: start/reset/pause + slots + volume + scale/filter/fullscreen");
 try {
   const hasBridge = !!(window.BMApk && typeof window.BMApk.saveMovie === "function");
-  const inApp = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+  const inApp = bmInApp();
   fetch("PACKAGING.json").then(r => r.ok ? r.json() : null).then(q => {
     if (q) { window.__bmWww = "www v" + q.version; shellLog("www v" + q.version + " git " + (q.git || "?") + " built " + (q.built || "?")); }
   }).catch(() => {});
@@ -1662,13 +1678,13 @@ try {
   var hasDlg = !!(window.BMApk && typeof window.BMApk.saveFileWithDialog === "function");
   var hasDir = false;
   try { hasDir = !!(window.BMApk && window.BMApk.hasSaveFolder && window.BMApk.hasSaveFolder()); } catch (eHD) {}
-  var inApp2 = (typeof window.cordova !== "undefined") || location.protocol === "file:";
+  var inApp2 = bmInApp();
   var apkV = "legacy";
   try { apkV = (window.BMApk && window.BMApk.apkVersion) ? String(window.BMApk.apkVersion()) : "legacy"; } catch (eAV) { apkV = "legacy"; }
   window.__bmApkV = inApp2 ? ("APK " + apkV) : "browser";
   window.__bmBridge = "apk" + (inApp2 ? "+" : "-") + " saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no") + " saveDir=" + (hasDir ? "yes" : "no") + " " + window.__bmApkV;
   shellLog("BMApk bridge: saveFile=" + (hasFile ? "yes" : "no") + " saveMovie=" + (hasMovie ? "yes" : "no") + " saveDlg=" + (hasDlg ? "yes" : "no") + " saveDir=" + (hasDir ? "yes" : "no") + " " + window.__bmApkV + " requestPermission=" + (canPerm ? "yes" : "no") + (inApp2 ? " (APK/file)" : " (browser: anchor downloads used)"));
-  if (inApp2 && !hasFile && !hasMovie) shellLog("saves will NOT reach Downloads in this build - no bridge; update the APK");
+  if (inApp2 && !hasFile && !hasMovie) shellLog("bridge present but no save methods - keys: " + String(bmBridgeKeys()).slice(0, 200));
 } catch (e) {}
 
 const fail6 = (s) => { document.title = "BM-L6-FAIL:" + s; };

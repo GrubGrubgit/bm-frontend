@@ -908,10 +908,11 @@ function dlOkLine(what, via, where) {
   return what + " saved (" + where + ")";
 }
 
-// Saves: ONE path on every surface (page, APK, desktop). Desktop browsers with
-// a file picker get the system dialog. Otherwise: name dialog, then the
-// system share sheet when it takes files (the user picks the location there),
-// else a direct download to Downloads. No bridge, no special cases.
+// Saves: folder-first on every surface. Where the app save bridge exposes a
+// picked folder: one-time folder pick (remembered), then name dialog per save,
+// file lands in that folder. Otherwise: direct save, media store, share sheet
+// (user picks the location there), else a direct download. Single name prompt
+// per attempt; every path either returns a file or shows its reason on screen.
 function dlFailedToast(what, via) {
   if (!dlFailed(via)) return;
   try { toast(padToastEl, what + " NOT SAVED (" + via + ") - nothing lost, tap again to retry", 5000); } catch (e) {}
@@ -988,6 +989,29 @@ async function saveBlobWithDialog(blob, dataUrlOrNull, defaultName, mime) {
       shellLog("save dialog failed, trying app save");
     }
   }
+  if (dataUrlOrNull && window.BMApk && typeof window.BMApk.saveFileToFolder === "function") {
+    var hasDir = false;
+    try { hasDir = !!(window.BMApk.hasSaveFolder && window.BMApk.hasSaveFolder()); } catch (eH) {}
+    if (!hasDir && typeof window.BMApk.pickSaveFolder === "function") {
+      shellLog("no save folder yet - opening folder picker (one-time setup, remembered after)");
+      try { toast(padToastEl, "pick a save folder (one-time setup)...", 2500); } catch (eT0) {}
+      var fr0 = await shellPickFolder();
+      if (String(fr0).indexOf("folder:") === 0) hasDir = true;
+      else shellLog("folder pick skipped (" + String(fr0).slice(0, 50) + ") - trying other save paths");
+    }
+    if (hasDir) {
+      var nmD = await promptForName(defaultName);
+      if (nmD == null) return { via: "cancelled" };
+      var wr;
+      try { wr = window.BMApk.saveFileToFolder(nmD, mime, dataUrlOrNull); }
+      catch (eW) { wr = "bridge-error:" + String((eW && eW.message) || eW).slice(0, 60); }
+      if (String(wr).indexOf("FAILED") !== 0 && String(wr).indexOf("bridge-error") !== 0) {
+        try { toast(padToastEl, "saved " + nmD, 2500); } catch (eT2) {}
+        return { via: String(wr), name: nmD };
+      }
+      shellLog("folder save failed (" + String(wr).slice(0, 60) + ") - trying other save paths");
+    }
+  }
   if (dataUrlOrNull && window.BMApk && (typeof window.BMApk.saveDirect === "function" || typeof window.BMApk.saveFile === "function")) {
     var granted = true;
     try { granted = !!(window.BMApk.hasAllFiles && window.BMApk.hasAllFiles()); } catch (eG) { granted = true; }
@@ -1055,6 +1079,29 @@ async function savePngWithDialog(dataUrl, defaultName) {
   var dl = await saveBlobWithDialog(blob, dataUrl, defaultName, "image/png");
   if (dl.via === "cancelled") return dl;
   return dl;
+}
+async function shellPickFolder() {
+  if (!window.BMApk || typeof window.BMApk.pickSaveFolder !== "function") {
+    shellLog("folder pick needs the app save bridge in this copy - other save paths still work");
+    try { toast(padToastEl, "folder pick is not in this copy - use the name dialog instead", 3500); } catch (eF0) {}
+    return "no-bridge";
+  }
+  try { toast(padToastEl, "pick your save folder (one-time setup)...", 2500); } catch (eF1) {}
+  var fr = await new Promise(function(resF) {
+    window.__bmFolderPending = resF;
+    var rF;
+    try { rF = window.BMApk.pickSaveFolder(); }
+    catch (eF2) { window.__bmFolderPending = null; resF("bridge-error:" + String((eF2 && eF2.message) || eF2).slice(0, 60)); return; }
+    if (String(rF) !== "folder:opened") { window.__bmFolderPending = null; resF(String(rF)); return; }
+    setTimeout(function () { if (window.__bmFolderPending) { window.__bmFolderPending = null; resF("timeout-no-result"); } }, 180000);
+  });
+  var hd = false;
+  try { hd = !!(window.BMApk.hasSaveFolder && window.BMApk.hasSaveFolder()); } catch (eF6) {}
+  shellLog("save folder now: " + (hd ? "set" : "not set") + " (" + String(fr).slice(0, 60) + ")");
+  if (String(fr).indexOf("folder:") === 0) { try { toast(padToastEl, "save folder set", 2500); } catch (eF3) {} }
+  else if (fr === "cancelled" || String(fr).indexOf("cancelled") === 0) { try { toast(padToastEl, "folder pick cancelled", 2500); } catch (eF7) {} }
+  else { try { toast(padToastEl, "folder pick failed: " + String(fr).slice(0, 50), 4000); } catch (eF4) {} }
+  return fr;
 }
 async function shellFileAccess() {
   if (!window.BMApk || typeof window.BMApk.openAllFilesSettings !== "function") {
@@ -1479,6 +1526,8 @@ movieBtn.addEventListener("click", () => {
 movieLoadBtn.addEventListener("click", () => { movieInput.click(); });
 const fileAccessBtn = document.getElementById("fileAccessBtn");
 if (fileAccessBtn) fileAccessBtn.addEventListener("click", () => { shellFileAccess().catch(replayErr("files err")); });
+const folderBtn = document.getElementById("folderBtn");
+if (folderBtn) folderBtn.addEventListener("click", () => { shellPickFolder().catch(replayErr("folder err")); });
 movieInput.addEventListener("change", () => {
   const f = movieInput.files && movieInput.files[0];
   movieInput.value = "";

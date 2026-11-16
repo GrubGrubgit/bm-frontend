@@ -830,7 +830,7 @@ async function shellStop() {
   if (replay.recording) {
     try { toast(padToastEl, "finalizing take - opening save dialog...", 2500); } catch (e7) {}
     shellLog("stop: finalizing active take first - save dialog opening...");
-    try { await replayToggleRecord(); } catch (e8) { shellLog("stop save err " + String((e8 && e8.message) || e8).slice(0, 80)); }
+    try { await replayToggleRecord(); } catch (e8) { var em8 = String((e8 && e8.message) || e8).slice(0, 100); shellLog("stop save err " + em8); try { toast(padToastEl, "save failed: " + em8, 8000); } catch (e8t) {} }
     try { recBtn.textContent = "Record"; } catch (e8e) {}
   }
   if (replay.movie) shellLog("replay cleared by stop");
@@ -849,7 +849,7 @@ async function shellReset() {
   if (replay.recording) {
     try { toast(padToastEl, "finalizing take - opening save dialog...", 2500); } catch (e7b) {}
     shellLog("reset: finalizing active take first - save dialog opening...");
-    try { await replayToggleRecord(); } catch (e8b) { shellLog("reset save err " + String((e8b && e8b.message) || e8b).slice(0, 80)); }
+    try { await replayToggleRecord(); } catch (e8b) { var em8b = String((e8b && e8b.message) || e8b).slice(0, 100); shellLog("reset save err " + em8b); try { toast(padToastEl, "save failed: " + em8b, 8000); } catch (e8bt) {} }
     try { recBtn.textContent = "Record"; } catch (e8f) {}
   }
   if (replay.movie) shellLog("replay cleared by reset (Movie up-arrow to reload)");
@@ -961,6 +961,7 @@ function promptForName(defaultName) {
   });
 }
 window.BM.promptName = promptForName;
+window.BM.saveJsonTest = saveJsonWithDialog;
 function anchorSaveUrl(dataUrl, name) {
   var a = document.createElement("a");
   a.href = dataUrl; a.download = name;
@@ -1086,7 +1087,12 @@ let replay = { movie: null, anchor: { kind: "boot" }, mode: "idle", trapped: fal
 let anchorSave = null;
 function hash16() { return (l2host.hash() >>> 0).toString(16); }
 async function currentRomCrc() {
-  try { const id = await loadRomId(); if (id && id.crc32) return String(id.crc32); } catch (e) {}
+  try {
+    var idP = null;
+    try { idP = loadRomId(); } catch (eL) { return "unknown"; }
+    var id = await Promise.race([idP, new Promise(function (res) { setTimeout(function () { res(null); }, 3000); })]);
+    if (id && id.crc32) return String(id.crc32);
+  } catch (e) {}
   return "unknown";
 }
 function replayProgress(i, n) {
@@ -1284,7 +1290,7 @@ async function replayStop() {
   if (replay.recording) {
     try { toast(padToastEl, "finalizing take - opening save dialog...", 2500); } catch (e7c) {}
     shellLog("r-stop: finalizing active take first - save dialog opening...");
-    try { await replayToggleRecord(); } catch (e8c) { shellLog("r-stop save err " + String((e8c && e8c.message) || e8c).slice(0, 80)); }
+    try { await replayToggleRecord(); } catch (e8c) { var em8c = String((e8c && e8c.message) || e8c).slice(0, 100); shellLog("r-stop save err " + em8c); try { toast(padToastEl, "save failed: " + em8c, 8000); } catch (e8ct) {} }
     try { recBtn.textContent = "Record"; } catch (e8d) {}
   }
   replay.busy = true;
@@ -1301,9 +1307,13 @@ async function replayStop() {
 async function replayToggleRecord() {
   if (replay.recording) {
     try { toast(padToastEl, "finalizing take - opening save dialog...", 2500); } catch (e4) {}
-    shellLog("finalizing take - opening save dialog...");
-    const pads = l2host.padLog.slice(0, l2host.frame());
-    const m = makeMovieV2(pads, await currentRomCrc(), { start: replay.recording.start, anchorHash: replay.recording.hash, engine: prefs.engine });
+    var pads = [];
+    try { pads = l2host.padLog.slice(0, l2host.frame()); }
+    catch (eP) { pads = []; shellLog("padLog unreadable (" + String((eP && eP.message) || eP).slice(0, 60) + ") - saving empty take"); }
+    shellLog("finalizing take - opening save dialog (pads=" + pads.length + ")...");
+    var m = null;
+    try { m = makeMovieV2(pads, await currentRomCrc(), { start: replay.recording.start, anchorHash: replay.recording.hash, engine: prefs.engine }); }
+    catch (eM) { m = { app: "bm-movie", v: 2, rom: "unknown", frame: 0, start: 0, anchorHash: null, engine: "unknown", pads: "", buildErr: String((eM && eM.message) || eM).slice(0, 80) }; shellLog("movie build failed - saving raw take instead"); }
     var tdl = await saveJsonWithDialog(m, "bmmovie-f" + m.frame + "-take" + m.start + ".json");
     var tshown = tdl.name || ("bmmovie-f" + m.frame + "-take" + m.start + ".json");
     window.__bmLastTake = m;

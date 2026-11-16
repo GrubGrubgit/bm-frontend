@@ -988,23 +988,32 @@ async function saveBlobWithDialog(blob, dataUrlOrNull, defaultName, mime) {
       shellLog("save dialog failed, trying app save");
     }
   }
-  if (dataUrlOrNull && window.BMApk && typeof window.BMApk.saveDirect === "function") {
+  if (dataUrlOrNull && window.BMApk && (typeof window.BMApk.saveDirect === "function" || typeof window.BMApk.saveFile === "function")) {
     var granted = true;
     try { granted = !!(window.BMApk.hasAllFiles && window.BMApk.hasAllFiles()); } catch (eG) { granted = true; }
-    if (granted) {
-      var nmD2 = await promptForName(defaultName);
-      if (nmD2 == null) return { via: "cancelled" };
+    var nmB = await promptForName(defaultName);
+    if (nmB == null) return { via: "cancelled" };
+    if (granted && typeof window.BMApk.saveDirect === "function") {
       var dr;
-      try { dr = window.BMApk.saveDirect(nmD2, mime, dataUrlOrNull); }
+      try { dr = window.BMApk.saveDirect(nmB, mime, dataUrlOrNull); }
       catch (eD) { dr = "bridge-error:" + String((eD && eD.message) || eD).slice(0, 60); }
       if (String(dr).indexOf("FAILED") !== 0 && String(dr).indexOf("bridge-error") !== 0) {
         try { toast(padToastEl, String(dr).slice(0, 80), 2500); } catch (eT2d) {}
-        return { via: String(dr), name: nmD2 };
+        return { via: String(dr), name: nmB };
       }
-      shellLog("direct save failed (" + String(dr).slice(0, 60) + ") - trying share/download");
+      shellLog("direct save failed (" + String(dr).slice(0, 60) + ") - trying media store");
     }
-  }
-  var nm = await promptForName(defaultName);
+    if (typeof window.BMApk.saveFile === "function") {
+      var sf;
+      try { sf = window.BMApk.saveFile(nmB, mime, dataUrlOrNull); }
+      catch (eF) { sf = "bridge-error:" + String((eF && eF.message) || eF).slice(0, 60); }
+      if (String(sf).indexOf("FAILED") !== 0 && String(sf).indexOf("bridge-error") !== 0) {
+        try { toast(padToastEl, String(sf).slice(0, 80), 2500); } catch (eTF) {}
+        return { via: String(sf), name: nmB };
+      }
+      shellLog("media store save failed (" + String(sf).slice(0, 60) + ") - trying share/download");
+    }
+  }  var nm = await promptForName(defaultName);
   if (nm == null) return { via: "cancelled" };
   try {
     if (typeof navigator !== "undefined" && navigator.canShare) {

@@ -1,8 +1,9 @@
 # Build-time vendor patch (adapter-owned, audited). Copies the pinned engine
-# into build/vendor/ and applies TWO mechanical hooks, anchors asserted:
+# into build/vendor/ and applies THREE mechanical hooks, anchors asserted:
 #  1. runtime.h globals: APU event ring (apu_ring/apu_head).
 #  2. runtime.h WR(): log $4000-$4017 writes into the ring.
 # Canonical gen/ files are never modified. Fails loudly on anchor drift.
+#  3. LE351 story-skip unwind resumes at C2AC (single static caller chain, G2 target-resume).
 import sys, pathlib
 RECOMP = pathlib.Path("/data/data/com.termux/files/home/storage/AiAgent/def7cmrvqe/recomp")
 OUT = pathlib.Path(__file__).resolve().parent.parent / "build" / "vendor"
@@ -48,6 +49,21 @@ def main():
             ln = ln.replace("__builtin_trap();", "bm_trap(_v, " + chr(34) + "vec007A-unmapped" + chr(34) + ");")
         tls.append(ln)
     co = chr(10).join(tls)
+    li = co.split(chr(10))
+    k = -1
+    n = len(li)
+    i = 0
+    while i < n:
+        if li[i] == 'static void __attribute__((used)) b7_LE351(void) {':
+            k = i
+        i = i + 1
+    assert k >= 0, 'LE351 anchor missing'
+    assert li[k+1].strip().startswith('nmi_poll(')
+    assert li[k+2].strip() == 'X = RD(0x01); setZN(X);'
+    assert li[k+5].strip() == 'S = X;'
+    assert li[k+7].strip() == 'return;'
+    li[k+7] = li[k+7].replace('return;', '__attribute__((musttail)) return b7_entry_C2AC();')
+    co = chr(10).join(li)
     (OUT / "combined_off.c").write_text(co)
-    print("vendor patched: runtime.h APU ring + combined_off.c verbatim")
+    print("vendor patched: runtime.h APU ring + combined_off.c + LE351resume")
 main()

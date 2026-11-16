@@ -15,6 +15,7 @@ export function fmtStatus(s) {
   return "fps " + (s.fps == null ? "-" : Number(s.fps).toFixed(0)) +
     " | frame " + s.engineFrame +
     " | audio " + (s.audio && s.audio.ready ? (s.audio.sampleRate + "Hz") : "locked") +
+    ((s.engine === "mesen" && s.pcm && s.pcm.ready) ? (" pcm" + (Number(s.pcm.fifoSec) < 0 ? "" : "+") + Number(s.pcm.fifoSec).toFixed(1) + "s") : "") +
     " | eng " + (s.engine || "wasm") + " " + s.scale + "/" + s.filter +
     " | vol " + Math.round(s.volume * 100) + "%" + (s.muted ? " (muted)" : "") +
     " | slot " + s.slot + (s.running ? (s.paused ? " | PAUSED" : " | RUNNING") : " | stopped");

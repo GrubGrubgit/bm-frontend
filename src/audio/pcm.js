@@ -8,6 +8,7 @@ export class PcmPlayer {
     this.volume = 0.8; this.muted = false;
     this.pushed = 0; this.lastFed = -1;
     this._carry = 0;
+    this.totalOut = 0; this.t0 = -1;
   }
   async unlock() {
     if (this.ctx) { if (this.ctx.state === "suspended") await this.ctx.resume(); return this.ctx.sampleRate; }
@@ -44,9 +45,11 @@ export class PcmPlayer {
     }
     this.node.port.postMessage({ t: "samples", f: f, b: out });
     this.pushed = f;
+    this.totalOut += out.length;
+    if (this.t0 < 0) { try { this.t0 = this.ctx.currentTime; } catch (e) { this.t0 = 0; } }
   }
   reset() {
-    this.pushed = 0; this.lastFed = -1; this._carry = 0;
+    this.pushed = 0; this.lastFed = -1; this._carry = 0; this.totalOut = 0; this.t0 = -1;
     if (this.node) { try { this.node.port.postMessage({ t: "reset" }); } catch (e) {} }
   }
   setVolume(v) {
@@ -60,6 +63,8 @@ export class PcmPlayer {
     return this.muted;
   }
   stats() {
-    return { ready: !!this.ctx, sampleRate: this.ctx ? this.ctx.sampleRate : 0, pushed: this.pushed, lastFed: this.lastFed, volume: this.volume, muted: this.muted, time: this.ctx ? this.ctx.currentTime : 0 };
+    var sr = this.ctx ? this.ctx.sampleRate : 0, drift = 0;
+    if (this.t0 >= 0 && this.ctx) { try { drift = Math.round(this.totalOut - (this.ctx.currentTime - this.t0) * sr); } catch (e) {} }
+    return { ready: !!this.ctx, sampleRate: sr, pushed: this.pushed, lastFed: this.lastFed, volume: this.volume, muted: this.muted, time: this.ctx ? this.ctx.currentTime : 0, fifo: drift, fifoSec: sr ? drift / sr : 0 };
   }
 }

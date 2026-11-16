@@ -738,11 +738,26 @@ function shellLoop() {
     (async () => {
       var nowT = 0;
       try { nowT = performance.now(); } catch (e) { nowT = 0; }
-      if (!shellPaused && !shellStepping && !replay.busy && (shellLastT === 0 || nowT - shellLastT >= 16.0)) {
-        if (nowT !== 0) shellLastT = nowT;
-        shellStepping = true;
-        try { await shellStepOnce(); } catch (e) { shellOnStepErr(e); try { shellAutoTrapReport(); } catch (e3) {} } finally { shellStepping = false; }
+      // Wall-clock pacing with catch-up: one emulation step per 1/60s of
+      // wall time, so a slow rAF (throttled WebView, heavy frame) no longer
+      // slows the GAME and starves Mesen audio into slow-motion. Capped at
+      // 4 steps: under heavy load the game degrades to graceful slow-mo
+      // instead of spiralling. Pause/resume carries no debt.
+      if (shellPaused || shellStepping || replay.busy) { if (shellPaused && nowT !== 0) shellLastT = nowT; return; }
+      var steps = 1;
+      if (shellLastT === 0 || nowT === 0) { shellLastT = nowT; }
+      else {
+        var elapsed = nowT - shellLastT;
+        steps = Math.floor(elapsed / 16.667);
+        if (steps < 1) return;
+        if (steps > 4) steps = 4;
+        shellLastT += steps * 16.667;
+        if (shellLastT < nowT - 100) shellLastT = nowT;
       }
+      shellStepping = true;
+      try { for (var i = 0; i < steps; i++) await shellStepOnce(); }
+      catch (e) { shellOnStepErr(e); try { shellAutoTrapReport(); } catch (e3) {} }
+      finally { shellStepping = false; }
     })().then(() => shellLoop(), () => shellLoop());
   });
 }
@@ -786,6 +801,7 @@ async function shellStart() {
   try { await ((l2host === mesenHost) ? ensurePcm().unlock() : ensureAudio().unlock()); syncAudioToPrefs(); }
   catch (e) { shellLog("audio locked: " + String((e && e.message) || e).slice(0, 60)); }
   shellRunning = true; shellPaused = false;
+  shellLastT = 0;
   pauseBtn.textContent = "Pause";
   if (!shellRaf) shellLoop();
   ensureVideo();
@@ -1189,6 +1205,7 @@ window.BM.log = shellLog;
 window.BM.stats = ((prev) => () => Object.assign(prev(), {
   running: shellRunning, paused: shellPaused, engineFrame: l2host.frame(),
   fps: video ? video.fps : shellFps,
+  pcm: (typeof pcmPlayer !== "undefined" && pcmPlayer) ? pcmPlayer.stats() : null,
   scale: prefs.scale, filter: prefs.filter,
   volume: prefs.volume, muted: prefs.muted, slot: prefs.slot,
   engine: prefs.engine

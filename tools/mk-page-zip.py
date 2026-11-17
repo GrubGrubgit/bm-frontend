@@ -3,7 +3,7 @@ P = '/data/data/com.termux/files/home/storage/AiAgent/def7cmrvqe'
 SRC = os.path.join(P, 'frontend', 'dist', 'www')
 STAGE = os.path.join(P, 'frontend', 'dist', 'page-stage')
 OUTZIP = os.path.join(P, 'frontend', 'dist', 'page.zip')
-EXCL_DIRS = ('src/core/mesen/',)
+EXCL_DIRS = ()
 EXCL_FILES = {'sw.js', 'manifest.webmanifest'}
 Q = chr(34)
 N = chr(10)
@@ -49,9 +49,9 @@ assert PKG in rep, 'packaging-fetch-moved'
 NOSW = '<script>' + N + '// Generator-page build: no service worker, no manifest.' + N + '// Perchance serves src/ files itself; the app is fully local.' + N + 'window.__INAPP = false;' + N + '</script>'
 idx2 = idx.replace(MANIFEST_LINK, '')
 idx2 = idx2[:s0] + NOSW + idx2[e0:]
-idx2 = idx2.replace(MESEN_TAG, '')
-idx2 = idx2.replace(MESEN_OPT, '')
-assert 'mesen/mesen.js' not in idx2, 'mesen-tag-left'
+idx2 = idx2  # 0.2.41 keep mesen tag
+idx2 = idx2  # 0.2.41 keep mesen option
+assert MESEN_TAG in idx2, 'mesen-tag-lost'
 assert 'manifest.webmanifest' not in idx2, 'manifest-left'
 assert 'value=' + Q + 'wasm' + Q + '>WASM port' in idx2, 'wasm-option-lost'
 BM_ADD = N + '// Generator-page base (set by the page wrapper via window.__BM_BASE).' + N + 'const BM_BASE = (typeof window !== ' + Q + 'undefined' + Q + ' && window.__BM_BASE) || ' + Q + Q + ';' + N
@@ -60,7 +60,7 @@ WASM_NEW = '(BM_BASE + ' + Q + 'build/game.wasm' + Q + ')'
 app3 = app2.replace(WASM_Q, WASM_NEW)
 assert app3.count(WASM_Q) == app3.count(WASM_NEW), 'wasm-wrap'
 assert app3.count(WASM_NEW) == 15, 'wasm-new-count'
-prf2 = prf.replace(ENG, 'const ENGINES = [' + Q + 'wasm' + Q + ']; // page: wasm only, no oracle shipped')
+prf2 = prf  # 0.2.41 both engines on the page
 PKG_NEW = 'fetch((typeof window !== ' + Q + 'undefined' + Q + ' && window.__BM_BASE || ' + Q + Q + ') + ' + Q + 'PACKAGING.json' + Q + ')'
 rep2 = rep.replace(PKG, PKG_NEW)
 assert PKG not in rep2, 'pkg-left'

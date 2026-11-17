@@ -169,6 +169,10 @@ void bm_load_chr(void) { memcpy(chr, stage, sizeof chr); }
 int bm_video_ptr(void) { return (int)(intptr_t)framebuf; }
 int bm_oam_ptr(void) { return (int)(intptr_t)oam; }
 int bm_frame_no(void) { return frame_no; }
+// Live wall counter (walls crossed per crossed NMI edge, incl. NMI-off
+// walls): replay feeds pads[wall+1] so the next handler strobe latches
+// the same pad the oracle/probe latch (cycle-measured, STROBE-verified).
+uint32_t bm_pad_wall(void) { return (uint32_t)(pad_wall & 0xFFFFFFFFu); }
 void bm_set_pad(int m) { game_pad = (uint8_t)(m & 0xFF); }
 int bm_audio_read(int dst_ptr, int max) {
   uint8_t *dst = (uint8_t *)(intptr_t)dst_ptr;
@@ -210,7 +214,7 @@ void bm_boot(void) {
   A = 0; X = 0; Y = 0; S = 0xFD; P = 0x24;
   pad_bits = 0; pad_pos1 = 0; pad_pos2 = 0; strobe = 0; pad_latch1 = 0; pad_latch2 = 0;
   cycles = 9; scx = 0; scy = 0; sc_latch = 0; ppu_addr = 0; ppu_latch = 0;
-  ppu_buf = 0; oam_addr = 0; reg2000 = 0; reg2001 = 0; chr0 = 0; chr1 = 0;
+  ppu_buf = 0; oam_addr = 0; reg2000 = 0; reg2001 = 0; ppu_openbus = 0; chr0 = 0; chr1 = 0;
   mmc_shift = 0; mmc_count = 0; mmc_ctrl = 0x0C; swbank = prg[0];
   nmi_next_edge = 27517; nmi_armed = 1; in_nmi = 0;
   frame_no = 0; game_pad = 0;

@@ -1235,15 +1235,18 @@ async function replayEnsureSpawned() {
 async function replayAdvanceTo(targetFrame, anchorHash) {
   const m = replay.movie;
   const base = m.version === 2 ? 0 : (replay.anchor.kind === "save" ? replay.anchor.frame : 0);
+  const useLiveWAdv = (typeof l2host.padWall === "function" && m.engine !== "wasm");
   replayProgress.last = -1;
   while (l2host.frame() < targetFrame) {
     const idx = l2host.frame() - base;
     if (idx < 0 || idx >= m.pads.length) throw new Error("replay-range idx=" + idx + " f=" + l2host.frame());
-    const q = m.pads[idx];
-    let j = idx + 1;
+    let q = m.pads[idx];
+    let advIdx = idx;
+    if (useLiveWAdv) { const W = l2host.padWall(); if (W !== null && W !== undefined) { advIdx = Math.max(0, Math.min(W + 1, m.pads.length - 1)); q = m.pads[advIdx]; } }
+    let j = advIdx + 1;
     const want = targetFrame - l2host.frame();
-    while (j < m.pads.length && m.pads[j] === q && (j - idx) < want && (j - idx) < 600) j++;
-    await l2host.go(j - idx, q);
+    while (j < m.pads.length && m.pads[j] === q && (j - advIdx) < want && (j - advIdx) < 600) j++;
+    await l2host.go(j - advIdx, q);
     replayProgress(l2host.frame() - base, m.pads.length);
   }
   if (anchorHash != null) {
@@ -1475,6 +1478,7 @@ async function replayStepOnce() {
   const m = replay.movie;
   const base = m.version === 2 ? 0 : (replay.anchor.kind === "save" ? replay.anchor.frame : 0);
   const idx = l2host.frame() - base;
+  const useLiveW = (typeof l2host.padWall === "function" && m.engine !== "wasm");
   if (idx < 0) throw new Error("replay-behind-anchor f=" + l2host.frame());
   if (idx >= m.pads.length) {
     replay.mode = "ended";
@@ -1488,7 +1492,9 @@ async function replayStepOnce() {
     const got = hash16();
     if (got !== String(m.anchorHash)) throw new Error("anchor-mismatch expect=" + m.anchorHash + " got=" + got + " (wrong ROM/save?)");
   }
-  const h = await Promise.race([l2host.go(1, m.pads[idx]), new Promise((rr, jj) => setTimeout(() => jj(new Error("go-stall")), 2500))]);
+  let feedPad = m.pads[idx];
+  if (useLiveW) { const W = l2host.padWall(); if (W !== null && W !== undefined) { const fi = Math.min(W + 1, m.pads.length - 1); feedPad = m.pads[Math.max(0, fi)]; } }
+  const h = await Promise.race([l2host.go(1, feedPad), new Promise((rr, jj) => setTimeout(() => jj(new Error("go-stall")), 2500))]);
   await presentFrame();
   if ((l2host.frame() & 31) === 0) updateReplayStatus();
   return h;

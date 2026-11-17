@@ -36,6 +36,7 @@ export function GameHost() {
   this._fatal = null;
 }
 GameHost.prototype.frame = function () { return this.consumed - this.f0; };
+GameHost.prototype.padWall = function () { try { if (this.inst && this.inst.exports.bm_pad_wall) return this.inst.exports.bm_pad_wall() >>> 0; } catch (e) {} return null; };
 GameHost.prototype.videoBytes = function () { return this.curVideo; };
 GameHost.prototype.hash = function () { return this.curHash >>> 0; };
 GameHost.prototype.audioFrame = function () {

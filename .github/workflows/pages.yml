@@ -1,0 +1,82 @@
+# .github/workflows/pages.yml - cloud build + GitHub Pages deploy for BM-Web.
+# Live site: https://grubgrubgit.github.io/bm-frontend/
+# The engine source (bm-recomp) is checked out at the commit pinned in
+# ENGINE_PIN, so the site tracks the pinned engine while the repos stay separate.
+# NOTE: this proves the wasm build + www assembly and deploys the playable page.
+# The gameplay gates (test_game / playtest) need the reference ROM, which never
+# enters git, so they stay device-side and must pass before any ENGINE_PIN bump.
+name: Build and deploy to Pages
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out frontend
+        uses: actions/checkout@v4
+        with:
+          path: frontend
+      - name: Read ENGINE_PIN
+        run: echo PIN_WANT=$(cat frontend/ENGINE_PIN) >> $GITHUB_ENV
+      - name: Check out engine source
+        uses: actions/checkout@v4
+        with:
+          repository: GrubGrubgit/bm-recomp
+          path: recomp
+          fetch-depth: 0
+      - name: Pin engine to ENGINE_PIN
+        run: git -C recomp checkout $PIN_WANT --quiet && git -C recomp rev-parse --short HEAD
+      - name: Install wasm toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+          clang --version
+          command -v wasm-ld || sudo ln -s $(ls /usr/bin/wasm-ld-* | head -n 1) /usr/local/bin/wasm-ld
+          wasm-ld --version
+      - name: Build game.wasm
+        working-directory: frontend
+        run: sh tools/build_game.sh
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Smoke-test wasm module (no ROM needed)
+        working-directory: frontend
+        run: |
+          node -e "const fs = require('node:fs'); const b = fs.readFileSync('build/game.wasm'); if (b[0] !== 0 || b[1] !== 97 || b[2] !== 115 || b[3] !== 109) { console.error('bad magic'); process.exit(1); } const mod = new WebAssembly.Module(b); const names = WebAssembly.Module.exports(mod).map(function (e) { return e.name; }); const need = ['memory', 'bm_boot', 'bm_stage_ptr', 'bm_video_ptr', 'bm_audio_read', 'bm_hash', 'bm_load_prg', 'bm_load_chr']; const missing = need.filter(function (n) { return names.indexOf(n) < 0; }); if (missing.length) { console.error('missing exports: ' + missing.join(',')); process.exit(1); } const imps = WebAssembly.Module.imports(mod); if (imps.length !== 1 || imps[0].module !== 'env' || imps[0].name !== 'host_frame') { console.error('unexpected imports: ' + JSON.stringify(imps)); process.exit(1); } console.log('wasm-smoke-ok exports=' + names.length + ' bytes=' + b.length);"
+      - name: Assemble www bundle
+        working-directory: frontend
+        run: |
+          VER=ci-$(git rev-parse --short HEAD)
+          python3 tools/packaging/make-www.py --version $VER
+          cat dist/www/PACKAGING.json
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist/www
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

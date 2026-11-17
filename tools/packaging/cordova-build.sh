@@ -85,15 +85,21 @@ patch_aapt2_arm() {
   [ "$patched" = 1 ]
 }
 
-echo "--- build ---"
-if cordova build android --debug >"$WORK/build1.log" 2>&1; then
+echo "echo --- prepare ---
+cordova prepare android
+for d in ldpi mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+  cp $WORK/res/android/fg-$d.png $WORK/platforms/android/app/src/main/res/mipmap-$d-v26/ic_launcher_foreground.png
+  cp $WORK/res/android/bg-$d.png $WORK/platforms/android/app/src/main/res/mipmap-$d-v26/ic_launcher_background.png
+done
+--- build ---"
+if cordova compile android --debug >"$WORK/build1.log" 2>&1; then
   tail -5 "$WORK/build1.log"
 else
   if grep -q "Daemon startup failed" "$WORK/build1.log"; then
     echo "x86_64 aapt2 detected, patching ARM aapt2 ..."
     patch_aapt2_arm || { echo "aapt2 patch failed"; tail -20 "$WORK/build1.log"; exit 1; }
     echo "rebuilding ..."
-    cordova build android --debug
+    cordova compile android --debug
   else
     tail -30 "$WORK/build1.log"; exit 1
   fi

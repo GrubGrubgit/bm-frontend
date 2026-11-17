@@ -31,8 +31,7 @@ mobile browsers (secondary).
   (unlocked by user gesture).
 - Responsive: desktop widescreen + mobile portrait/landscape. Touch controls
   and Bluetooth controllers are first-class, keyboard is dev convenience.
-- Modular code: one concern per file under `src/`, mirroring the FFV port
-  layout (`ffvport/src/ff5/` as the structural example: `rom.js`, `pack.js`,
+- Modular code: one concern per file under `src/` (`rom.js`, `pack.js`,
   `packreader.js`, `host.js`/`frontend.js`, `ppu.js`/`gfx.js`, `audio.js`/
   `sound.js`, `input.js`, `save.js`). No engine logic in shells.
 - No demo slices, no toy renderers, no placeholder systems. Every layer
@@ -64,7 +63,7 @@ mobile browsers (secondary).
   tables the C adapter needs (exact set frozen in P1; nothing copyrighted
   beyond what the user supplied).
 - Pack reader: version-checked load, section accessors, gap list (every
-  unexplained gap fails the build loudly — same rule as the FFV pack).
+  unexplained gap fails the build loudly)..
 - Cache: IndexedDB, pack version-keyed, ROM never stored (re-extract on
   demand). Wipe button clears `rom`/`packs`/`saves`.
 
@@ -81,9 +80,8 @@ mobile browsers (secondary).
   fixed-timestep + frame-skip policy, `reset()`, `stepFrame(pad)`,
   framebuffer hand-off, audio pump, state save/load. ONLY module touching
   compiled game code.
-- `src/rom/` — loader + CRC + header (FFV `rom.js` pattern).
-- `src/pack/` — builder + reader + schema version (FFV `pack.js` +
-  `packreader.js` pattern).
+- `src/rom/` — loader + CRC + header.
+- `src/pack/` — builder + reader + schema version.
 - `src/video/` — WebGL uploader + present of the SPEC section 5 framebuffer
   (CHR/palette/scroll/OAM compositing lives in the C adapter; OAM from oam[], scroll includes reg2000 base bits with MMC1 mirroring, sprite priority behind opaque bg, 8x16 bank fix; title oracle still matches):
   scaling (Integer/Fit/Fill/Stretch) + filter (Nearest default/Bilinear) +
@@ -93,11 +91,11 @@ mobile browsers (secondary).
   SwiftShader — any drawArrays loses the context ~1s later — so readPixels/
   drawImage asserts are excluded by environment; renderer byte-exactness was
   additionally proven on conformant real GL).
-- `src/audio/` — live NES APU (FFV `spc.js` pattern: native voice
+- `src/audio/` — live NES APU (native voice
   synthesis from the engine register stream, not PCM playback):
   pulse/triangle/noise/DMC + frame counter per the game driver (bank5 TU),
   worklet/graph at device rate, mute/volume, gap counter. Shell reset/stop/load resets the worklet voice; ApuStream rebases on frame jumps so load does not render thousands of silent frames. No game code.
-- `src/input/` — ONE virtual-pad bus (FFV `input.js` pattern): `keyboard.js`
+- `src/input/` — ONE virtual-pad bus: `keyboard.js`
   (desktop), `touch.js` (d-pad + diagonals + A/B/Start/Select, multitouch,
   both orientations), `gamepad.js` (standard mapping incl. Bluetooth,
   hotplug + reconnect), `agent.js` (programmatic writes for headless).
@@ -118,8 +116,8 @@ channel. Documented in `README.md`.
 - Zero console errors on desktop + mobile viewports, every layer.
 - Headless Chromium runner (`tools/headless.sh`): loads the build, runs
   the layer self-tests, captures screenshots to `work/` (gitignored),
-  diffs against oracle captures (tracer `snap2png.py` room renders + FFV
-  pack-reader pattern). No layer DONE until its checks pass on the phone.
+  diffs against oracle captures (tracer `snap2png.py` room renders).
+  No layer DONE until its checks pass on the phone.
 - Budgets: full speed (60fps NTSC) on the phone with headroom;
   input-to-photon latency under 100ms on touch. `work/` stays small;
   `sh tools/guard.sh` before heavy sessions (6GB minimum); user approval

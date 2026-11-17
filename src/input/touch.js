@@ -1,5 +1,5 @@
 // src/input/touch.js -- real cross d-pad + round B/A + compact SEL/STA.
-// Same shape as the ffvport SNES pad: four discrete direction buttons fused
+// Four discrete direction buttons fused
 // into a 3x3 cross around a pivot nub, thumb-roll across buttons via
 // elementFromPoint hit-testing, per-pointerId tracking so run+jump (hold A
 // on one thumb while rolling the cross with the other) is one mask,

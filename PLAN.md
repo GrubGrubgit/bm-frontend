@@ -70,7 +70,7 @@ identical boot pixels; zero console errors. No game logic here.
 
 ## L4 — Audio (finished whole)
 Goal: game sound out of the phone speaker, no crackle.
-- `src/audio/`: live NES APU (FFV `spc.js` pattern) driven by the
+- `src/audio/`: live NES APU (native voice synthesis) driven by the
   `bm_audio_read()` register stream, rendered in a worklet/graph at the
   device rate; mute/volume + render-gap counter in `BM.stats()`.
   Voice/sequence semantics are the game music driver itself (bank5 TU)

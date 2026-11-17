@@ -5,7 +5,7 @@
 # Canonical gen/ files are never modified. Fails loudly on anchor drift.
 #  3. LE351 story-skip unwind resumes at C2AC (single static caller chain, G2 target-resume).
 import sys, pathlib
-RECOMP = pathlib.Path("/data/data/com.termux/files/home/storage/AiAgent/def7cmrvqe/recomp")
+RECOMP = pathlib.Path(__file__).resolve().parent.parent.parent / "recomp"
 OUT = pathlib.Path(__file__).resolve().parent.parent / "build" / "vendor"
 A1 = "uint8_t chr0, chr1;"
 R1 = ("uint8_t chr0, chr1;\n"

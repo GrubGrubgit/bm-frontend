@@ -115,6 +115,18 @@ export async function replayMovie(host, pads, onProgress) {
   }
   return host.frame();
 }
+// Cross-engine replay policy (pure, headless-tested): anchor hashes are
+// engine-LOCAL (wasm bm_hash vs mesen frame FNV), so they are only
+// comparable within the recording engine. ROM crcs are engine-independent.
+export function sameEngineForAnchor(movieEngine, currentEngine) {
+  return !movieEngine || movieEngine === "unknown" || movieEngine === currentEngine;
+}
+export function romGateVerdict(movieRom, loadedRom) {
+  const w = movieRom != null ? String(movieRom) : "unknown";
+  const h = loadedRom != null ? String(loadedRom) : "unknown";
+  if (w === "unknown" || h === "unknown") return "unverifiable";
+  return w === h ? "ok" : "mismatch";
+}
 export function downloadJson(obj, fname) {
   const text = JSON.stringify(obj);
   const apkr = apkSave(fname, text);

@@ -610,7 +610,7 @@ if (qs.has("headless")) {
 // mask, video present + audio push per frame). Determinism + replay save/
 // load are L2 properties this layer reuses, never reimplements.
 import { autoTrapReport, autoFaultReport, manualBugReport, buildBugReport, formatTrapBanner } from "./ui/report.js";
-import { makeMovie, makeMovieV2, parseMovie, downloadMovie, downloadPng, replayMovie, downloadJson } from "./input/movie.js";
+import { makeMovie, makeMovieV2, parseMovie, downloadMovie, downloadPng, replayMovie, downloadJson, sameEngineForAnchor, romGateVerdict } from "./input/movie.js";
 import { loadPrefs, savePrefs } from "./ui/prefs.js";
 import { wireInstall } from "./ui/pwa.js";
 import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
@@ -1176,7 +1176,9 @@ async function shellFrame() {
 // A replay = parsed movie + anchor + mode. Anchor = where pads[0] executes:
 // boot (fresh spawn, frame 0) or a loaded savestate slot (frame M).
 // v2 movies are self-contained: pads = FULL history boot->end, start = take
-// offset, anchorHash = engine hash at take start. Replay always runs from
+// offset, anchorHash = engine-LOCAL hash at take start, engine = recorder.
+// Cross-engine loads skip the hash (wasm/mesen hash different state) and
+// verify the ROM crc instead. Replay always runs from
 // boot through all pads; reaching start with a different hash throws
 // anchor-mismatch instead of silently desyncing. v1 movies (old shares,
 // retroarch imports) have no prefix: with a save anchor their pads apply
@@ -1268,6 +1270,14 @@ async function replayLoadParsed(m) {
   replay.busy = true;
   try {
   await replayEnsureSpawned();
+  const haveRom = await currentRomCrc();
+  const rv = m.version === 2 ? romGateVerdict(m.rom, haveRom) : "unverifiable";
+  if (rv === "mismatch") throw new Error("rom-mismatch movie=" + m.rom + " loaded=" + haveRom + " (wrong ROM file?)");
+  if (rv === "ok") shellLog("replay rom ok crc=" + haveRom);
+  else shellLog("replay rom unverifiable (movie=" + m.rom + " loaded=" + haveRom + ") - continuing");
+  const sameEngine = sameEngineForAnchor(m.engine, prefs.engine);
+  const takeHash = sameEngine ? m.anchorHash : null;
+  if (!sameEngine) shellLog("cross-engine replay (" + m.engine + "->" + prefs.engine + "): anchor hash is engine-local, ROM crc verified instead");
   if (anchorSave && anchorSave.slot != null) replay.anchor = { kind: "save", slot: anchorSave.slot, frame: anchorSave.frame, hash: anchorSave.hash };
   else replay.anchor = { kind: "boot" };
   replay.movie = m;
@@ -1283,12 +1293,12 @@ async function replayLoadParsed(m) {
     shellLog("replay self-contained prefix, advancing to take@" + m.start);
     const pack = await l2ensurePack();
     await l2host.spawn(pack, "build/game.wasm");
-    await replayAdvanceTo(m.start, m.anchorHash);
+    await replayAdvanceTo(m.start, takeHash);
   } else if (m.version === 2) {
     if (replay.anchor.kind === "save") shellLog("replay save anchor is not the take anchor - using self-contained prefix instead");
     const pack = await l2ensurePack();
     await l2host.spawn(pack, "build/game.wasm");
-    await replayAdvanceTo(m.start, m.anchorHash);
+    await replayAdvanceTo(m.start, takeHash);
   } else {
     if (replay.anchor.kind === "save") {
       shellLog("v1 replay: no anchor hash, starting from save (unverifiable)");
@@ -1311,7 +1321,7 @@ async function replayLoadFile(file) {
   const text = await file.text();
   const m = parseMovie(JSON.parse(text));
   const crc = await currentRomCrc();
-  if (String(m.rom) !== String(crc)) shellLog("movie rom " + m.rom + " vs current " + crc + " (replaying anyway)");
+  if (String(m.rom) !== String(crc)) shellLog("movie rom " + m.rom + " vs current " + crc);
   try {
     return await replayLoadParsed(m);
   } catch (e) {
@@ -1474,7 +1484,7 @@ async function replayStepOnce() {
     await presentFrame();
     return 0;
   }
-  if (m.version === 2 && m.anchorHash != null && idx === m.start && l2host.frame() !== 0) {
+  if (m.version === 2 && m.anchorHash != null && sameEngineForAnchor(m.engine, prefs.engine) && idx === m.start && l2host.frame() !== 0) {
     const got = hash16();
     if (got !== String(m.anchorHash)) throw new Error("anchor-mismatch expect=" + m.anchorHash + " got=" + got + " (wrong ROM/save?)");
   }
@@ -1845,7 +1855,7 @@ async function selfTestReplay() {
     const endHash = hash16();
     const hash150 = (l2host.hashLog[149] >>> 0).toString(16);
     const pads = l2host.padLog.slice(0, 300);
-    const m = makeMovieV2(pads, "testcrc", { start: 150, anchorHash: hash150, engine: "wasm" });
+    const m = makeMovieV2(pads, await currentRomCrc(), { start: 150, anchorHash: hash150, engine: "wasm" });
     const parsed = parseMovie(JSON.parse(JSON.stringify(m)));
     if (parsed.version !== 2 || parsed.start !== 150 || parsed.anchorHash !== hash150) return failR("v2-rt");
     statusEl.textContent = "replay: load (advance to take@150)";

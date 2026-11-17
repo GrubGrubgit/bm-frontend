@@ -15,5 +15,17 @@
   <platform name="android">
     <preference name="android-minSdkVersion" value="29" />
     <preference name="android-targetSdkVersion" value="36" />
+    <icon density='ldpi' src='res/android/ldpi.png' />
+    <icon density='mdpi' src='res/android/mdpi.png' />
+    <icon density='hdpi' src='res/android/hdpi.png' />
+    <icon density='xhdpi' src='res/android/xhdpi.png' />
+    <icon density='xxhdpi' src='res/android/xxhdpi.png' />
+    <icon density='xxxhdpi' src='res/android/xxxhdpi.png' />
+    <icon density='ldpi' background='res/android/bg-ldpi.png' foreground='res/android/fg-ldpi.png' />
+    <icon density='mdpi' background='res/android/bg-mdpi.png' foreground='res/android/fg-mdpi.png' />
+    <icon density='hdpi' background='res/android/bg-hdpi.png' foreground='res/android/fg-hdpi.png' />
+    <icon density='xhdpi' background='res/android/bg-xhdpi.png' foreground='res/android/fg-xhdpi.png' />
+    <icon density='xxhdpi' background='res/android/bg-xxhdpi.png' foreground='res/android/fg-xxhdpi.png' />
+    <icon density='xxxhdpi' background='res/android/bg-xxxhdpi.png' foreground='res/android/fg-xxxhdpi.png' />
   </platform>
 </widget>

@@ -57,6 +57,7 @@ open(f, 'w').write(s)
 print('stamped config ' + ver + ' code ' + code)
 PYEOF
 cd "$WORK"
+if [ -d $REPO/cordova-res ]; then cp -r $REPO/cordova-res $WORK/res; fi
 cordova platform add android@15.1.0
 
 echo --- bmapk bridge ---

@@ -85,13 +85,13 @@ patch_aapt2_arm() {
   [ "$patched" = 1 ]
 }
 
-echo "echo --- prepare ---
+echo --- prepare ---
 cordova prepare android
 for d in ldpi mdpi hdpi xhdpi xxhdpi xxxhdpi; do
   cp $WORK/res/android/fg-$d.png $WORK/platforms/android/app/src/main/res/mipmap-$d-v26/ic_launcher_foreground.png
   cp $WORK/res/android/bg-$d.png $WORK/platforms/android/app/src/main/res/mipmap-$d-v26/ic_launcher_background.png
 done
---- build ---"
+echo "--- build ---"
 if cordova compile android --debug >"$WORK/build1.log" 2>&1; then
   tail -5 "$WORK/build1.log"
 else

@@ -42,10 +42,15 @@ void bm_trap(uint16_t v, const char *name) {
 int bm_trap_flag(void) { return bm_trap_seen; }
 int bm_trap_code(void) { return (int)bm_trap_val; }
 int bm_trap_namep(void) { return (int)(intptr_t)bm_trap_name; }
+void dbg_ev(uint32_t x);
 #include "combined_off.c"
 __attribute__((import_module("env"))) __attribute__((import_name("host_frame"))) void host_frame(int frame);
 static int frame_no;
 static uint8_t game_pad;
+static uint32_t dbgev[2048]; static int dbgn;
+void dbg_ev(uint32_t x) { if (dbgn < 2048) dbgev[dbgn++] = x; }
+int bm_dbgn(void) { return dbgn; }
+uint32_t bm_dbg(int i) { return (i >= 0 && i < dbgn) ? dbgev[i] : 0; }
 static int apu_tail;
 static uint8_t stage[131072];
 uint8_t chr[131072];
@@ -169,6 +174,8 @@ void bm_load_chr(void) { memcpy(chr, stage, sizeof chr); }
 int bm_video_ptr(void) { return (int)(intptr_t)framebuf; }
 int bm_oam_ptr(void) { return (int)(intptr_t)oam; }
 int bm_frame_no(void) { return frame_no; }
+int bm_cycles_lo(void) { return (int)(cycles & 0xFFFFFFFFu); }
+int bm_cycles_hi(void) { return (int)((cycles >> 32) & 0xFFFFFFFFu); }
 // Live wall counter (walls crossed per crossed NMI edge, incl. NMI-off
 // walls): replay feeds pads[wall+1] so the next handler strobe latches
 // the same pad the oracle/probe latch (cycle-measured, STROBE-verified).

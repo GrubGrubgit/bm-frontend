@@ -207,7 +207,7 @@ int bm_mem_size(void) {
   return (int)(intptr_t)&__heap_base;
 }
 void bm_boot(void) {
-  memset(ram, 0xFF, sizeof ram); // power-on pattern (all 0xFF)
+  memset(ram, 0x00, sizeof ram); // Mesen parity: power-on RAM reads 0 (probe-proven over 120568f; 0xFF diverges at f=144)
   memset(vram, 0, sizeof vram);
   memset(pal, 0, sizeof pal);
   memset(oam, 0, sizeof oam);

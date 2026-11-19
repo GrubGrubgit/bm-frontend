@@ -61,8 +61,9 @@ def main():
     assert li[k+1].strip().startswith('nmi_poll(')
     assert li[k+2].strip() == 'X = RD(0x01); setZN(X);'
     assert li[k+5].strip() == 'S = X;'
-    assert li[k+7].strip() == 'return;'
-    li[k+7] = li[k+7].replace('return;', '__attribute__((musttail)) return b7_entry_C2AC();')
+    assert li[k+7].strip().startswith('nmi_poll(')
+    assert li[k+9].strip() == 'return;'
+    li[k+9] = li[k+9].replace('return;', '__attribute__((musttail)) return b7_entry_C2AC();')
     co = chr(10).join(li)
     (OUT / "combined_off.c").write_text(co)
     print("vendor patched: runtime.h APU ring + combined_off.c + LE351resume")

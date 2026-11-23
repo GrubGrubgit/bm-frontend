@@ -90,7 +90,7 @@ standalone copy). Verify the row placement matches in both files. Editor ships v
   PACKAGING/MANIFEST/README -> page_refresh boot-verify.
 
 ## P0-COMPLETE (2026-11-23, frontend e8ccd45, bundle 0.2.50).
-All acceptance checks that can run without a user-supplied ROM pass: node overlay suite 15/15, node wasm/mesen byte-equality 5/5, browser end-to-end 19/19 (resolve/patch/gates/UI), movie fields 3/3, boot log clean (shell ready, zero errors). Residual (needs ROM): live boot of a modded pack + replay pack-mismatch refusal on a spawned engine; save/load pack-gate code is in place and syntax-checked on both hosts.
+All acceptance checks that can run without a user-supplied ROM pass: node overlay suite 15/15, node wasm/mesen byte-equality 5/5, browser end-to-end 19/19 (resolve/patch/gates/UI), movie fields 3/3, boot log clean (shell ready, zero errors). Closed on device 2026-11-23 with the reference ROM (work/roms-dev/blaster-master-usa.nes, crc bc300047): ~/verify-pack-p0.mjs 32/32. CHR-modded pack boots trap-free and renders changed video (stock vs mod fnv differ); wasm loaded-PRG/CHR readback is byte-equal to the overlaid banks through the exact spawn load sequence; real GameHost.packGate throws pack-mismatch on cross-pack load and passes on match/legacy; real MesenHost._buildRomBytes rebuilt ROM carries the overlay bytes; replay gate (app.js condition) fires on real parsed movies for custom-vs-stock and passes on match/legacy-v1, as does the mesen save-gate condition. No user-supplied ROM was ever needed; the device reference ROM covers it.
 
 ## 4. Phases
 ### P0 — Custom-pack plumbing (no editor UI beyond shell hooks)

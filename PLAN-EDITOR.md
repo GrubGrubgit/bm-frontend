@@ -49,9 +49,12 @@ editor") — the workspace src/bm/ tree is a GENERATED BUNDLE, never hand-edit.
   entrance, 4 damage, 5 ladder, 6 water (solid+water = breakable), 7 solid
   (solid+door = scrolling-region doorway). Overhead physics bits DIFFER —
   overhead attrs are read-only until 6.2.
-- 2.3 Free space (growth headroom, same-bank only): bank0 628B, bank1 2005B,
-  bank2 1437B (per ROM map). Tables may be intermixed/relocated within the
-  bank; pointers make it explicit ("data ... could be intermixed").
+- 2.3 Free space (growth headroom, same-bank only): bank0 624B, bank1 2003B,
+  bank2 1471B (TRUE compact capacity = 16384 - head/slack - all table spans,
+  proven by grow-until-overflow: 620/2000/1468 usable at 4-alignment; the ROM
+  map's 628/2005/1437 counts a few unusable head-slack/hole bytes).
+  Tables may be intermixed/relocated within the bank; pointers make it
+  explicit ("data ... could be intermixed").
 - 2.4 CHR: pack stores 16x8KB chr banks (= 32x4KB physical). Per-level
   sprite/bg bank assignments documented in ROM map CHR section. Patterns are
   standard NES 2bpp 8x8 tiles. Level bg palettes listed in ROM map Misc.

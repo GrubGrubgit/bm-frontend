@@ -212,7 +212,9 @@ function scrollHint(E) {
     const rs = cells.map(c => c[0]), cs = cells.map(c => c[1]);
     const r0 = Math.min(...rs), r1 = Math.max(...rs), c0 = Math.min(...cs), c1 = Math.max(...cs);
     const full = (r1 - r0 + 1) * (c1 - c0 + 1);
-    let m = name + ": " + cells.length + " cells" + (cells.length === full ? " rectangular [" + r0 + "-" + r1 + "," + c0 + "-" + c1 + "]" : " NON-RECTANGULAR bbox [" + r0 + "-" + r1 + "," + c0 + "-" + c1 + "]");
+    // Shape is informational only: stock maps prove non-rectangular
+    // regions are legitimate (e.g. stock L1 V), so shape is never flagged.
+    let m = name + ": " + cells.length + " cells " + (cells.length === full ? "rectangular [" + r0 + "-" + r1 + "," + c0 + "-" + c1 + "]" : "(non-rectangular bbox [" + r0 + "-" + r1 + "," + c0 + "-" + c1 + "])");
     if (doors && evenScreens) {
       // Informational only: stock maps prove doorless scroll screens and
       // even doorless regions are legitimate (dead-ends, loops, drops),

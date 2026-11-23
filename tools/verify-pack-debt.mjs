@@ -128,7 +128,9 @@ for (const b of [0, 1, 2]) {
   const pb = parseBank(stock.prg[b], b);
   ok('bank' + b + ' free>0', pb.ok && bankFreeBytes(pb) > 0, pb.ok ? String(bankFreeBytes(pb)) : 'parse-fail');
 }
-ok('free matches doc tail', (() => { const pb = parseBank(stock.prg[0], 0); return bankFreeBytes(pb) === 628; })(), 'bank0 headroom');
+ok('free bank0=624', bankFreeBytes(parseBank(stock.prg[0], 0)) === 624);
+ok('free bank1=2003', bankFreeBytes(parseBank(stock.prg[1], 1)) === 2003);
+ok('free bank2=1471', bankFreeBytes(parseBank(stock.prg[2], 2)) === 1471);
 // 9. doorway helpers on real levels
 const doors1 = doorComboSet(L1);
 ok('L1 has door combos', doors1.size > 0, 'n=' + doors1.size);

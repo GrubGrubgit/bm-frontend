@@ -112,25 +112,17 @@ export function parseBank(bankBytes, bank) {
   if (errors.length) return { ok: false, errors };
   return { ok: true, errors: [], bank, bytes: bankBytes.slice(), levels, gaps };
 }
-// Free space = bank tail after the last span start... plus recorded gaps.
-// Computed at serialize time from the parse (gaps) and current placements.
-function freeList(parsed) {
-  let last = parsed.levels.length * 4 + 4;
-  const bump = o => { if (o > last) last = o; };
-  for (const L of parsed.levels) {
-    bump(L.tableRel + 12); bump(L.ptrs.pal + 16); bump(L.scrollRel + 16);
-    bump(L.ptrs.map + L.lens.map);
-    bump(L.ptrs.combo + L.lens.combo); bump(L.ptrs.struct + L.lens.struct);
-    bump(L.ptrs.block + L.lens.block); bump(L.ptrs.attr + L.lens.attr);
-    for (const g of parsed.gaps) bump(g.off + g.len);
-  }
-  const free = parsed.gaps.map(g => ({ off: g.off, len: g.len }));
-  if (last < BANK_SIZE) free.push({ off: last, len: BANK_SIZE - last });
-  return free;
-}
-// Free-space accounting (P1): recorded inter-table gaps + bank tail.
+// Free-space accounting (P1): TRUE compact capacity — the exact byte
+// budget serializeCompact enforces (bank size minus head+slack minus every
+// table span). Measured operationally by grow-until-overflow: bank0 624,
+// bank1 2003, bank2 1471 (gap+tail sums overstate this by a few bytes of
+// head slack and pre-first-span holes the compactor cannot reuse, so they
+// are not used here).
 export function bankFreeBytes(parsed) {
-  return freeList(parsed).reduce((a, r) => a + r.len, 0);
+  let used = parsed.levels.length * 4 + 4; // head + slack, mirrors serializeCompact
+  for (const L of parsed.levels)
+    used += 12 + 16 + 16 + L.lens.combo + L.lens.struct + L.lens.block + L.lens.map + L.lens.attr;
+  return BANK_SIZE - used;
 }
 // Serialize parsed (possibly edited) levels back into a bank image.
 // edited: {level: {pal?, scroll?, attrs?, combos?, structs?, blocks?, map?}}.

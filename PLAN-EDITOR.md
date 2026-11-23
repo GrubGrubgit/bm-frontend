@@ -31,15 +31,25 @@ editor") — the workspace src/bm/ tree is a GENERATED BUNDLE, never hand-edit.
   (offsets UNRESEARCHED — see 6.1). Banks 4-7: engine code (hands off).
 - 2.2 Level record (per level, all pointers same-bank, level paged at 0x8000;
   file offset = ptr - 0x8000 + bank*16384): bank head has per-level
-  (mapPtr, scrollPtr); mapPtr table = 6 pointers: bg palette (16B),
-  combo attrs (N x 1B), combos (N x 4B: 4 pattern indices), structures
-  (M x 4B: 4 combo indices), blocks (K x 4B: 4 structure indices), map
-  (32x32 block indices = 1024B; overhead L9 = 800B, L13 = 928B).
+  (tablePtr, scrollPtr); table = 6 pointers in FIXED order [pal, attr,
+  combo, struct, block, map]: bg palette (16B), combo attrs (N x 1B),
+  combos (N x 4B: 4 pattern indices), structures (M x 4B: 4 combo
+  indices), blocks (K x 4B: 4 struct indices), map (32 cols x rows =
+  1024B tank rows=32; overhead L9 = 800B rows=25, L13 = 928B rows=29).
+  Lengths derive exactly: attr runs to the next span (attr count ==
+  combo count), combo = 4x attr, struct/block run to the next span
+  (multiples of 4), map fixed per level, pal/scroll/table fixed.
+  Inter-table gaps exist (L10/L12/L14/L16: 4-12B after combos) and are
+  preserved; bank-tail free starts (bank-relative): bank0 0x3D8C,
+  bank1 0x382B, bank2 0x3A63. Geometry (measured headless: 2-block
+  stripe period 128px, 8px grid): pattern 8x8, combo 16x16, struct
+  32x32, block 64x64, row-major [TL,TR,BL,BR] assumed (visual check in
+  preview). Screen = 4x4 blocks.
   Scroll = 16B (8B vertical + 8B horizontal flags over 8x8 screen grid,
   grid offset +32/+32px). Combo attr bits: 0-1 palette, 2-3 door/overhead
   entrance, 4 damage, 5 ladder, 6 water (solid+water = breakable), 7 solid
   (solid+door = scrolling-region doorway). Overhead physics bits DIFFER —
-  do not assume tank meanings when editing overhead combos.
+  overhead attrs are read-only until 6.2.
 - 2.3 Free space (growth headroom, same-bank only): bank0 628B, bank1 2005B,
   bank2 1437B (per ROM map). Tables may be intermixed/relocated within the
   bank; pointers make it explicit ("data ... could be intermixed").

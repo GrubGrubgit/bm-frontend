@@ -80,7 +80,11 @@ editor") — the workspace src/bm/ tree is a GENERATED BUNDLE, never hand-edit.
   pack (never mutates stock in place; "Save as" naming). All editor parsing
   lives in pure modules (pack/levels.js: pointer-chain parser + serializer;
   pack/chr.js: 2bpp codec; pack/enemies.js in P3) with headless tests.
-- 3.6 No hand-edits to workspace src/bm/ ever. Editor ships via the normal
+- 3.6 No hand-edits to workspace src/bm/ ever. EXCEPTION that is not an
+exception: the workspace root index.html (generator page shell markup)
+mirrors the device index.html shell section by hand on every sync that
+changes shell DOM (the bundle only carries src/bm/index.html, the
+standalone copy). Verify the row placement matches in both files. Editor ships via the normal
   release path: device build -> make-www --version X -> mk-page-zip ->
   catbox -> fetch_url scratch/page-X.zip -> extract over src/bm/ ->
   PACKAGING/MANIFEST/README -> page_refresh boot-verify.

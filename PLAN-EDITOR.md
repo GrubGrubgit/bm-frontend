@@ -89,6 +89,9 @@ standalone copy). Verify the row placement matches in both files. Editor ships v
   catbox -> fetch_url scratch/page-X.zip -> extract over src/bm/ ->
   PACKAGING/MANIFEST/README -> page_refresh boot-verify.
 
+## P0-COMPLETE (2026-11-23, frontend e8ccd45, bundle 0.2.50).
+All acceptance checks that can run without a user-supplied ROM pass: node overlay suite 15/15, node wasm/mesen byte-equality 5/5, browser end-to-end 19/19 (resolve/patch/gates/UI), movie fields 3/3, boot log clean (shell ready, zero errors). Residual (needs ROM): live boot of a modded pack + replay pack-mismatch refusal on a spawned engine; save/load pack-gate code is in place and syntax-checked on both hosts.
+
 ## 4. Phases
 ### P0 — Custom-pack plumbing (no editor UI beyond shell hooks)
 Steps: schema v2 + validate; overlay.js + bounds checks; store custom CRUD;

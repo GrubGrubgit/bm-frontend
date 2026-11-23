@@ -43,8 +43,7 @@ editor") — the workspace src/bm/ tree is a GENERATED BUNDLE, never hand-edit.
   preserved; bank-tail free starts (bank-relative): bank0 0x3D8C,
   bank1 0x382B, bank2 0x3A63. Geometry (measured headless: 2-block
   stripe period 128px, 8px grid): pattern 8x8, combo 16x16, struct
-  32x32, block 64x64, row-major [TL,TR,BL,BR] assumed (visual check in
-  preview). Screen = 4x4 blocks.
+  32x32, block 64x64, row-major [TL,TR,BL,BR] PROVEN exact (2026-11-23: full 32x30 L1 spawn vicinity reproduced the live PPU nametable + attrs 960/960 under the unique surviving arrangement of 8 hypotheses; tile pixels mean-ham 0.12/64 vs live frame; settled PPU palette RAM byte-identical to the level pal). Screen = 4x4 blocks.
   Scroll = 16B (8B vertical + 8B horizontal flags over 8x8 screen grid,
   grid offset +32/+32px). Combo attr bits: 0-1 palette, 2-3 door/overhead
   entrance, 4 damage, 5 ladder, 6 water (solid+water = breakable), 7 solid
@@ -174,3 +173,4 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
 - 2026-11-23 user: phase order P0->P1->P2->P3 approved; plan doc first.
 - 2026-11-23: pack overlay (not forked packs) so stock stays pristine and
   both engines share one apply path.
+- 2026-11-23 P1 acceptance closed: all-16-level byte-identical round-trip (verify-pack-p1 57/57) + edited map boots and plays on BOTH engines (verify-pack-p1-play 15/15: wasm warp(0)+walk dx=9792 trap-free, mesen stock-vs-edited divergence + scroll motion).

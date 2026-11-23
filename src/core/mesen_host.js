@@ -167,7 +167,13 @@ MesenHost.prototype.save = async function (slot) {
   var blob = new Uint8Array(mod.HEAPU8.subarray(ptr, ptr + sz)).slice();
   try { mod._free(ptr); } catch (e) {}
   if (!ok) throw new Error("mesen-snap-fail");
-  var data = { v: 2, engine: "mesen", frame: this.frame(), hash: (this.hash() >>> 0).toString(16), audioTotal: this.audioTotal, pads: this.padLog.slice(0, this.frame()), snap: m64enc(blob) };
+  var tag = (function (pack) {
+    var c = pack && pack.custom;
+    if (c && c.id) return { pack: String(c.id), packCrc: String(c.crc || "unknown") };
+    var crc = (pack && pack.meta && pack.meta.crc32) || "unknown";
+    return { pack: "stock", packCrc: String(crc) };
+  })(this.pack);
+  var data = { v: 2, engine: "mesen", frame: this.frame(), hash: (this.hash() >>> 0).toString(16), audioTotal: this.audioTotal, pads: this.padLog.slice(0, this.frame()), snap: m64enc(blob), pack: tag.pack, packCrc: tag.packCrc };
   await saveSlot(slot, data);
   return data;
 };
@@ -175,6 +181,12 @@ MesenHost.prototype.load = async function (slot, onProgress) {
   var data = await loadSlot(slot);
   if (!data || (data.v !== 1 && data.v !== 2)) throw new Error("no-save:" + slot);
   if (data.v === 2 && data.engine && data.engine !== "mesen") throw new Error("save-engine:" + data.engine + " (current mesen)");
+  if (data.v === 2 && data.pack != null && data.pack !== "unknown") {
+    var c0 = this.pack && this.pack.custom;
+    var cur = c0 && c0.id ? { pack: String(c0.id), packCrc: String(c0.crc || "unknown") } : { pack: "stock", packCrc: String((this.pack && this.pack.meta && this.pack.meta.crc32) || "unknown") };
+    if (String(data.pack) !== cur.pack || (data.packCrc && data.packCrc !== "unknown" && String(data.packCrc) !== cur.packCrc))
+      throw new Error("pack-mismatch save=" + data.pack + " active=" + cur.pack + " (load the matching custom pack?)");
+  }
   if (data.v === 2 && data.snap) {
     var mod = this.mod;
     if (!mod) throw new Error("mesen-not-spawned (Start first, then Load)");

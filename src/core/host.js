@@ -152,8 +152,21 @@ GameHost.prototype.reset = async function () {
 // serialized, so restore = fresh spawn + fast-forward). v2 adds the engine
 // tag and the post-restore hash: load replays, then compares against the
 // saved hash and throws LOAD-MISMATCH instead of silently desyncing.
+GameHost.prototype.packTag = function () {
+  var c = this.pack && this.pack.custom;
+  if (c && c.id) return { pack: String(c.id), packCrc: String(c.crc || "unknown") };
+  var crc = (this.pack && this.pack.meta && this.pack.meta.crc32) || "unknown";
+  return { pack: "stock", packCrc: String(crc) };
+};
+GameHost.prototype.packGate = function (data) {
+  if (!data || data.pack == null || data.pack === "unknown") return;
+  var tag = this.packTag();
+  if (String(data.pack) !== tag.pack || (data.packCrc && data.packCrc !== "unknown" && String(data.packCrc) !== tag.packCrc))
+    throw new Error("pack-mismatch save=" + data.pack + " active=" + tag.pack + " (load the matching custom pack?)");
+};
 GameHost.prototype.save = async function (slot) {
-  var data = { v: 2, engine: "wasm", frame: this.frame(), hash: (this.hash() >>> 0).toString(16), audioTotal: this.audioTotal, pads: this.padLog.slice(0, this.frame()) };
+  var tag = this.packTag();
+  var data = { v: 2, engine: "wasm", frame: this.frame(), hash: (this.hash() >>> 0).toString(16), audioTotal: this.audioTotal, pads: this.padLog.slice(0, this.frame()), pack: tag.pack, packCrc: tag.packCrc };
   await saveSlot(slot, data);
   return data;
 };
@@ -161,6 +174,7 @@ GameHost.prototype.load = async function (slot, onProgress) {
   var data = await loadSlot(slot);
   if (!data || (data.v !== 1 && data.v !== 2)) throw new Error("no-save:" + slot);
   if (data.v === 2 && data.engine && data.engine !== "wasm") throw new Error("save-engine:" + data.engine + " (current wasm)");
+  this.packGate(data);
   await this.spawn(this.pack, this.wasmUrl);
   var n = data.pads.length, i = 0, last = -1;
   while (i < n) {

@@ -29,7 +29,10 @@ export function makeMovieV2(pads, romCrc, opts) {
   return {
     app: "bm-movie", v: 2, rom: String(romCrc), frame: b.length, start: start,
     anchorHash: o.anchorHash != null ? String(o.anchorHash) : null,
-    engine: o.engine || "unknown", pads: encodePads(b)
+    engine: o.engine || "unknown",
+    pack: o.pack != null ? String(o.pack) : "unknown",
+    packCrc: o.packCrc != null ? String(o.packCrc) : "unknown",
+    pads: encodePads(b)
   };
 }
 export function parseMovie(o) {
@@ -41,6 +44,8 @@ export function parseMovie(o) {
   const start = o.v === 2 ? Math.max(0, Math.min(pads.length, o.start | 0)) : 0;
   return {
     pads: pads, frame: o.frame, rom: String(o.rom),
+    pack: o.pack != null ? String(o.pack) : "unknown",
+    packCrc: o.packCrc != null ? String(o.packCrc) : "unknown",
     version: o.v, start: start,
     anchorHash: o.v === 2 && o.anchorHash != null ? String(o.anchorHash) : null,
     engine: o.v === 2 ? String(o.engine || "unknown") : "unknown"

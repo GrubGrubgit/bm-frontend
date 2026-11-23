@@ -3,6 +3,8 @@ import { wireLoader } from "./rom/loader.js";
 import { buildPack } from "./pack/builder.js";
 import { validatePack } from "./pack/reader.js";
 import { savePack, loadPack, wipeAll, loadRomId } from "./pack/store.js";
+import { applyOverlay, validateCustomPack, newCustomId, packIdOf, packCrcOf } from "./pack/overlay.js";
+import { saveCustomPack, loadCustomPack, deleteCustomPack, listCustomPackIds } from "./pack/store.js";
 const bootMs = Date.now();
 let frames = 0;
 const errors = [];
@@ -52,6 +54,43 @@ function synthRom() {
   return b;
 }
 const fail = s => { document.title = "BM-L1-FAIL:" + s; };
+async function selfTestOverlay() {
+  document.title = "BM-OVERLAY-RUNNING";
+  const mkStock = () => {
+    const prg = [], chr = [];
+    for (let i = 0; i < 8; i++) { const b = new Uint8Array(16384); b.fill(i); prg.push(b); }
+    for (let j = 0; j < 16; j++) { const b = new Uint8Array(8192); b.fill(0xA0 + j); chr.push(b); }
+    return { meta: { packVersion: 1, crc32: "00000000", md5: "x" }, prg: prg, chr: chr };
+  };
+  const stock = mkStock();
+  let crc = "";
+  { const all = new Uint8Array(8 * 16384 + 16 * 8192); for (let i = 0; i < 8; i++) all.set(stock.prg[i], i * 16384); let o = 8 * 16384; for (let j = 0; j < 16; j++) { all.set(stock.chr[j], o); o += 8192; } crc = (await import("./rom/crc.js").then(m => m.crc32Hex(all))); }
+  stock.meta.crc32 = crc;
+  const { applyOverlay: ao, validateCustomPack: vcp, makePatch } = await import("./pack/overlay.js").then(m => m).catch(() => ({}));
+  const t = (name, cond) => { if (!cond) throw new Error("overlay-case:" + name); };
+  const base = { customVersion: 1, id: "c-test1", name: "t", baseCrc: crc, patches: [], editorVersion: 0, builtAt: "" };
+  // empty patch list applies clean, crc stable
+  let r = ao(stock, Object.assign({}, base, { patches: [] }));
+  t("empty-ok", r.ok && r.pack.custom.id === "c-test1" && r.pack.custom.crc === crc);
+  t("stock-bytes", r.pack.prg[3][1000] === 3 && r.pack.chr[15][8000] === (0xA0 + 15));
+  // single-byte patches both areas
+  const p1 = Object.assign({}, base, { id: "c-test2", patches: [makePatch("prg", 0, 0, new Uint8Array([0x41])), makePatch("chr", 15, 8191, new Uint8Array([0xFF, 0x00]).slice(0, 1))] });
+  r = ao(stock, p1);
+  t("patch-ok", r.ok && r.pack.prg[0][0] === 0x41 && r.pack.prg[0][1] === 0 && r.pack.chr[15][8191] === 0xFF);
+  t("crc-moved", r.pack.custom.crc !== crc);
+  t("stock-unmutated", stock.prg[0][0] === 0);
+  // rejects
+  t("base-reject", !ao(stock, Object.assign({}, base, { id: "c-bad", baseCrc: "deadbeef" })).ok);
+  t("overflow-reject", !ao(stock, Object.assign({}, base, { id: "c-ov", patches: [makePatch("prg", 0, 16383, new Uint8Array([1, 2]))] })).ok);
+  t("bank-reject", !vcp(Object.assign({}, base, { id: "c-bk", patches: [{ area: "prg", bank: 8, offset: 0, bytes: "AQ==" }] })).ok);
+  t("area-reject", !vcp(Object.assign({}, base, { id: "c-ar", patches: [{ area: "sram", bank: 0, offset: 0, bytes: "AQ==" }] })).ok);
+  t("empty-reject", !vcp(Object.assign({}, base, { id: "c-em", patches: [{ area: "chr", bank: 0, offset: 0, bytes: "" }] })).ok);
+  t("id-reject", !vcp(Object.assign({}, base, { id: "BAD ID!" })).ok);
+  t("ver-reject", !vcp(Object.assign({}, base, { customVersion: 99 })).ok);
+  t("json-roundtrip", vcp(JSON.parse(JSON.stringify(p1))).ok);
+  document.title = "BM-OVERLAY-PASS";
+  statusEl.textContent = "overlay self-test PASS";
+}
 async function selfTestL1() {
   document.title = "BM-L1-RUNNING";
   const r = buildPack(synthRom(), "synthetic");
@@ -88,7 +127,8 @@ async function selfTestReload() {
 const qs = new URLSearchParams(location.search);
 if (qs.has("headless")) {
   const t = qs.get("test");
-  if (t === "l1") selfTestL1().catch(e => fail(e));
+  if (t === "overlay") selfTestOverlay().catch(e => fail(e));
+  else if (t === "l1") selfTestL1().catch(e => fail(e));
   else if (t === "l1save") selfTestSave().catch(e => fail(e));
   else if (t === "l1reload") selfTestReload().catch(e => fail(e));
   else document.title = "BM-HEADLESS-READY";
@@ -100,13 +140,38 @@ const wasmHost = new GameHost();
 const mesenHost = new MesenHost();
 let l2host = wasmHost;
 let l2pack = null;
+let l2packKey = null;
+function packCacheKey(stockPack) {
+  const want = (typeof prefs !== "undefined" && prefs.pack && prefs.pack !== "stock") ? String(prefs.pack) : "stock";
+  return String(stockPack.meta.crc32) + "|" + want;
+}
+function activePackInfo() {
+  if (!l2pack) return { id: "stock", crc: "unknown" };
+  return { id: packIdOf(l2pack), crc: packCrcOf(l2pack) };
+}
 async function l2ensurePack() {
   // Picker-only: the app NEVER ships a ROM. The user supplies their own
   // ROM file via the file picker; the validated pack is cached in IDB.
-  if (l2pack) return l2pack;
+  // Custom pack (editor packs): the stock pack is the base; the active
+  // custom pack's patches are applied here so BOTH engines spawn identical
+  // bytes (wasm stages banks, mesen rebuilds the ROM from the same pack).
   const cached = await loadPack();
-  if (cached && validatePack(cached).ok) { l2pack = cached; return l2pack; }
-  throw new Error("no-rom: use the picker to supply your own ROM file");
+  if (!cached || !validatePack(cached).ok) { l2pack = null; l2packKey = null; throw new Error("no-rom: use the picker to supply your own ROM file"); }
+  const key = packCacheKey(cached);
+  if (l2pack && l2packKey === key) return l2pack;
+  const want = (typeof prefs !== "undefined" && prefs.pack && prefs.pack !== "stock") ? String(prefs.pack) : "stock";
+  let resolved = cached;
+  if (want !== "stock") {
+    const custom = await loadCustomPack(want);
+    if (!custom) { l2pack = null; l2packKey = null; throw new Error("pack-missing:" + want + " (deleted? re-import or switch pack to stock)"); }
+    const r = applyOverlay(cached, custom);
+    if (!r.ok) { l2pack = null; l2packKey = null; throw new Error("pack-overlay:" + r.errors.join(" ")); }
+    resolved = r.pack;
+  } else {
+    resolved.custom = null;
+  }
+  l2pack = resolved; l2packKey = key;
+  return l2pack;
 }
 // Headless/dev-test helper ONLY (localhost serve.js): boots the device-local
 // reference ROM via the /testrom.nes alias so ?headless&test=l* can run with
@@ -1145,7 +1210,8 @@ async function shellExportMovie() {
   }
   const pads = l2host.padLog.slice(0, l2host.frame());
   const crc = await currentRomCrc();
-  const m = makeMovieV2(pads, crc, { start: 0, anchorHash: null, engine: prefs.engine });
+  const pi0 = activePackInfo();
+  const m = makeMovieV2(pads, crc, { start: 0, anchorHash: null, engine: prefs.engine, pack: pi0.id, packCrc: pi0.crc });
   var mdl = await saveJsonWithDialog(m, "bmmovie-f" + m.frame + ".json");
   var shown = mdl.name || ("bmmovie-f" + m.frame + ".json");
   if (mdl.via === "cancelled") shellLog("movie export cancelled");
@@ -1279,6 +1345,12 @@ async function replayLoadParsed(m) {
   if (rv === "mismatch") throw new Error("rom-mismatch movie=" + m.rom + " loaded=" + haveRom + " (wrong ROM file?)");
   if (rv === "ok") shellLog("replay rom ok crc=" + haveRom);
   else shellLog("replay rom unverifiable (movie=" + m.rom + " loaded=" + haveRom + ") - continuing");
+  const ap = activePackInfo();
+  if (m.pack && m.pack !== "unknown") {
+    if (m.pack !== ap.id || (m.packCrc && m.packCrc !== "unknown" && m.packCrc !== ap.crc))
+      throw new Error("pack-mismatch movie=" + m.pack + " active=" + ap.id + " (switch to the matching custom pack?)");
+    shellLog("replay pack ok " + ap.id + " crc=" + ap.crc);
+  } else shellLog("replay pack unverifiable (old movie) - continuing");
   const sameEngine = sameEngineForAnchor(m.engine, prefs.engine);
   const takeHash = sameEngine ? m.anchorHash : null;
   if (!sameEngine) shellLog("cross-engine replay (" + m.engine + "->" + prefs.engine + "): anchor hash is engine-local, ROM crc verified instead");
@@ -1431,7 +1503,7 @@ async function replayToggleRecord() {
     catch (eP) { pads = []; shellLog("padLog unreadable (" + String((eP && eP.message) || eP).slice(0, 60) + ") - saving empty take"); }
     shellLog("finalizing take - opening save dialog (pads=" + pads.length + ")...");
     var m = null;
-    try { m = makeMovieV2(pads, await currentRomCrc(), { start: replay.recording.start, anchorHash: replay.recording.hash, engine: prefs.engine }); }
+    try { const piR = activePackInfo(); m = makeMovieV2(pads, await currentRomCrc(), { start: replay.recording.start, anchorHash: replay.recording.hash, engine: prefs.engine, pack: piR.id, packCrc: piR.crc }); }
     catch (eM) { m = { app: "bm-movie", v: 2, rom: "unknown", frame: 0, start: 0, anchorHash: null, engine: "unknown", pads: "", buildErr: String((eM && eM.message) || eM).slice(0, 80) }; shellLog("movie build failed - saving raw take instead"); }
     shellLog("take built f=" + m.frame + " (" + pads.length + " pads) - opening name dialog...");
     var tdl = await saveJsonWithDialog(m, "bmmovie-f" + m.frame + "-take" + m.start + ".json");
@@ -1501,6 +1573,10 @@ async function replayStepOnce() {
   return h;
 }
 window.BM.start = shellStart;
+window.BM.ensurePack = l2ensurePack;
+window.BM.packInfo = activePackInfo;
+window.BM.setPack = function (id) { prefs.pack = id; savePrefs(prefs); l2pack = null; l2packKey = null; try { if (typeof refreshPackSel === "function") refreshPackSel().catch(function () {}); } catch (e) {} return prefs.pack; };
+window.BM.refreshPacks = function () { return refreshPackSel(); };
 window.BM.stop = shellStop;
 window.BM.reset = shellReset;
 window.BM.pause = shellPause;
@@ -1650,6 +1726,90 @@ swapABInput.addEventListener("change", () => {
   prefs.swapAB = !!swapABInput.checked; padFlags.swapAB = prefs.swapAB; savePrefs(prefs);
   shellLog("swap A/B " + (prefs.swapAB ? "on" : "off"));
 });
+// ---- P0 custom packs: selector + import/export/delete ----
+const packSel = document.getElementById("packSel");
+const packInput = document.getElementById("packInput");
+async function refreshPackSel() {
+  if (!packSel) return;
+  const ids = await listCustomPackIds().catch(() => []);
+  const opts = [{ id: "stock", name: "stock" }];
+  for (const id of ids) {
+    try {
+      const c = await loadCustomPack(id);
+      opts.push({ id: id, name: (c && c.name) || id });
+    } catch (e) { opts.push({ id: id, name: id }); }
+  }
+  packSel.innerHTML = "";
+  for (const o of opts) {
+    const el = document.createElement("option");
+    el.value = o.id;
+    el.textContent = o.id === "stock" ? "stock" : (o.name + " [" + o.id + "]");
+    packSel.appendChild(el);
+  }
+  packSel.value = prefs.pack || "stock";
+  if (packSel.value !== prefs.pack) packSel.value = "stock";
+}
+if (packSel) {
+  packSel.value = prefs.pack || "stock";
+  packSel.addEventListener("change", async () => {
+    const want = packSel.value || "stock";
+    if (want !== "stock") {
+      const c = await loadCustomPack(want).catch(() => null);
+      if (!c) { shellLog("pack missing: " + want); packSel.value = prefs.pack || "stock"; return; }
+    }
+    try { if (shellRunning) await shellStop(); } catch (e) {}
+    try { l2host.terminate(); } catch (e2) {}
+    l2pack = null; l2packKey = null;
+    prefs.pack = want; savePrefs(prefs);
+    shellLog("pack active: " + want + " (press Start)");
+  });
+  const packImportBtn = document.getElementById("packImportBtn");
+  const packExportBtn = document.getElementById("packExportBtn");
+  const packDelBtn = document.getElementById("packDelBtn");
+  if (packImportBtn && packInput) {
+    packImportBtn.addEventListener("click", () => { packInput.value = ""; packInput.click(); });
+    packInput.addEventListener("change", async () => {
+      try {
+        const f = packInput.files[0];
+        if (!f) return;
+        const doc = JSON.parse(await f.text());
+        const v = validateCustomPack(doc);
+        if (!v.ok) { shellLog("pack import rejected: " + v.errors.join(" ")); return; }
+        const stock = await loadPack();
+        if (!stock || !validatePack(stock).ok) { shellLog("pack import needs a stock ROM first (pick ROM)"); return; }
+        if (String(doc.baseCrc).toLowerCase() !== String(stock.meta.crc32).toLowerCase()) { shellLog("pack import: base " + doc.baseCrc + " != loaded ROM " + stock.meta.crc32); return; }
+        await saveCustomPack(doc);
+        prefs.pack = doc.id; savePrefs(prefs);
+        l2pack = null; l2packKey = null;
+        await refreshPackSel();
+        shellLog("pack imported: " + doc.name + " [" + doc.id + "] (" + doc.patches.length + " patches)");
+      } catch (e) { shellLog("pack import err " + String((e && e.message) || e).slice(0, 80)); }
+    });
+  }
+  if (packExportBtn) packExportBtn.addEventListener("click", async () => {
+    try {
+      if (!prefs.pack || prefs.pack === "stock") { shellLog("pack export: stock is not exportable (import a custom pack first)"); return; }
+      const doc = await loadCustomPack(prefs.pack);
+      if (!doc) { shellLog("pack export: active pack missing"); return; }
+      await saveJsonWithDialog(doc, "bm-pack-" + prefs.pack + ".json");
+      shellLog("pack exported: " + prefs.pack);
+    } catch (e) { shellLog("pack export err " + String((e && e.message) || e).slice(0, 80)); }
+  });
+  if (packDelBtn) packDelBtn.addEventListener("click", async () => {
+    try {
+      if (!prefs.pack || prefs.pack === "stock") { shellLog("pack delete: stock cannot be deleted"); return; }
+      const id = prefs.pack;
+      await deleteCustomPack(id);
+      try { if (shellRunning) await shellStop(); } catch (e) {}
+      try { l2host.terminate(); } catch (e2) {}
+      l2pack = null; l2packKey = null;
+      prefs.pack = "stock"; savePrefs(prefs);
+      await refreshPackSel();
+      shellLog("pack deleted: " + id + " (back to stock)");
+    } catch (e) { shellLog("pack delete err " + String((e && e.message) || e).slice(0, 80)); }
+  });
+  refreshPackSel().catch(() => {});
+}
 const touchInput = document.getElementById("touchInput");
 if (touchInput) {
   touchInput.checked = prefs.touch !== false;

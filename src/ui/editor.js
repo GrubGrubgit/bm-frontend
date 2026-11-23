@@ -2,7 +2,7 @@
 // Reads the LOADED (resolved) pack, edits banks 0-2 in memory, writes a NEW
 // custom pack (never mutates stock). Overhead combo attrs are read-only
 // until research 6.2; map/scroll/palette-view work for both modes.
-import { parseBank, serializeBank, LEVEL_MODE } from "../pack/levels.js";
+import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/levels.js";
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
 import { makePatch, newCustomId } from "../pack/overlay.js";
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
@@ -34,6 +34,8 @@ function repaint() {
   const L = cur();
   if (!L) return;
   const E = effLevel(L);
+  const br0 = el("edBrush");
+  if (br0) br0.max = E.blocks.length / 4 - 1;
   const cv = el("edMap");
   const scroll = E.scroll;
   paintMap(cv, E, bgBank(), E.pal, {
@@ -159,11 +161,50 @@ function renderInspector(E) {
   }
   box.appendChild(aRow);
 }
+// Door-combo heuristic (tank only): a set scroll screen should contain a
+// doorway combo (combo attr with door bits 2-3; solid+door links regions).
+export function doorComboSet(L) {
+  const d = new Set();
+  for (let i = 0; i < L.attrs.length; i++) if ((L.attrs[i] & 0x0C) !== 0) d.add(i);
+  return d;
+}
+export function screenHasDoor(L, doors, sr, sc) {
+  for (let by = 0; by < 4; by++) for (let bx = 0; bx < 4; bx++) {
+    const bi = L.map[(sr * 4 + by) * 32 + sc * 4 + bx];
+    for (let k = 0; k < 4; k++) {
+      const si = L.blocks[bi * 4 + k];
+      for (let j = 0; j < 4; j++) if (doors.has(L.structs[si * 4 + j])) return true;
+    }
+  }
+  return false;
+}
+// Live free-space accounting: serialize the effective (edited) model per
+// bank in memory and report free bytes; overflow surfaces here as well as
+// at save time.
+function effFreeLine() {
+  const parts = [];
+  for (const b of [0, 1, 2]) {
+    const P = S.parsed["b" + b];
+    if (!P) continue;
+    try {
+      const ed = {};
+      for (const L of P.levels) if (S.edited[L.level]) ed[L.level] = S.edited[L.level];
+      const r = serializeBank(P, ed);
+      if (!r.ok) { parts.push("bank" + b + " OVERFLOW (" + r.errors[0] + ")"); continue; }
+      const q = parseBank(r.bytes, b);
+      parts.push("bank" + b + " free " + (q.ok ? bankFreeBytes(q) : -1) + "B");
+    } catch (e) { parts.push("bank" + b + " free ?"); }
+  }
+  return parts.join(" | ");
+}
 function scrollHint(E) {
-  // rectangularity hint per plane over the 8x8 screen grid
+  // rectangularity + doorway hints per plane over the 8x8 screen grid
   const hint = el("edScrollHint");
   if (!hint) return;
   const msgs = [];
+  const rows = E.map.length / 32;
+  const evenScreens = (rows % 4 === 0);
+  const doors = E.mode === "tank" ? doorComboSet(E) : null;
   for (const [name, bytes] of [["V", E.scroll.subarray(0, 8)], ["H", E.scroll.subarray(8, 16)]]) {
     let cells = [];
     for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if ((bytes[r] >> c) & 1) cells.push([r, c]);
@@ -171,9 +212,20 @@ function scrollHint(E) {
     const rs = cells.map(c => c[0]), cs = cells.map(c => c[1]);
     const r0 = Math.min(...rs), r1 = Math.max(...rs), c0 = Math.min(...cs), c1 = Math.max(...cs);
     const full = (r1 - r0 + 1) * (c1 - c0 + 1);
-    msgs.push(name + ": " + cells.length + " cells" + (cells.length === full ? " rectangular [" + r0 + "-" + r1 + "," + c0 + "-" + c1 + "]" : " NON-RECTANGULAR bbox [" + r0 + "-" + r1 + "," + c0 + "-" + c1 + "]"));
+    let m = name + ": " + cells.length + " cells" + (cells.length === full ? " rectangular [" + r0 + "-" + r1 + "," + c0 + "-" + c1 + "]" : " NON-RECTANGULAR bbox [" + r0 + "-" + r1 + "," + c0 + "-" + c1 + "]");
+    if (doors && evenScreens) {
+      // Informational only: stock maps prove doorless scroll screens and
+      // even doorless regions are legitimate (dead-ends, loops, drops),
+      // so absence of a door is never flagged as an error here.
+      let with_ = 0;
+      for (const [r, c] of cells) if (screenHasDoor(E, doors, r, c)) with_++;
+      m += " doors " + with_ + "/" + cells.length + " screens";
+    }
+    msgs.push(m);
   }
-  hint.textContent = msgs.join(" | ") + " (plane orientation unverified; doorway combos link regions)";
+  if (!doors) msgs.push("doorway check n/a (overhead: attrs read-only)");
+  else if (!evenScreens) msgs.push("doorway check n/a (rows not multiple of 4)");
+  hint.textContent = msgs.join(" | ") + " [" + effFreeLine() + "]";
 }
 function renderScrollGrids(E) {
   const v = el("edScrollV"), h = el("edScrollH");
@@ -253,12 +305,13 @@ async function saveAsPack() {
       }
     }
     if (!patches.length) { say("no changes to save"); return; }
-    const id = "c-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6);
+    const id = newCustomId();
     const doc = { customVersion: 1, id, name, baseCrc: S.stock.meta.crc32, patches, editorVersion: "p1", builtAt: new Date().toISOString() };
     await saveCustomPack(doc);
     S.edited = {};
     try { await api.refreshPacks(); } catch (e) {}
-    say("saved pack " + name + " [" + id + "] (" + patches.length + " patches)");
+    try { if (api.setPack) api.setPack(id); } catch (e2) {}
+    say("saved pack " + name + " [" + id + "] (" + patches.length + " patches, now active)");
   } catch (e) { say("save failed: " + String((e && e.message) || e).slice(0, 120)); }
 }
 async function loadAll() {

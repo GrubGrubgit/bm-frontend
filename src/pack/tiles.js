@@ -3,7 +3,8 @@
 // Geometry (measured headless on device: 2-block stripe period 128px,
 // 8px pattern grid): pattern 8x8, combo 16x16 (2x2 patterns), struct
 // 32x32 (2x2 combos), block 64x64 (2x2 structs), all row-major
-// [TL,TR,BL,BR] (row-major assumed - verify visually in preview).
+// [TL,TR,BL,BR] (row-major PROVEN exact 2026-11-23: full 32x30 L1 spawn
+// vicinity reproduced the live PPU nametable + attr bytes 960/960).
 // Map is 32 blocks wide; rows = 32 tank, 25 level 9, 29 level 13.
 export const NES_PALETTE = ["#575757","#000C8E","#0800A6","#340096","#550061","#630015","#5A0000","#3C0E00","#112800","#003B00","#004200","#003A05","#002652","#000000","#000000","#000000","#A5A5A5","#0041D9","#2F1EFF","#6704F2","#9400B4","#AA0057","#A31800","#803900","#4B5B00","#137600","#008100","#007923","#006288","#000000","#000000","#000000","#FFFFFF","#4A9FFF","#797EFF","#AF63FF","#DD55FF","#F757C2","#F76A63","#DC8810","#AEA900","#78C400","#4AD211","#2FCF64","#2FBDC4","#414141","#000000","#000000","#FFFFFF","#B9DDFF","#CAD1FF","#DEC6FF","#F0C0FF","#FCC0EE","#FDC6CA","#F5D0AA","#E4DD95","#D0E892","#BDEEA2","#B2EEC0","#B0E8E3","#B3B3B3","#000000","#000000"];
 // BG 4KB CHR bank per game level (Data Crystal CHR-ROM table).

@@ -1608,7 +1608,7 @@ window.BM.stats = ((prev) => () => Object.assign(prev(), {
   pcm: (typeof pcmPlayer !== "undefined" && pcmPlayer) ? pcmPlayer.stats() : null,
   scale: prefs.scale, filter: prefs.filter,
   volume: prefs.volume, muted: prefs.muted, slot: prefs.slot,
-  engine: prefs.engine
+  engine: prefs.engine, pack: activePackInfo().id
 }))(window.BM.stats);
 startBtn.addEventListener("click", () => {
   if (replay.movie && replay.mode !== "idle") { shellLog("replay loaded - R Play / R Stop control playback (manual Start paused)"); return; }
@@ -1734,6 +1734,7 @@ if (editorBtn) editorBtn.addEventListener("click", async () => {
     await m.toggleEditor({
       log: shellLog,
       refreshPacks: () => refreshPackSel(),
+      setPack: (id) => window.BM.setPack(id),
       ensurePack: () => l2ensurePack(),
       loadStock: async () => { const p = await loadPack(); return (p && validatePack(p).ok) ? p : null; },
     });
@@ -2220,17 +2221,17 @@ if (qs.has("headless")) {
   if (tp === "pwa") selfTestPwa();
 }
 async function shellAutoTrapReport() {
-  try { await autoTrapReport(l2host, prefs.engine, loadRomId, logTail, shellLog); } catch (e) {}
+  try { await autoTrapReport(l2host, prefs.engine, loadRomId, logTail, shellLog, activePackInfo()); } catch (e) {}
   var last = logTail[logTail.length - 1] || "";
   if (/NOT SAVED|FAILED/.test(last)) dlFailedToast("bugreport", last);
 }
 async function shellAutoFaultReport(errMsg) {
-  try { await autoFaultReport(l2host, prefs.engine, loadRomId, logTail, shellLog, errMsg); } catch (e) {}
+  try { await autoFaultReport(l2host, prefs.engine, loadRomId, logTail, shellLog, errMsg, activePackInfo()); } catch (e) {}
   var last2 = logTail[logTail.length - 1] || "";
   if (/NOT SAVED|FAILED/.test(last2)) dlFailedToast("bugreport", last2);
 }
 async function shellManualReport() {
-  var r = await buildBugReport(l2host, prefs.engine, loadRomId, logTail, "manual");
+  var r = await buildBugReport(l2host, prefs.engine, loadRomId, logTail, "manual", activePackInfo());
   var mdl = await saveJsonWithDialog(r, "bmbug-f" + r.frame + "-manual.json");
   var mShown = mdl.name || ("bmbug-f" + r.frame + "-manual.json");
   if (mdl.via === "cancelled") shellLog("bugreport save cancelled");

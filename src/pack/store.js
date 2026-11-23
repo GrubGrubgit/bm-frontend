@@ -44,14 +44,27 @@ export async function loadRomId() {
   return id || null;
 }
 
+// Save slots are pack-scoped: key "slot-<n>::<packId>" so stock and custom
+// packs never clobber each other's saves (PLAN-EDITOR 3.4). Pre-scope
+// saves under the legacy key ("slot-<n>") still load as fallback.
+export function slotKeyFor(n, packId) {
+  const base = "slot-" + (n | 0);
+  if (typeof packId !== "string" || !packId.length || packId === "unknown") return base;
+  if (!/^[A-Za-z0-9-]+$/.test(packId)) return base;
+  return base + "::" + packId;
+}
 export async function saveSlot(n, data) {
+  const key = slotKeyFor(n, data && data.pack);
   const db = await openDb();
-  await tx(db, STORES.saves, "readwrite", s => s.put(data, "slot-" + n));
+  await tx(db, STORES.saves, "readwrite", s => s.put(data, key));
   db.close();
 }
-export async function loadSlot(n) {
+export async function loadSlot(n, packId) {
+  const key = slotKeyFor(n, packId);
+  const legacy = "slot-" + (n | 0);
   const db = await openDb();
-  const d = await tx(db, STORES.saves, "readonly", s => s.get("slot-" + n));
+  let d = await tx(db, STORES.saves, "readonly", s => s.get(key));
+  if ((d == null) && key !== legacy) d = await tx(db, STORES.saves, "readonly", s => s.get(legacy));
   db.close();
   return d || null;
 }

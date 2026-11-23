@@ -128,6 +128,10 @@ function freeList(parsed) {
   if (last < BANK_SIZE) free.push({ off: last, len: BANK_SIZE - last });
   return free;
 }
+// Free-space accounting (P1): recorded inter-table gaps + bank tail.
+export function bankFreeBytes(parsed) {
+  return freeList(parsed).reduce((a, r) => a + r.len, 0);
+}
 // Serialize parsed (possibly edited) levels back into a bank image.
 // edited: {level: {pal?, scroll?, attrs?, combos?, structs?, blocks?, map?}}.
 // Size-unchanged tables keep offsets (=> byte-identical round-trip).

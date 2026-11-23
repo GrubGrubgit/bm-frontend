@@ -178,7 +178,9 @@ MesenHost.prototype.save = async function (slot) {
   return data;
 };
 MesenHost.prototype.load = async function (slot, onProgress) {
-  var data = await loadSlot(slot);
+  var c00 = this.pack && this.pack.custom;
+  var curPack = (c00 && c00.id) ? String(c00.id) : "stock";
+  var data = await loadSlot(slot, curPack);
   if (!data || (data.v !== 1 && data.v !== 2)) throw new Error("no-save:" + slot);
   if (data.v === 2 && data.engine && data.engine !== "mesen") throw new Error("save-engine:" + data.engine + " (current mesen)");
   if (data.v === 2 && data.pack != null && data.pack !== "unknown") {

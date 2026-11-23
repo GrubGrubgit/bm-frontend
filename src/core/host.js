@@ -171,7 +171,7 @@ GameHost.prototype.save = async function (slot) {
   return data;
 };
 GameHost.prototype.load = async function (slot, onProgress) {
-  var data = await loadSlot(slot);
+  var data = await loadSlot(slot, this.packTag().pack);
   if (!data || (data.v !== 1 && data.v !== 2)) throw new Error("no-save:" + slot);
   if (data.v === 2 && data.engine && data.engine !== "wasm") throw new Error("save-engine:" + data.engine + " (current wasm)");
   this.packGate(data);

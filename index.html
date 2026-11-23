@@ -67,6 +67,9 @@ button{padding:10px 14px;margin:2px}
 </div>
 <div class="shellRow">
 <label>engine <select id="engineSel"><option value="wasm">WASM port</option><option value="mesen">Mesen (accurate)</option></select></label>
+<label><input id="swapABInput" type="checkbox"> Swap A/B</label>
+<label><input id="swapXYInput" type="checkbox"> Swap X/Y</label>
+<label><input id="touchInput" type="checkbox"> Touch pad</label>
 </div>
 <div class="shellRow">
 <label>pack <select id="packSel"><option value="stock">stock</option></select></label>
@@ -74,9 +77,6 @@ button{padding:10px 14px;margin:2px}
 <button id="packExportBtn">Export</button>
 <button id="packDelBtn">Delete</button>
 <input id="packInput" type="file" accept=".json,application/json" hidden>
-<label><input id="swapABInput" type="checkbox"> Swap A/B</label>
-<label><input id="swapXYInput" type="checkbox"> Swap X/Y</label>
-<label><input id="touchInput" type="checkbox"> Touch pad</label>
 </div>
 <pre id="logEl">log…</pre>
 <hr>

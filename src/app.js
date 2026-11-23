@@ -1726,6 +1726,19 @@ swapABInput.addEventListener("change", () => {
   prefs.swapAB = !!swapABInput.checked; padFlags.swapAB = prefs.swapAB; savePrefs(prefs);
   shellLog("swap A/B " + (prefs.swapAB ? "on" : "off"));
 });
+// ---- P1 editor (lazy) ----
+const editorBtn = document.getElementById("editorBtn");
+if (editorBtn) editorBtn.addEventListener("click", async () => {
+  try {
+    const m = await import("./ui/editor.js");
+    await m.toggleEditor({
+      log: shellLog,
+      refreshPacks: () => refreshPackSel(),
+      ensurePack: () => l2ensurePack(),
+      loadStock: async () => { const p = await loadPack(); return (p && validatePack(p).ok) ? p : null; },
+    });
+  } catch (e) { shellLog("editor err " + String((e && e.message) || e).slice(0, 120)); }
+});
 // ---- P0 custom packs: selector + import/export/delete ----
 const packSel = document.getElementById("packSel");
 const packInput = document.getElementById("packInput");

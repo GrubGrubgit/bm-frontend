@@ -73,12 +73,33 @@ button{padding:10px 14px;margin:2px}
 </div>
 <div class="shellRow">
 <label>pack <select id="packSel"><option value="stock">stock</option></select></label>
+<button id="editorBtn">Editor</button>
 <button id="packImportBtn">Import</button>
 <button id="packExportBtn">Export</button>
 <button id="packDelBtn">Delete</button>
 <input id="packInput" type="file" accept=".json,application/json" hidden>
 </div>
 <pre id="logEl">log…</pre>
+<div id="editorCtn" hidden>
+<hr>
+<h3>Editor (P1 tile maps)</h3>
+<div class="shellRow">
+<label>level <select id="edLevelSel"></select></label><span id="edModeBadge"></span>
+<label><input type="radio" name="edMode" value="paint" checked> paint</label>
+<label><input type="radio" name="edMode" value="inspect"> inspect</label>
+<label><input id="edScrollChk" type="checkbox"> scroll overlay</label>
+</div>
+<div style="overflow:auto;max-height:60vh;border:1px solid #444"><canvas id="edMap"></canvas></div>
+<div class="shellRow"><label>brush block <input id="edBrush" type="number" min="0" value="0" style="width:90px"></label><span id="edCellInfo"></span></div>
+<div id="edInspector" style="text-align:left;background:#181818;padding:8px;white-space:normal"></div>
+<div class="shellRow"><span>V plane</span></div>
+<div id="edScrollV" style="overflow:auto"></div>
+<div class="shellRow"><span>H plane</span></div>
+<div id="edScrollH" style="overflow:auto"></div>
+<div id="edScrollHint" style="font-size:12px;color:#9c9"></div>
+<div class="shellRow"><span>bg palette (viewer; editable in P2)</span><canvas id="edPal" height="24"></canvas></div>
+<div class="shellRow"><label>pack name <input id="edPackName" type="text" size="24" placeholder="my level edit"></label><button id="edSaveBtn">Save as pack</button><span id="edStatus"></span></div>
+</div>
 <hr>
 <h3>ROM loader (L1)</h3>
 <button type="button" id="pickBtn" style="display:block;width:100%;background:#243;padding:16px;text-align:center;border:2px dashed #6c6;color:#eee;cursor:pointer">tap to pick ROM</button><input id="romInput" type="file" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" aria-hidden="true" tabindex="-1">

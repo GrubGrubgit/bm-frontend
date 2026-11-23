@@ -1,0 +1,120 @@
+// src/pack/tiles.js -- NES tile decode + level-map canvas paint. Pure render
+// helpers (takes a canvas; no app state). Own code.
+// Geometry (measured headless on device: 2-block stripe period 128px,
+// 8px pattern grid): pattern 8x8, combo 16x16 (2x2 patterns), struct
+// 32x32 (2x2 combos), block 64x64 (2x2 structs), all row-major
+// [TL,TR,BL,BR] (row-major assumed - verify visually in preview).
+// Map is 32 blocks wide; rows = 32 tank, 25 level 9, 29 level 13.
+export const NES_PALETTE = ["#575757","#000C8E","#0800A6","#340096","#550061","#630015","#5A0000","#3C0E00","#112800","#003B00","#004200","#003A05","#002652","#000000","#000000","#000000","#A5A5A5","#0041D9","#2F1EFF","#6704F2","#9400B4","#AA0057","#A31800","#803900","#4B5B00","#137600","#008100","#007923","#006288","#000000","#000000","#000000","#FFFFFF","#4A9FFF","#797EFF","#AF63FF","#DD55FF","#F757C2","#F76A63","#DC8810","#AEA900","#78C400","#4AD211","#2FCF64","#2FBDC4","#414141","#000000","#000000","#FFFFFF","#B9DDFF","#CAD1FF","#DEC6FF","#F0C0FF","#FCC0EE","#FDC6CA","#F5D0AA","#E4DD95","#D0E892","#BDEEA2","#B2EEC0","#B0E8E3","#B3B3B3","#000000","#000000"];
+// BG 4KB CHR bank per game level (Data Crystal CHR-ROM table).
+export const BG_CHR_BANK = { 1: 8, 2: 9, 3: 10, 4: 11, 5: 12, 6: 13, 7: 14, 8: 15, 9: 17, 16: 17, 11: 18, 13: 18, 10: 19, 14: 19, 12: 20, 15: 20 };
+export const MAP_COLS = 32;
+export function mapRows(mapLen) { return mapLen / MAP_COLS; }
+// pack chr = 16 x 8KB; 4KB bank B lives at chr[B>>1] + (B&1)*4096.
+export function chrBankBytes(chrBanks, bank4k) {
+  const b = chrBanks[bank4k >> 1];
+  if (!b) return null;
+  return b.subarray((bank4k & 1) * 4096, (bank4k & 1) * 4096 + 4096);
+}
+export function decodeTile(bank4kBytes, tile) {
+  const o = (tile & 255) * 16;
+  const px = new Uint8Array(64);
+  for (let y = 0; y < 8; y++) {
+    const lo = bank4kBytes[o + y], hi = bank4kBytes[o + 8 + y];
+    for (let x = 0; x < 8; x++) {
+      const bit = 7 - x;
+      px[y * 8 + x] = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
+    }
+  }
+  return px;
+}
+function hexRgb(hex) { return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]; }
+const PAL_RGB = NES_PALETTE.map(hexRgb);
+// Resolve one 64x64 block to 8x8 tile grid: [{tile, sub}] row-major.
+export function blockTiles(L, blockIdx) {
+  const out = [];
+  for (let sy = 0; sy < 2; sy++) for (let sx = 0; sx < 2; sx++) {
+    const structIdx = L.blocks[blockIdx * 4 + sy * 2 + sx];
+    for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 2; cx++) {
+      const comboIdx = L.structs[structIdx * 4 + cy * 2 + cx];
+      const sub = L.attrs[comboIdx] & 3;
+      for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 2; tx++) {
+        out.push({ tile: L.combos[comboIdx * 4 + ty * 2 + tx], sub });
+      }
+    }
+  }
+  return out; // 64 entries, row-major 8x8
+}
+export function renderBlockImage(L, bgBankBytes, pal, blockIdx) {
+  const cv = document.createElement("canvas");
+  cv.width = 64; cv.height = 64;
+  const ctx = cv.getContext("2d");
+  const img = ctx.createImageData(64, 64);
+  const tiles = blockTiles(L, blockIdx);
+  const cache = {};
+  for (let ty = 0; ty < 8; ty++) for (let tx = 0; tx < 8; tx++) {
+    const { tile, sub } = tiles[ty * 8 + tx];
+    const key = tile * 4 + sub;
+    let px = cache[key];
+    if (!px) { px = decodeTile(bgBankBytes, tile); cache[key] = px; }
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      const v = px[y * 8 + x];
+      const ci = pal[sub * 4 + v] & 63;
+      const rgb = PAL_RGB[ci];
+      const o = (((ty * 8 + y) * 64) + (tx * 8 + x)) * 4;
+      img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+// Paint the whole map. opts: {pxPerBlock, scrollV, scrollH, showScroll}.
+// Returns {w, h} in device px.
+export function paintMap(canvas, L, bgBankBytes, pal, opts) {
+  const o = opts || {};
+  const bpx = o.pxPerBlock || 16;
+  const cols = MAP_COLS, rows = L.map.length / MAP_COLS;
+  canvas.width = cols * bpx; canvas.height = rows * bpx;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const seen = new Map();
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const bi = L.map[y * cols + x];
+    let cv = seen.get(bi);
+    if (!cv) { cv = renderBlockImage(L, bgBankBytes, pal, bi); seen.set(bi, cv); }
+    ctx.drawImage(cv, x * bpx, y * bpx, bpx, bpx);
+  }
+  if (o.showScroll && o.scrollV && o.scrollH) {
+    // screens are 4x4 blocks; planes are 8x8 bit grids (orientation
+    // assumption: plane byte i = row i, bit j = column j).
+    for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+      const v = (o.scrollV[r] >> c) & 1, h = (o.scrollH[r] >> c) & 1;
+      if (!v && !h) continue;
+      ctx.fillStyle = v && h ? "rgba(255,255,0,0.25)" : v ? "rgba(0,255,255,0.25)" : "rgba(255,0,255,0.25)";
+      ctx.fillRect(c * 4 * bpx, r * 4 * bpx, 4 * bpx, 4 * bpx);
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
+      ctx.strokeRect(c * 4 * bpx + 0.5, r * 4 * bpx + 0.5, 4 * bpx - 1, 4 * bpx - 1);
+    }
+  }
+  return { w: canvas.width, h: canvas.height };
+}
+// 8x8 bit-grid editor. onToggle(plane, row, col). Returns element.
+export function bitGrid(el, bytes, plane, onToggle) {
+  el.innerHTML = "";
+  const t = document.createElement("table");
+  t.style.borderCollapse = "collapse";
+  for (let r = 0; r < 8; r++) {
+    const tr = document.createElement("tr");
+    for (let c = 0; c < 8; c++) {
+      const td = document.createElement("td");
+      const on = (bytes[r] >> c) & 1;
+      td.textContent = on ? "1" : "0";
+      td.style.cssText = "border:1px solid #666;min-width:44px;min-height:44px;text-align:center;cursor:pointer;background:" + (on ? "#246" : "#111");
+      td.addEventListener("click", () => onToggle(plane, r, c));
+      tr.appendChild(td);
+    }
+    t.appendChild(tr);
+  }
+  el.appendChild(t);
+}

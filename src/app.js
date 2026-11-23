@@ -614,6 +614,7 @@ import { makeMovie, makeMovieV2, parseMovie, downloadMovie, downloadPng, replayM
 import { loadPrefs, savePrefs } from "./ui/prefs.js";
 import { wireInstall } from "./ui/pwa.js";
 import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
+import { buildTweaksPanel, applyTweaks } from "./ui/tweaks.js";
 const prefs = loadPrefs();
 const shellStatusEl = document.getElementById("shellStatus");
 const logEl = document.getElementById("logEl");
@@ -1670,6 +1671,15 @@ swapXYInput.addEventListener("change", () => {
   prefs.swapXY = !!swapXYInput.checked; padFlags.swapXY = prefs.swapXY; savePrefs(prefs);
   shellLog("swap X/Y " + (prefs.swapXY ? "on" : "off"));
 });
+try {
+  buildTweaksPanel({
+    ram: () => (wasmHost.inst && wasmHost.inst.exports && wasmHost.inst.exports.bm_ram_wr) ? wasmHost.inst.exports : null,
+    warp: (a) => wasmHost.inst.exports.bm_warp(a),
+    engine: () => prefs.engine,
+    log: shellLog,
+  });
+  wasmHost.cheatsApply = function (ex) { try { applyTweaks(ex); } catch (e) {} };
+} catch (e) { shellLog("tweaks err " + String((e && e.message) || e).slice(0, 80)); }
 setInterval(() => {
   try {
     if (!shellStatusEl) return;

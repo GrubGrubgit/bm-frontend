@@ -42,9 +42,13 @@ GameHost.prototype.hash = function () { return this.curHash >>> 0; };
 GameHost.prototype.audioFrame = function () {
   return { n: this.curAudioN, bytes: this.curAudio.slice() };
 };
+// Cheat hook (set by app.js from ui/tweaks.js): runs while the engine is
+// suspended inside host_frame, so RAM writes land cleanly between edges.
+GameHost.prototype.cheatsApply = null;
 GameHost.prototype.onFrame = function (f) {
   var self = this;
   var ex = this.inst.exports;
+  try { if (this.cheatsApply) this.cheatsApply(ex); } catch (eCheat) {}
   var mem = new Uint8Array(ex.memory.buffer);
   var vp = ex.bm_video_ptr();
   var vd = mem.slice(vp, vp + VBYTES);

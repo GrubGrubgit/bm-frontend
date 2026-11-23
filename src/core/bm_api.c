@@ -47,8 +47,8 @@ void dbg_ev(uint32_t x);
 __attribute__((import_module("env"))) __attribute__((import_name("host_frame"))) void host_frame(int frame);
 static int frame_no;
 static uint8_t game_pad;
-static uint32_t dbgev[2048]; static int dbgn;
-void dbg_ev(uint32_t x) { if (dbgn < 2048) dbgev[dbgn++] = x; }
+static uint32_t dbgev[2097152]; static int dbgn;
+void dbg_ev(uint32_t x) { if (dbgn < 2097152) dbgev[dbgn++] = x; }
 int bm_dbgn(void) { return dbgn; }
 uint32_t bm_dbg(int i) { return (i >= 0 && i < dbgn) ? dbgev[i] : 0; }
 static int apu_tail;
@@ -163,11 +163,35 @@ static void render(void) {
   }
 }
 
+// Pre-NMI RAM snapshot (trace/debug only, zero gameplay effect): the Mesen
+// oracle snaps pre-NMI phase, so wall-indexed comparisons read presnap.
+static uint8_t presnap_ram[2048];
+static uint64_t presnap_cyc;
+static uint32_t ppu_snap[20];
+static void ppu_snap_take(void) {
+  ppu_snap[0]=(uint32_t)ppu_scan; ppu_snap[1]=(uint32_t)ppu_dot; ppu_snap[2]=ppu_frame;
+  ppu_snap[3]=vblank_on; ppu_snap[4]=cpu_nmi; ppu_snap[5]=cpu_nmi_prev; ppu_snap[6]=need_nmi; ppu_snap[7]=prevent_vbl;
+  ppu_snap[8]=(uint32_t)(mcpu_clk&0xFFFFFFFFu); ppu_snap[9]=(uint32_t)((mcpu_clk>>32)&0xFFFFFFFFu);
+  ppu_snap[10]=(uint32_t)(ppu_mclk&0xFFFFFFFFu); ppu_snap[11]=(uint32_t)((ppu_mclk>>32)&0xFFFFFFFFu);
+  ppu_snap[12]=w2000_old; ppu_snap[13]=(uint32_t)w2000_has; ppu_snap[14]=(uint32_t)w2000_done;
+  ppu_snap[15]=reg2000; ppu_snap[16]=reg2001; ppu_snap[17]=(uint32_t)(wall_no&0xFFFFFFFFu); ppu_snap[18]=(uint32_t)(pad_wall&0xFFFFFFFFu);
+  ppu_snap[19]=(uint32_t)(synced_cyc&0xFFFFFFFFu);
+}
+int bm_ppu_ptr(void) { return (int)(intptr_t)ppu_snap; }
+static uint32_t cpu_snap[6];
+int bm_cpu_ptr(void) { return (int)(intptr_t)cpu_snap; }
 static void nmi_frame(void) {
+  { uint32_t i; for (i = 0; i < 2048u; i++) presnap_ram[i] = presnap2_ram[i]; }
+  presnap_cyc = presnap2_cyc;
+  cpu_snap[0]=presnap2_S; cpu_snap[1]=presnap2_P; cpu_snap[2]=presnap2_A; cpu_snap[3]=presnap2_X; cpu_snap[4]=presnap2_Y; cpu_snap[5]=presnap2_pc;
+  ppu_snap_take();
   b7_entry_EB7E();
   render();
   host_frame(frame_no++);
 }
+int bm_pre_ptr(void) { return (int)(intptr_t)presnap_ram; }
+int bm_preh_lo(void) { return (int)(presnap_cyc & 0xFFFFFFFFu); }
+int bm_preh_hi(void) { return (int)((presnap_cyc >> 32) & 0xFFFFFFFFu); }
 int bm_stage_ptr(void) { return (int)(intptr_t)stage; }
 void bm_load_prg(void) { memcpy(prg, stage, sizeof prg); }
 void bm_load_chr(void) { memcpy(chr, stage, sizeof chr); }

@@ -98,7 +98,10 @@ mirrors the device index.html shell section by hand on every sync that
 changes shell DOM (the bundle only carries src/bm/index.html, the
 standalone copy). Verify the row placement matches in both files. Editor ships via the normal
   release path: device build -> make-www --version X -> mk-page-zip ->
-  catbox -> fetch_url scratch/page-X.zip -> extract over src/bm/ ->
+  PRIVATE transfer only (chunked base64 over the bridge exec channel or
+  another user-approved private path — NEVER a public file host; catbox
+  and equivalents are BANNED, user order 2026-11-24) -> reassemble +
+  sha-check vs the device PAGEZIP line -> extract over src/bm/ ->
   PACKAGING/MANIFEST/README -> page_refresh boot-verify.
 
 ## P0-COMPLETE (2026-11-23, frontend e8ccd45, bundle 0.2.50).

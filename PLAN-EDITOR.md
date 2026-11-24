@@ -308,7 +308,7 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   e. Sound engine (song/sfx table layout; future music editor).
   f. Tank/Jason physics constants (accel/friction/jump arcs; would ground a future physics-accurate preview).
   g. Enemy AI state machines per type (behavior tables beyond spawn placement).
-  h. Password/save encoding (continue-system math).
+  h. STRUCK 2026-11-24 (not applicable to this game): header battery bit is clear (no SRAM), no PASSWORD/SAVE strings anywhere in PRG; the sole CONTINUE hit is the game-over menu text (CONTINUE/END at PRG 0x1F7C4). There is no password or save encoding to reverse-engineer.
   i. Text/dialog encoding (font + message tables; future script editor).
   Rule: every item closes with a headless proof (byte-equality or observed in-engine effect), same bar as 6.2.
 - 6.3 Boss-room linkage (P3 safeguards) CLOSED 2026-11-24

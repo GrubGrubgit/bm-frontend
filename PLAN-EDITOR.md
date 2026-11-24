@@ -179,6 +179,33 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   to bank-3 ROM offsets), document record format, verify by patching one
   byte (e.g. enemy HP) and observing in-game. Estimate: small (days, not
   weeks) — spawn path is already lifted and understood.
+  CLOSED 2026-11-24 (tools/verify-pack-6.1.mjs, 23/23 green: 8 static + 15 headless).
+  Pointer chain (all bank-3 CPU-mapped addrs): EA3A(0x31) reads R1[1]=$A174
+  (R1 = 16x16-bit LE table at bank-rel 0); EB51(area) indexes the 16-entry
+  area list (8 A-subpointers tank + 8 B-subpointers overhead; area-1 = index
+  9 = B1 = $B2A2); B-subpointer aims at a 3-pointer triplet
+  [type[]][x[]][y[]] (B1 = [$B2A8][$B320][$B397]); CA89 (fixed bank) copies
+  the triplet to ZP $00-$05 and round-robin-scans ($8E) entries whose
+  ($00),y must be <0x80 (negative = wrap/end marker).
+  Record format (parallel arrays): type[i] -> sprite base via LCB51/LCB7C
+  ($0150) AND actor id via bank6 vector[0] init (bank6 $8000-table base
+  $8002, entry (id-1), indirect jmp; actor-0x55 init at $A40B->$A4A4);
+  x[i]/y[i] -> slot $0403/$0405 (pixel-hi; lo init $80); slot byte0 = 1
+  (dormant) at spawn, $040D=$20; dedupe vs $0100 table, spawn idx -> $F8.
+  Area-1 proven spawns: entries 0,2,0x0e,0x26 -> slots 8,9,10,11
+  (x = $4B,$4F,$54,$52 matches array; slots 8/9 -> actor 0x55).
+  One-byte proofs (deterministic x2, no trap, all controls identical):
+  type[0] 00->05 changes slot8 actor 0x55->0x60 AND sprite $54->$5F
+  (=LCB7C[5]) with changed rendered pixels (video SAD>0); x[0] $4B->$51
+  moves slot8 spawn px-hi $4B->$51. Activation gate (documented, gated
+  the x-run): byte0=1 dormant slots convert only in a ~32px camera band
+  (fixed-bank vec $8124->$815B->$813C tests |pos-cam+8|&$7F<$20); patched
+  entry stayed dormant to +600 (still proves x mapping), converts on
+  approach (drive-run: slot8 cycled dormant->02->despawn->respawn).
+  Follow-ups (6.1b, NOT blocking P3 placement editing): record-type->actor
+  id map location inside bank6 vector[0] init; A-group target format
+  (pointer-lists + coordinate ladders, tank-mode consumer); R1 indices
+  other than 1; per-type HP/damage stat tables.
 - 6.2 Overhead physics bit meanings (CLOSED 2026-11-23, headless proofs):
   door bits 2-3 shared (all 15 overhead door-table entries sit on 0x8/0x9/
   0xB combos); bit7 solid (boundary-exact stops; cleared cells entered);

@@ -85,6 +85,23 @@ def main():
     A5 = "static void nmi_fire_now(uint64_t frame, const char *site) {"
     assert co.count(A5) == 1, "fire_now anchor drift"
     co = co.replace(A5, "extern void thaw_maybe(void);\n" + A5 + "\n    thaw_maybe();")
+    # 6. E1b lives-gate (infinite lives while saving is on). C52A is the
+    # player-death handler: DEC lives at C537, and on underflow DEC
+    # continues at C53B, then game-over (LC55A->C29E) when continues
+    # reach zero. While saving_on the DECs are skipped via arithmetic restore
+    # (single RD, no extra side effects; WR skipped so cycles/PPU untouched).
+    # Flags reflect the UN-decremented value, so C52A always takes the LC551
+    # respawn path and the game-over branch goes unreachable. New-game init
+    # WRs (lives=2 at C301, cont=5 at C2BC) are full writes, NOT gated, so a
+    # fresh game still seeds 2/5 even with saving on.
+    A6a = "{ uint8_t _v = (uint8_t)(RD(0xDD) - 1); WR(0xDD, _v); setZN(_v); }"
+    assert co.count(A6a) == 1, "lives-DEC anchor drift"
+    R6a = "{ uint8_t _v = (uint8_t)(RD(0xDD) - 1); if (saving_on) { _v = (uint8_t)(_v + 1); } else { WR(0xDD, _v); } setZN(_v); }"
+    co = co.replace(A6a, R6a)
+    A6b = "{ uint8_t _v = (uint8_t)(RD(0x037E) - 1); WR(0x037E, _v); setZN(_v); }"
+    assert co.count(A6b) == 1, "continues-DEC anchor drift"
+    R6b = "{ uint8_t _v = (uint8_t)(RD(0x037E) - 1); if (saving_on) { _v = (uint8_t)(_v + 1); } else { WR(0x037E, _v); } setZN(_v); }"
+    co = co.replace(A6b, R6b)
     (OUT / "combined_off.c").write_text(co)
     print("vendor patched: runtime.h APU ring + combined_off.c + LE351resume")
 main()

@@ -49,6 +49,10 @@ static int pending_warp = -1;
 static int pending_warp_raw = -1;
 static int apu_tail;
 static void save_stage_freeze(void);
+// E1 lives rule (E1b): infinite lives while saving is on. Config flag lives
+// BEFORE the engine include so the vendored lives-gate (hook 6) can see it.
+// Sticky across bm_boot, excluded from freeze/thaw blobs (like enhanced_mode).
+static int saving_on = 0;
 #include "combined_off.c"
 __attribute__((import_module("env"))) __attribute__((import_name("host_frame"))) void host_frame(int frame);
 static uint32_t dbgev[2097152]; static int dbgn;
@@ -422,7 +426,6 @@ static int sram_area[SRAM_SLOTS], sram_x[SRAM_SLOTS], sram_y[SRAM_SLOTS];
 static int sram_frame[SRAM_SLOTS];
 static uint32_t sram_crc[SRAM_SLOTS];
 static int sram_last = -1;
-static int saving_on = 0; // E1 lives rule gate (enforcement: lives RE)
 void bm_saving_set(int v) { saving_on = v ? 1 : 0; }
 int bm_saving_get(void) { return saving_on; }
 static int sram_valid_blob(const uint8_t *d, uint32_t len) {

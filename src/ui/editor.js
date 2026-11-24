@@ -1,7 +1,7 @@
 // src/ui/editor.js -- P1 tile-map editor view (lazy-loaded by app.js).
 // Reads the LOADED (resolved) pack, edits banks 0-2 in memory, writes a NEW
-// custom pack (never mutates stock). Overhead combo attrs are read-only
-// until research 6.2; map/scroll/palette-view work for both modes.
+// custom pack (never mutates stock). Overhead combo attrs editable per
+// research 6.2 (bit meanings PROVEN headless, see levels.js).
 import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/levels.js";
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
 import { makePatch, newCustomId } from "../pack/overlay.js";
@@ -37,10 +37,27 @@ function repaint() {
   const br0 = el("edBrush");
   if (br0) br0.max = E.blocks.length / 4 - 1;
   const cv = el("edMap");
+  const doorCells = new Set();
+  try {
+    const isDoorAttr = (a) => ((a & 0x0C) !== 0 || a === 0x8B);
+    const doorCombo = new Set();
+    for (let ci = 0; ci < E.attrs.length; ci++) if (isDoorAttr(E.attrs[ci])) doorCombo.add(ci);
+    const doorStruct = new Set();
+    for (let si = 0; si < E.structs.length / 4; si++) {
+      for (let k = 0; k < 4; k++) if (doorCombo.has(E.structs[si * 4 + k])) { doorStruct.add(si); break; }
+    }
+    const doorBlock = new Set();
+    for (let bi = 0; bi < E.blocks.length / 4; bi++) {
+      for (let k = 0; k < 4; k++) if (doorStruct.has(E.blocks[bi * 4 + k])) { doorBlock.add(bi); break; }
+    }
+    for (let mi = 0; mi < E.map.length; mi++) if (doorBlock.has(E.map[mi])) doorCells.add(mi);
+  } catch (e) {}
+
   const scroll = E.scroll;
   paintMap(cv, E, bgBank(), E.pal, {
     pxPerBlock: 16, showScroll: S.showScroll,
     scrollV: scroll.subarray(0, 8), scrollH: scroll.subarray(8, 16),
+    doorBlocks: doorCells,
   });
   renderInspector(E);
   renderScrollGrids(E);
@@ -54,6 +71,7 @@ function renderPalStrip(E) {
   for (let i = 0; i < 16; i++) { ctx.fillStyle = NES_PALETTE[E.pal[i] & 63]; ctx.fillRect(i * 24, 0, 24, 24); }
 }
 const ATTR_BITS_TANK = ["pal0", "pal1", "door/ent0", "door/ent1", "damage", "ladder", "water(brk)", "solid"];
+const ATTR_BITS_OVERHEAD = ["pal0", "pal1", "door/ent0", "door/ent1", "bit4(no-eff)", "bit5(unused)", "bit6(solid-only)", "solid"]; // 6.2
 function renderInspector(E) {
   const box = el("edInspector");
   if (!box) return;
@@ -134,12 +152,11 @@ function renderInspector(E) {
     pRow.appendChild(inp);
   }
   box.appendChild(pRow);
-  // attr bit editor (tank only)
+  // attr bit editor (per-mode meanings; overhead per research 6.2)
   const aRow = document.createElement("div");
-  if (E.mode === "overhead") {
-    aRow.textContent = "attr bits read-only for overhead (research 6.2 pending): $" + E.attrs[ci].toString(16) + " = " + E.attrs[ci].toString(2).padStart(8, "0");
-  } else {
-    aRow.textContent = "attr bits: ";
+  {
+    const labels = E.mode === "overhead" ? ATTR_BITS_OVERHEAD : ATTR_BITS_TANK;
+    aRow.textContent = "attr bits (" + E.mode + "): ";
     for (let b = 0; b < 8; b++) {
       const lab = document.createElement("label");
       lab.style.margin = "0 4px";
@@ -155,14 +172,14 @@ function renderInspector(E) {
         repaint();
       });
       lab.appendChild(cb);
-      lab.appendChild(document.createTextNode(ATTR_BITS_TANK[b]));
+      lab.appendChild(document.createTextNode(labels[b]));
       aRow.appendChild(lab);
     }
   }
   box.appendChild(aRow);
 }
-// Door-combo heuristic (tank only): a set scroll screen should contain a
-// doorway combo (combo attr with door bits 2-3; solid+door links regions).
+// Door-combo heuristic (both modes; door bits 2-3 shared per 6.2): a set
+// scroll screen should contain a doorway combo (solid+door links regions).
 export function doorComboSet(L) {
   const d = new Set();
   for (let i = 0; i < L.attrs.length; i++) if ((L.attrs[i] & 0x0C) !== 0) d.add(i);
@@ -204,7 +221,7 @@ function scrollHint(E) {
   const msgs = [];
   const rows = E.map.length / 32;
   const evenScreens = (rows % 4 === 0);
-  const doors = E.mode === "tank" ? doorComboSet(E) : null;
+  const doors = doorComboSet(E); // door bits 2-3 shared by tank+overhead (6.2)
   for (const [name, bytes] of [["V", E.scroll.subarray(0, 8)], ["H", E.scroll.subarray(8, 16)]]) {
     let cells = [];
     for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if ((bytes[r] >> c) & 1) cells.push([r, c]);
@@ -215,7 +232,7 @@ function scrollHint(E) {
     // Shape is informational only: stock maps prove non-rectangular
     // regions are legitimate (e.g. stock L1 V), so shape is never flagged.
     let m = name + ": " + cells.length + " cells " + (cells.length === full ? "rectangular [" + r0 + "-" + r1 + "," + c0 + "-" + c1 + "]" : "(non-rectangular bbox [" + r0 + "-" + r1 + "," + c0 + "-" + c1 + "])");
-    if (doors && evenScreens) {
+    if (evenScreens) {
       // Informational only: stock maps prove doorless scroll screens and
       // even doorless regions are legitimate (dead-ends, loops, drops),
       // so absence of a door is never flagged as an error here.
@@ -225,8 +242,7 @@ function scrollHint(E) {
     }
     msgs.push(m);
   }
-  if (!doors) msgs.push("doorway check n/a (overhead: attrs read-only)");
-  else if (!evenScreens) msgs.push("doorway check n/a (rows not multiple of 4)");
+  if (!evenScreens) msgs.push("doorway check n/a (rows not multiple of 4)");
   hint.textContent = msgs.join(" | ") + " [" + effFreeLine() + "]";
 }
 function renderScrollGrids(E) {

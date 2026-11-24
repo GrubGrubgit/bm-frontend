@@ -44,11 +44,19 @@ editor") — the workspace src/bm/ tree is a GENERATED BUNDLE, never hand-edit.
   bank1 0x382B, bank2 0x3A63. Geometry (measured headless: 2-block
   stripe period 128px, 8px grid): pattern 8x8, combo 16x16, struct
   32x32, block 64x64, row-major [TL,TR,BL,BR] PROVEN exact (2026-11-23: full 32x30 L1 spawn vicinity reproduced the live PPU nametable + attrs 960/960 under the unique surviving arrangement of 8 hypotheses; tile pixels mean-ham 0.12/64 vs live frame; settled PPU palette RAM byte-identical to the level pal). Screen = 4x4 blocks.
-  Scroll = 16B (8B vertical + 8B horizontal flags over 8x8 screen grid,
-  grid offset +32/+32px). Combo attr bits: 0-1 palette, 2-3 door/overhead
-  entrance, 4 damage, 5 ladder, 6 water (solid+water = breakable), 7 solid
-  (solid+door = scrolling-region doorway). Overhead physics bits DIFFER —
-  overhead attrs are read-only until 6.2.
+  Scroll = 16B (8B vertical + 8B horizontal flags over 8x8 screen grid
+  (V byte i = screen ROW i, bit j = column j (column-hypothesis refuted
+  headless); H byte i = screen row i, bit6 = +32px camera-origin row
+  flag; V bit6 = NO shift, confirmed 2x), grid offset +32/+32px). Combo
+  attr bits, tank: 0-1 palette, 2-3 door/overhead entrance, 4 damage,
+  5 ladder, 6 water (solid+water = breakable), 7 solid (solid+door =
+  scrolling-region doorway). Overhead (6.2 PROVEN headless 2026-11-23):
+  0-1 palette, 2-3 door/entrance (all 15 overhead transit-door table
+  entries sit on door-bit combos), 4 NO damage effect on Jason, 5 UNUSED
+  (absent from every overhead level), 6 solid-only (0xC1-0xC3; walkable
+  0x42 probe at full speed), 7 solid. Transit-door table: fixed bank
+  $DD7E (areas) / $DDEA (xhi) / $DE56 (yhi), entries (area, xhi, yhi) in
+  X_raw>>8 units, EOR-1 paired two-sided.
 - 2.3 Free space (growth headroom, same-bank only): bank0 624B, bank1 2003B,
   bank2 1471B (TRUE compact capacity = 16384 - head/slack - all table spans,
   proven by grow-until-overflow: 620/2000/1468 usable at 4-alignment; the ROM
@@ -160,10 +168,19 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   to bank-3 ROM offsets), document record format, verify by patching one
   byte (e.g. enemy HP) and observing in-game. Estimate: small (days, not
   weeks) — spawn path is already lifted and understood.
-- 6.2 Overhead physics bit meanings (needed for P1 overhead attr editing):
-  Data Crystal flags they differ; find door/entrance semantics for
-  overhead combos (door bits 2-3 are shared; solid/damage/ladder may differ).
-  Verify by in-game observation.
+- 6.2 Overhead physics bit meanings (CLOSED 2026-11-23, headless proofs):
+  door bits 2-3 shared (all 15 overhead door-table entries sit on 0x8/0x9/
+  0xB combos); bit7 solid (boundary-exact stops; cleared cells entered);
+  bit4 harmless to Jason (hurt-rate 17% on 0x10 vs 43% open-floor control);
+  bit5 unused (absent overhead-wide); bit6 solid-only (0xC1-0xC3; walkable
+  0x42 at full speed). Control method: dismount via game-Select hold
+  (pad 4 = game bit $20), then warp_raw(k) as Jason; 4-way top-down
+  movement confirmed. (Pad map is bit-reversed in this build: game button
+  bit i = pad bit 7-i.) Live door transit remains un-triggered (Down-edge
+  gate decoded at bank6 $82E4 -> $D238/$D1EF(1) -> $B7=1 -> dispatcher
+  $C465 -> $C4C8 -> table scan $C7A8; observed $B7=2 events were
+  enemy-damage state, not doors); not required for P1 since the table
+  data is ground truth for the highlight.
 - 6.3 Boss-room linkage (P3): how bosses bind to rooms/levels; death-warp
   and $03FB boss-bit interactions must keep working with edited spawns.
 
@@ -180,4 +197,11 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
 - 2026-11-23: pack overlay (not forked packs) so stock stays pristine and
   both engines share one apply path.
 - 2026-11-23 P1 acceptance closed: all-16-level byte-identical round-trip (verify-pack-p1 57/57) + edited map boots and plays on BOTH engines (verify-pack-p1-play 15/15: wasm warp(0)+walk dx=9792 trap-free, mesen stock-vs-edited divergence + scroll motion).
+- 2026-11-23 P1 completion: H row-flag mapping + V row-indexed mapping proven
+  headless (column-hypothesis refuted dynamically; V bit6 no-shift confirmed
+  twice); door-combo highlight + H +32 row markers shipped; 6.2 closed
+  (overhead attrs editable with honest per-bit labels; bit5 hidden as
+  unused); framebuffer-vs-mesen scare closed as non-issue (matcher
+  mirroring bug + idle spawn colors; NT d=0 at (288,800), NAT boot
+  identical to warp(0)).
 - 2026-11-23 P0/P1 debt closure (verify-pack-debt 43/43; P0 32/32, P1 57/57, P1-play 15/15 re-green): save slots are now pack-scoped keys (slot-N::packId, legacy slot-N fallback; store.slotKeyFor) so stock/custom saves coexist; bug reports + status line carry the active pack (report uses v2 movies); editor saves auto-activate the new pack + use newCustomId; brush max refreshes live; tiles.js arrangement comment corrected to PROVEN; levels.js exports bankFreeBytes with live per-bank free readout in the scroll-hint line; doorway hint is informational counts only (measured: stock maps legitimately contain doorless screens AND doorless regions, e.g. L1 V 2 doorless regions, so absence is never flagged — auto-checks stay stock-green; true door semantics wait on 6.2). No engine/recomp/disasm changes.

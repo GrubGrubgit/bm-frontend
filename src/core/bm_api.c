@@ -184,6 +184,8 @@ static int pending_warp = -1;
 int bm_ram_rd(int a) { return ram[a & 0x7FF]; }
 void bm_ram_wr(int a, int v) { ram[a & 0x7FF] = (uint8_t)(v & 0xFF); }
 void bm_warp(int area) { pending_warp = area & 7; }
+static int pending_warp_raw = -1;
+void bm_warp_raw(int area) { pending_warp_raw = area & 15; }
 static void nmi_frame(void) {
   { uint32_t i; for (i = 0; i < 2048u; i++) presnap_ram[i] = presnap2_ram[i]; }
   presnap_cyc = presnap2_cyc;
@@ -198,6 +200,13 @@ static void nmi_frame(void) {
     ram[0x14] = (uint8_t)(w & 7);
     in_nmi = 0;
     __attribute__((musttail)) return b7_entry_C2FB();
+  }
+  if (pending_warp_raw >= 0) {
+    int w = pending_warp_raw;
+    pending_warp_raw = -1;
+    ram[0x14] = (uint8_t)(w & 15);
+    in_nmi = 0;
+    __attribute__((musttail)) return b7_entry_C301();
   }
 }
 int bm_pre_ptr(void) { return (int)(intptr_t)presnap_ram; }

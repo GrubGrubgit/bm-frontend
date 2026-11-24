@@ -86,9 +86,30 @@ export function paintMap(canvas, L, bgBankBytes, pal, opts) {
     if (!cv) { cv = renderBlockImage(L, bgBankBytes, pal, bi); seen.set(bi, cv); }
     ctx.drawImage(cv, x * bpx, y * bpx, bpx, bpx);
   }
+  if (o.doorBlocks && o.doorBlocks.size) {
+    // Door-combo highlight: blocks containing a combo whose attr has
+    // door bits 2-3 set (shared tank+overhead per 6.2: all 15 overhead
+    // door-table entries sit on door-bit combos; e.g. combo146 block
+    // (15,21) = L1 table entry (area8, xhi62, yhi85)).
+    ctx.fillStyle = "rgba(255,200,0,0.20)";
+    ctx.strokeStyle = "#fc0"; ctx.lineWidth = 2;
+    for (const bi of o.doorBlocks) {
+      const bx = bi % cols, by = (bi / cols) | 0;
+      if (bx < 0 || by < 0 || bx >= cols || by >= rows) continue;
+      ctx.fillRect(bx * bpx, by * bpx, bpx, bpx);
+      ctx.strokeRect(bx * bpx + 1, by * bpx + 1, bpx - 2, bpx - 2);
+    }
+  }
   if (o.showScroll && o.scrollV && o.scrollH) {
-    // screens are 4x4 blocks; planes are 8x8 bit grids (orientation
-    // assumption: plane byte i = row i, bit j = column j).
+    // screens are 4x4 blocks; planes are 8x8 bit grids PROVEN headless:
+    // H byte i = map screen ROW i, bit j = column j; H bit6 is a ROW flag
+    // (+32px camera-origin shift for the whole row, causal +/-32 in
+    // follow; NOT per-cell: origin constant across columns). V bytes are
+    // row-indexed the same way (CD1D/LCC6D symmetry); V bit6 shows NO
+    // Y-shift headless (L9 follow 1:1 smooth with mixed V bit6), so V
+    // cells render without a shift marker. Column-hypothesis refuted
+    // headless: scy follows py walking straight down L9 screen col 5
+    // where V[5]=00 throughout (bits must be row-indexed to have effect).
     for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
       const v = (o.scrollV[r] >> c) & 1, h = (o.scrollH[r] >> c) & 1;
       if (!v && !h) continue;
@@ -96,6 +117,14 @@ export function paintMap(canvas, L, bgBankBytes, pal, opts) {
       ctx.fillRect(c * 4 * bpx, r * 4 * bpx, 4 * bpx, 4 * bpx);
       ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
       ctx.strokeRect(c * 4 * bpx + 0.5, r * 4 * bpx + 0.5, 4 * bpx - 1, 4 * bpx - 1);
+    }
+    // H row-flag marker: bit6 set => +32px X-origin for that row.
+    ctx.fillStyle = "#ff0";
+    ctx.font = "bold 10px monospace";
+    for (let r = 0; r < 8; r++) {
+      if (((o.scrollH[r] >> 6) & 1) && r * 4 * bpx < canvas.height) {
+        ctx.fillText("+32", 2, r * 4 * bpx + 11);
+      }
     }
   }
   return { w: canvas.width, h: canvas.height };

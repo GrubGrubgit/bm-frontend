@@ -14,10 +14,14 @@
 // pal/scroll/table are fixed. Inter-table gaps (L10/L12/L14/L16, 4-12B)
 // and bank-tail free space are preserved verbatim on the fast path and
 // absorbed into one contiguous tail region on the compact path.
-// Combo attr bits (tank; overhead physics bits DIFFER - overhead attrs are
-// read-only until research item 6.2): 0-1 palette, 2-3 door/overhead
-// entrance, 4 damage, 5 ladder, 6 water (solid+water = breakable),
-// 7 solid (solid+door = scrolling-region doorway).
+// Combo attr bits. Tank: 0-1 palette, 2-3 door/overhead entrance, 4 damage,
+// 5 ladder, 6 water (solid+water = breakable), 7 solid (solid+door =
+// scrolling-region doorway). Overhead (6.2 PROVEN headless 2026-11-23):
+// 0-1 palette, 2-3 door/entrance (all 15 overhead door-table entries sit on
+// 0x8/0x9/0xB), 4 NO damage effect on Jason (hurt-rate below open-floor
+// control), 5 UNUSED (absent from all overhead levels), 6 solid-only
+// (0xC1-0xC3; walkable 0x42 shows full speed), 7 solid. Door table: fixed
+// bank $DD7E/$DDEA/$DE56 (areas, xhi, yhi), EOR-1 paired two-sided entries.
 export const LEVEL_BANK = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 1, 7: 1, 8: 1, 9: 1, 11: 1, 13: 2, 10: 2, 14: 2, 16: 2, 12: 2, 15: 2 };
 export const BANK_LEVELS = { 0: [1, 2, 3, 4, 5], 1: [6, 7, 8, 9, 11], 2: [13, 10, 14, 16, 12, 15] };
 export const LEVEL_MODE = {};

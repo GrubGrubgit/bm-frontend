@@ -192,6 +192,17 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   $C465 -> $C4C8 -> table scan $C7A8; observed $B7=2 events were
   enemy-damage state, not doors); not required for P1 since the table
   data is ground truth for the highlight.
+- 6.4 Full-game RE backlog (user order 2026-11-24: record now, pursue after P3; long-term goal is a complete reverse-engineering of the game). Not gated on anything; pick items as editor phases demand them:
+  a. Per-level sprite palettes (would let the P2 CHR tab preview sprite banks exactly; currently bg-palette approximation, recorded as known limitation).
+  b. Bank-3 enemy/powerup record formats (this is 6.1, active now as P3 groundwork).
+  c. Boss-room linkage (this is 6.3, required for P3 placement safeguards).
+  d. Sprite-bank assignments per level (which 4KB CHR banks the PPU maps for sprites per area; Data Crystal CHR-ROM table covers bg only).
+  e. Sound engine (song/sfx table layout; future music editor).
+  f. Tank/Jason physics constants (accel/friction/jump arcs; would ground a future physics-accurate preview).
+  g. Enemy AI state machines per type (behavior tables beyond spawn placement).
+  h. Password/save encoding (continue-system math).
+  i. Text/dialog encoding (font + message tables; future script editor).
+  Rule: every item closes with a headless proof (byte-equality or observed in-engine effect), same bar as 6.2.
 - 6.3 Boss-room linkage (P3): how bosses bind to rooms/levels; death-warp
   and $03FB boss-bit interactions must keep working with edited spawns.
 

@@ -286,7 +286,7 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   src/pack/enemies.js. Open micro-items: boss-HP-128 source, T48 splitter
   mechanics, T63 phantom player damage (HP df w/ no visible spawn),
   T46/47 byte11=8b vs T32 4c, converter routine boundaries. Tank
-  attribute editing in UI is future work (P3d, not ordered).
+  attribute editing in UI CLOSED as P3d 2026-11-24 (see tail).
 - 6.2 Overhead physics bit meanings (CLOSED 2026-11-23, headless proofs):
   door bits 2-3 shared (all 15 overhead door-table entries sit on 0x8/0x9/
   0xB combos); bit7 solid (boundary-exact stops; cleared cells entered);
@@ -337,7 +337,7 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   -- keep boss-active windows short). Editor rule: NEVER delete/retype/move
   the boss record far (kill sets $03FB; the egg needs its camera band).
 
-## P4 Enhancements menu + entrance save system (OPEN, user order 2026-11-24)
+## P4 Enhancements menu + entrance save system CLOSED 2026-11-24 (user order 2026-11-24)
 - Decisions: saving OPTIONAL, default off (original experience preserved);
   new Enhancements panel modeled on cheats/tweaks (future home of widescreen;
   earlier widescreen research not found in repo -- re-research when ordered);
@@ -387,3 +387,4 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
 - 2026-11-24 P3e CLOSED (verify-pack-p3 43/43; battery p3b/p3c/6.1/6.1b/6.1c/6.3 re-green = 198 checks; 77728e3 pushed, mirrored): 16-warp palette survey proved warp_raw(k) loads level k<8?k+9:k-7 ($14 6 stock init trap excluded); shipped enemies-tab mapping was A/B-swapped every level. Fix: subLevel/subMode swapped, pure keyForLevel/levelForKey in enemies.js (editor delegates), stat gate on tank mode. Side finding: bank4 actor conversion lands ~250f (use span>=250 for bank4 actor asserts).
 - 2026-11-24 P4 engine CLOSED (tools/verify-pack-p4.mjs 32/32; battery p3/p3b/p3c/6.1/6.1b/6.1c/6.3/p0 re-green): freeze+thaw BOTH at NMI-entry top (thaw_maybe, patch_vendor.py hook 5). First draft froze at end-of-nmi_frame: skipped the main-slice wait (wall+1/cycles-28k divergence). Fix: entry-freeze, byte-exact re-runs (K=1/10 ndiff=0). Wait-poll labels int_pc/nmi_pc (E93A/E93C) may swap rarely with identical gameplay (RTI discards; proof masks 8B). Door table: bank7 0x1D7E 108 rows, (9,69,75)r1<->(8,9,125)r0 (Down-drive proven), (10,85,7)r5<->(9,22,93)r4. New lib src/pack/doors.js. UI phase (Enhancements panel + entrance saves) next.
 - 2026-11-24 P4 UI: Enhancements panel (opt-in, default off) + entrance saves. Up on a doorway captures the exact-state freeze and offers Save-to-slot; Down entry unchanged. Slots in IDB entrance-<n>::<pack> (apart from replay slots); loads stage thaw bytes and rewind live. Widescreen placeholder (disabled). New: src/ui/enhance.js, src/pack/entrance.js (pure detector: 6-frame stability, one prompt per side); hook entranceApply in host.js onFrame (suspended, read-only). Suite p4 now 44 checks (detector units + headless presnap/Up/capture/load flow).
+- 2026-11-24 P3d CLOSED (tools/verify-pack-p3d.mjs 27/27 green: 21 static + 6 dynamic headless x2): tank-side per-type HP/damage editing via bank-4 table ($B326, 16x4B; lib getTankStatEntry/serializeTankStats pre-existing from 6.1c). Editor stat table now covers A-list areas (levels 9-16, $14 0-7), GLOBAL-per-type, trap types locked, boss egg ($20) noted HP-$80-not-table-driven, no-entry types listed (16-31 empty, 32+ special). Save writes bank-4 patches via overlay diff (base = active pack). Boot proofs: alone-method area-0 span-250 (byte13==HP for e1->07 and e14->09), walk-damage 16/16/16 control vs 16/48/16 patched at identical frames, B-area boot unaffected by tank edit. No engine/recomp/disasm changes.

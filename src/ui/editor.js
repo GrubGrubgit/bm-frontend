@@ -6,14 +6,14 @@ import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/lev
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
-import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel } from "../pack/enemies.js";
+import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR } from "../pack/enemies.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
   brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
-  chr: {}, enemies: null, edEnemies: {}, edStats: {},
+  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {},
   chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
 };
 // 4KB CHR bank -> levels using it as bg bank (labels for the bank picker).
@@ -609,6 +609,25 @@ function commitStat(idx, field, value) {
   log('editor: stats e' + idx + '.' + field + ' -> ' + value + ' (GLOBAL per type)');
   repaint();
 }
+function effTankStat(idx) {
+  const base = S.resolved ? S.resolved.prg[TANK_STAT_BANK] : null;
+  const cur = getTankStatEntry(base, idx) || { hp: 0, dmg: 0 };
+  const e = S.edTankStats[idx];
+  if (e) { if (e.hp !== undefined) cur.hp = e.hp; if (e.dmg !== undefined) cur.dmg = e.dmg; }
+  return cur;
+}
+function commitTankStat(idx, field, value) {
+  if (!(idx >= 0) || !Number.isInteger(value) || value < 0 || value > 255) {
+    log(String("editor: tank stats refusing out-of-range e") + idx + "." + field + "=" + value);
+    repaint();
+    return;
+  }
+  const cur = S.edTankStats[idx] || {};
+  S.edTankStats[idx] = cur;
+  cur[field] = value;
+  log(String("editor: tank stats e") + idx + "." + field + " -> " + value + " (GLOBAL per type)");
+  repaint();
+}
 function renderStatTbl() {
   const info = el('edStatInfo'), tbl = el('edStatTbl');
   if (!tbl) return;
@@ -617,7 +636,55 @@ function renderStatTbl() {
   const E = effEnemyList(key);
   if (!E) { if (info) info.textContent = ''; return; }
   if (E.L.mode !== 'tank') {
-    if (info) info.textContent = 'A-list area ($14 0-7): stats live in the bank-4 table (6.1c), not editable here';
+    if (info) info.textContent = 'bank-4 table: GLOBAL per type (all A-list areas: levels 9-16, $14 0-7)';
+    const seenT = {};
+    const rowsT = [];
+    const noEntryT = [];
+    for (let i = 0; i < E.n; i++) {
+      const t = E.types[i];
+      const idx = tankStatIdxFor(t);
+      if (idx < 0) { if (noEntryT.indexOf(t) < 0) noEntryT.push(t); continue; }
+      if (seenT[idx] !== undefined) continue;
+      seenT[idx] = t;
+      rowsT.push({ type: t, idx: idx });
+    }
+    rowsT.sort(function (a, b) { return a.idx - b.idx; });
+    const hrT = document.createElement('tr');
+    const headsT = ['type', 'actor', 'HP', 'dmg', ''];
+    for (let h = 0; h < headsT.length; h++) { const th = document.createElement('th'); th.textContent = headsT[h]; hrT.appendChild(th); }
+    tbl.appendChild(hrT);
+    for (let r = 0; r < rowsT.length; r++) {
+      const type = rowsT[r].type, idx = rowsT[r].idx;
+      const locked = TANK_TRAP_TYPES.has(type);
+      const st = effTankStat(idx);
+      const tr = document.createElement('tr');
+      const td0 = document.createElement('td'); td0.textContent = type + ' (e' + idx + ')'; tr.appendChild(td0);
+      const tdA = document.createElement('td');
+      const av = TANK_TYPE_ACTOR[type];
+      tdA.textContent = (av === undefined) ? '?' : ('$' + av.toString(16)); tr.appendChild(tdA);
+      const fields = [['hp', st.hp], ['dmg', st.dmg]];
+      for (let k = 0; k < fields.length; k++) {
+        const td = document.createElement('td');
+        if (locked) { td.textContent = fields[k][1]; }
+        else {
+          const inp = document.createElement('input');
+          inp.type = 'number'; inp.min = 0; inp.max = 255; inp.value = fields[k][1];
+          inp.style.width = '64px';
+          inp.dataset.idx = idx; inp.dataset.f = fields[k][0];
+          inp.addEventListener('change', function () { commitTankStat(this.dataset.idx | 0, this.dataset.f, this.value | 0); });
+          td.appendChild(inp);
+        }
+        tr.appendChild(td);
+      }
+      const tdN = document.createElement('td');
+      tdN.textContent = locked ? 'locked: activation-traps here' : '';
+      tr.appendChild(tdN);
+      tbl.appendChild(tr);
+    }
+    let extraT = '';
+    for (let i = 0; i < E.n; i++) if (E.types[i] === BOSS_TYPE) { extraT += ' | boss egg ($20): HP $80, not table-driven'; break; }
+    if (noEntryT.length && info) info.textContent += ' | no table entry (stock HP; 16-31 empty, 32+ special): types ' + noEntryT.join(',');
+    if (extraT && info) info.textContent += extraT;
     return;
   }
   if (info) info.textContent = 'bank-6 table: GLOBAL per type (all B-list areas: levels 1-8, $14 8-15)';
@@ -700,6 +767,13 @@ async function saveAsPack() {
         patches.push(makePatch('prg', STAT_BANK, run.off, run.bytes));
       }
     }
+    if (Object.keys(S.edTankStats).length) {
+      const tr2 = serializeTankStats(S.resolved.prg[TANK_STAT_BANK], S.edTankStats);
+      if (!tr2.ok) throw new Error('serialize tank stats: ' + tr2.errors.join(' '));
+      for (const run of diffRuns(S.stock.prg[TANK_STAT_BANK], tr2.bytes)) {
+        patches.push(makePatch('prg', TANK_STAT_BANK, run.off, run.bytes));
+      }
+    }
     if (Object.keys(S.edEnemies).length) {
       let structural = false;
       for (const k of Object.keys(S.edEnemies)) {
@@ -722,6 +796,7 @@ async function saveAsPack() {
     S.chr = {};
     S.edEnemies = {};
     S.edStats = {};
+    S.edTankStats = {};
     repaint();
     try { await api.refreshPacks(); } catch (e) {}
     try { if (api.setPack) api.setPack(id); } catch (e2) {}
@@ -745,6 +820,7 @@ async function loadAll() {
   S.chr = {};
   S.edEnemies = {};
   S.edStats = {};
+  S.edTankStats = {};
   const pe = parseSpawns(active.prg[SPAWN_BANK]);
   if (!pe.ok) throw new Error("parse enemies: " + pe.errors.join(" "));
   S.enemies = pe;

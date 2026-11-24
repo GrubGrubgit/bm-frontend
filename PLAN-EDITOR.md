@@ -163,6 +163,19 @@ Steps: enemies.js tables (attributes + placement/spawn lists + boss rooms);
 attribute editor (HP/damage/speed/sprite fields per RE); placement editor
 (add/move/remove spawns, room bounds checking); boss-room safeguards.
 Acceptance: per RE doc + in-game verification (warp to edited room, observe).
+  STATUS 2026-11-24: placement core DONE (not yet committed as P3-acceptance).
+  src/pack/enemies.js: parse/serialize all 16 sublists (triplet + t[n+1]/x[n]/y[n],
+  t[n]=$FF terminator enforced immutable, types <0x80, B7 y-tail past xlen
+  excluded incl. $BF53 stub; add/remove fail loudly, P3b) + engine sprite
+  tables SPR_A/SPR_B ($B51/$B7C) + spriteFor. Editor enemies tab: per-area
+  record table (type/x/y edit, sprite preview, unique-type boss warning, 6.3
+  open); save path via overlay prg-bank-3 patches (editorVersion p3).
+  tools/verify-pack-p3.mjs 17/17 green (round-trip identical, rejects bad
+  input, overlay write path boots: type edit 00->05 gives actor 0x60, x edit
+  moves spawn; warp(9) observed). REMAINING for P3 acceptance: add/remove
+  records (needs bank-3 free-space map, P3b); per-type attributes HP/damage
+  (needs 6.1b stat tables); boss-room safeguards (needs 6.3); editor smoke
+  test post-mirror (UI wiring syntax-checked only).
 
 ## 5. Shell UI plan
 - Editor button in shell grid (opens editor view; game view untouched).

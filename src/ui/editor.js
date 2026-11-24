@@ -6,13 +6,15 @@ import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/lev
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
+import { parseSpawns, serializeSpawns, spriteFor, SPAWN_BANK } from "../pack/enemies.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
   brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
-  chr: {}, chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
+  chr: {}, enemies: null, edEnemies: {},
+  chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
 };
 // 4KB CHR bank -> levels using it as bg bank (labels for the bank picker).
 const BANK_USERS = {};
@@ -87,6 +89,7 @@ function repaint() {
   });
   renderInspector(E);
   renderScrollGrids(E);
+  renderEnemies();
   renderPalStrip(E);
   fillChrBankSel();
   renderChrTab(E);
@@ -461,6 +464,62 @@ function onMapClick(ev) {
     repaint();
   }
 }
+function enemyKeyForLevel(level) { return level <= 8 ? 'A' + (level - 1) : 'B' + (level - 9); }
+function effEnemyList(key) {
+  if (!S.enemies || !S.enemies.ok) return null;
+  const L = S.enemies.lists.find(l => l.key === key);
+  if (!L) return null;
+  const e = S.edEnemies[key] || {};
+  return { L, types: e.types || L.types, xs: e.xs || L.xs, ys: e.ys || L.ys };
+}
+function commitEnemyRec(key, i, field, value) {
+  const E = effEnemyList(key);
+  if (!E) return;
+  const cur = S.edEnemies[key] || { types: E.L.types.slice(), xs: E.L.xs.slice(), ys: E.L.ys.slice() };
+  S.edEnemies[key] = cur;
+  if (field === 't') cur.types[i] = Math.max(0, Math.min(127, value | 0));
+  if (field === 'x') cur.xs[i] = Math.max(0, Math.min(255, value | 0));
+  if (field === 'y') cur.ys[i] = Math.max(0, Math.min(255, value | 0));
+  log('editor: enemies ' + key + '[' + i + '].' + field + ' -> ' + value);
+  repaint();
+}
+function renderEnemies() {
+  const info = el('edEnemyInfo'), tbl = el('edEnemyTbl'), warn = el('edEnemyWarn');
+  if (!tbl) return;
+  const key = enemyKeyForLevel(S.level);
+  const E = effEnemyList(key);
+  tbl.innerHTML = '';
+  if (!E) { if (info) info.textContent = 'no spawn data'; if (warn) warn.textContent = ''; return; }
+  const L = E.L;
+  if (info) info.textContent = 'area ' + key + ' (' + L.mode + '): ' + L.n + ' spawn records';
+  const freq = {};
+  for (let i = 0; i < L.n; i++) freq[E.types[i]] = (freq[E.types[i]] || 0) + 1;
+  const uniq = Object.keys(freq).filter(function (t) { return freq[t] === 1; });
+  if (warn) warn.textContent = uniq.length ? ('unique type(s) ' + uniq.join(',') + ' here: possibly a boss/miniboss -- verify in-game before moving far (6.3 open).') : '';
+  const hr = document.createElement('tr');
+  const heads = ['rec', 'type', 'x', 'y', 'sprA/B'];
+  for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }
+  tbl.appendChild(hr);
+  for (let i = 0; i < L.n; i++) {
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td'); td0.textContent = i; tr.appendChild(td0);
+    const fields = [['t', E.types[i], 127], ['x', E.xs[i], 255], ['y', E.ys[i], 255]];
+    for (let k = 0; k < fields.length; k++) {
+      const td = document.createElement('td');
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.min = 0; inp.max = fields[k][2]; inp.value = fields[k][1];
+      inp.style.width = '64px';
+      inp.dataset.i = i; inp.dataset.f = fields[k][0];
+      inp.addEventListener('change', function () { commitEnemyRec(key, this.dataset.i | 0, this.dataset.f, this.value | 0); });
+      td.appendChild(inp); tr.appendChild(td);
+    }
+    const sp = spriteFor(E.types[i]);
+    const td = document.createElement('td');
+    td.textContent = String.fromCharCode(36) + sp.a.toString(16) + '/' + String.fromCharCode(36) + sp.b.toString(16);
+    tr.appendChild(td);
+    tbl.appendChild(tr);
+  }
+}
 async function saveAsPack() {
   const nameEl = el("edPackName");
   const stEl = el("edStatus");
@@ -487,12 +546,20 @@ async function saveAsPack() {
         patches.push(makePatch("prg", b, run.off, run.bytes));
       }
     }
+    if (Object.keys(S.edEnemies).length) {
+      const er = serializeSpawns(S.enemies, S.edEnemies);
+      if (!er.ok) throw new Error("serialize enemies: " + er.errors.join(" "));
+      for (const run of diffRuns(S.stock.prg[SPAWN_BANK], er.bytes)) {
+        patches.push(makePatch("prg", SPAWN_BANK, run.off, run.bytes));
+      }
+    }
     if (!patches.length) { say("no changes to save"); return; }
     const id = newCustomId();
-    const doc = { customVersion: 1, id, name, baseCrc: S.stock.meta.crc32, patches, editorVersion: "p2", builtAt: new Date().toISOString() };
+    const doc = { customVersion: 1, id, name, baseCrc: S.stock.meta.crc32, patches, editorVersion: "p3", builtAt: new Date().toISOString() };
     await saveCustomPack(doc);
     S.edited = {};
     S.chr = {};
+    S.edEnemies = {};
     repaint();
     try { await api.refreshPacks(); } catch (e) {}
     try { if (api.setPack) api.setPack(id); } catch (e2) {}
@@ -514,6 +581,10 @@ async function loadAll() {
   }
   S.edited = {};
   S.chr = {};
+  S.edEnemies = {};
+  const pe = parseSpawns(active.prg[SPAWN_BANK]);
+  if (!pe.ok) throw new Error("parse enemies: " + pe.errors.join(" "));
+  S.enemies = pe;
   S.chrBank = -1;
   S.chrTile = 0;
   S.chrInk = 3;

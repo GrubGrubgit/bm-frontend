@@ -600,6 +600,7 @@ function effStat(idx) {
 function commitStat(idx, field, value) {
   if (!(idx >= 0) || !Number.isInteger(value) || value < 0 || value > 255) {
     log('editor: stats refusing out-of-range e' + idx + '.' + field + '=' + value);
+    repaint();
     return;
   }
   const cur = S.edStats[idx] || {};

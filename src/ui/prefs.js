@@ -43,3 +43,48 @@ export function savePrefs(p) {
   try { localStorage.setItem(KEY, JSON.stringify(clean)); } catch (e) {}
   return clean;
 }
+
+// ---- E4 settings sync: shell prefs as a sync wrapper over the engine core ----
+// Canonical store lives in the engine (bm_api.c E2/E4-core): volume 0-10,
+// mute 0/1, scale 0-3 INTEGER/FIT/FILL/STRETCH, filter 0/1 NEAREST/BILINEAR,
+// with bm_setting_get/set exports. prefs.js persists to localStorage and
+// pushes into the engine on spawn; the per-frame shell tick pulls in-game
+// menu edits back out. Shell controls ALWAYS work (never gated on enhanced
+// mode); the in-game settings menu requires enhancements on (engine gate).
+// Engine/slot/pad-swap/pack/touch stay frontend-owned and never enter the core.
+export const SCALE_ORDER = Object.freeze(["integer", "fit", "fill", "stretch"]);
+export const FILTER_ORDER = Object.freeze(["nearest", "bilinear"]);
+export function prefsToSettings(q) {
+  const raw = Number(q.volume) * 10;
+  const vol = Math.max(0, Math.min(10, Math.round(raw)));
+  const mute = q.muted ? 1 : 0;
+  let sc = SCALE_ORDER.indexOf(q.scale); if (sc < 0) sc = 0;
+  let fi = FILTER_ORDER.indexOf(q.filter); if (fi < 0) fi = 0;
+  return { volume: isFinite(vol) ? vol : 8, mute: mute, scale: sc, filter: fi };
+}
+export function settingsToPrefs(v, m, s, f) {
+  let vv = Math.max(0, Math.min(10, parseInt(v, 10))); if (!isFinite(vv)) vv = 8;
+  let ss = Math.max(0, Math.min(3, parseInt(s, 10))); if (!isFinite(ss)) ss = 0;
+  let ff = parseInt(f, 10) ? 1 : 0; if (!isFinite(ff)) ff = 0;
+  return { volume: vv / 10, muted: !!m, scale: SCALE_ORDER[ss], filter: ff ? "bilinear" : "nearest" };
+}
+export function pushPrefsToEngine(ex, q) {
+  if (!ex || typeof ex.bm_setting_set !== "function") return false;
+  const s = prefsToSettings(q);
+  ex.bm_setting_set(0, s.volume); ex.bm_setting_set(1, s.mute);
+  ex.bm_setting_set(2, s.scale); ex.bm_setting_set(3, s.filter);
+  return true;
+}
+export function pullEngineToPrefs(ex, q) {
+  if (!ex || typeof ex.bm_setting_get !== "function") return false;
+  const v = ex.bm_setting_get(0), m = ex.bm_setting_get(1);
+  const s = ex.bm_setting_get(2), f = ex.bm_setting_get(3);
+  if (typeof v !== "number" || typeof m !== "number" || typeof s !== "number" || typeof f !== "number") return false;
+  const want = settingsToPrefs(v, m, s, f);
+  let ch = false;
+  if (Math.round(Number(q.volume) * 10) !== Math.round(want.volume * 10)) { q.volume = want.volume; ch = true; }
+  if (!!q.muted !== want.muted) { q.muted = want.muted; ch = true; }
+  if (q.scale !== want.scale) { q.scale = want.scale; ch = true; }
+  if (q.filter !== want.filter) { q.filter = want.filter; ch = true; }
+  return ch;
+}

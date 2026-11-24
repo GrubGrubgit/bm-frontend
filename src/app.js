@@ -676,7 +676,7 @@ if (qs.has("headless")) {
 // load are L2 properties this layer reuses, never reimplements.
 import { autoTrapReport, autoFaultReport, manualBugReport, buildBugReport, formatTrapBanner } from "./ui/report.js";
 import { makeMovie, makeMovieV2, parseMovie, downloadMovie, downloadPng, replayMovie, downloadJson, sameEngineForAnchor, romGateVerdict } from "./input/movie.js";
-import { loadPrefs, savePrefs } from "./ui/prefs.js";
+import { loadPrefs, savePrefs, pushPrefsToEngine, pullEngineToPrefs } from "./ui/prefs.js";
 import { wireInstall } from "./ui/pwa.js";
 import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
 import { buildTweaksPanel, applyTweaks } from "./ui/tweaks.js";
@@ -730,6 +730,58 @@ function syncAudioToPrefs() {
   } catch (e) {}
   muteBtn.textContent = prefs.muted ? "Unmute" : "Mute";
 }
+// ---- E4 settings sync (shell <-> engine core store) ----
+// Canonical store lives in the engine (bm_setting_get/set in bm_api.c E2/E4-core:
+// 0 volume 0-10, 1 mute 0/1, 2 scale 0-3 INTEGER/FIT/FILL/STRETCH, 3 filter 0-1).
+// Shell controls ALWAYS work (never gated on enhanced mode); the in-game menu
+// requires enhancements on (engine gate in pad_fn/menu_tick). Engine-only prefs
+// (slot/engine/pad-swap/pack/touch) stay frontend-owned and never touch the core.
+let __settingsInst = null;
+function engineExports() {
+  try { if (l2host && l2host.inst && l2host.inst.exports) return l2host.inst.exports; } catch (e) {}
+  return null;
+}
+function pushSettingsToEngine() {
+  try {
+    if (l2host !== wasmHost) return false;
+    const ex = engineExports();
+    if (!ex) return false;
+    return pushPrefsToEngine(ex, prefs);
+  } catch (e) { return false; }
+}
+function pullSettingsFromEngine() {
+  try {
+    if (l2host !== wasmHost) return false;
+    const ex = engineExports();
+    if (!ex) return false;
+    if (pullEngineToPrefs(ex, prefs)) {
+      savePrefs(prefs);
+      try {
+        scaleSel.value = prefs.scale;
+        filterSel.value = prefs.filter;
+        volumeInput.value = String(Math.round(prefs.volume * 100));
+      } catch (eD) {}
+      applyVideoPrefs();
+      syncAudioToPrefs();
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+// Per-frame sync: first frame after any (re)spawn pushes shell prefs into the
+// fresh engine (covers shellStart/shellReset/replay spawns with one hook);
+// later frames pull in-game menu edits into the shell. Mesen has no
+// bm_setting_* exports: push/pull no-op and shell controls stay local.
+function syncSettingsTick() {
+  try {
+    if (l2host !== wasmHost) { __settingsInst = null; return; }
+    const ex = engineExports();
+    if (!ex || typeof ex.bm_setting_get !== "function") return;
+    if (l2host.inst !== __settingsInst) { __settingsInst = l2host.inst; pushSettingsToEngine(); return; }
+    pullSettingsFromEngine();
+  } catch (e) {}
+}
+
 applyVideoPrefs();
 window.addEventListener("resize", () => { try { fitCanvas(); } catch (e) {} });
 document.addEventListener("fullscreenchange", () => {
@@ -768,6 +820,7 @@ async function shellStepOnce() {
   return h;
 }
 async function presentFrame() {
+  try { syncSettingsTick(); } catch (eSS) {}
   try {
     if (l2host === mesenHost) {
       if (pcmPlayer && pcmPlayer.node) pcmPlayer.pushSamples(l2host.frame(), l2host.pcmDrain());
@@ -1680,11 +1733,11 @@ slotSel.addEventListener("change", () => {
   shellLog("slot " + prefs.slot);
 });
 scaleSel.addEventListener("change", () => {
-  prefs.scale = scaleSel.value; savePrefs(prefs); applyVideoPrefs();
+  prefs.scale = scaleSel.value; savePrefs(prefs); applyVideoPrefs(); pushSettingsToEngine();
   shellLog("scale " + prefs.scale);
 });
 filterSel.addEventListener("change", () => {
-  prefs.filter = filterSel.value; savePrefs(prefs); applyVideoPrefs();
+  prefs.filter = filterSel.value; savePrefs(prefs); applyVideoPrefs(); pushSettingsToEngine();
   shellLog("filter " + prefs.filter);
 });
 fsBtn.addEventListener("click", async () => {
@@ -1699,9 +1752,10 @@ volumeInput.addEventListener("input", () => {
   prefs.volume = Math.max(0, Math.min(1, Number(volumeInput.value) / 100));
   savePrefs(prefs);
   try { ensureAudio().setVolume(prefs.volume); } catch (e) {}
+  pushSettingsToEngine();
 });
 muteBtn.addEventListener("click", () => {
-  prefs.muted = !prefs.muted; savePrefs(prefs); syncAudioToPrefs();
+  prefs.muted = !prefs.muted; savePrefs(prefs); syncAudioToPrefs(); pushSettingsToEngine();
   shellLog(prefs.muted ? "muted" : "unmuted");
 });
 const engineSel = document.getElementById("engineSel");

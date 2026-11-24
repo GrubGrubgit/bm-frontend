@@ -43,15 +43,18 @@ int bm_trap_flag(void) { return bm_trap_seen; }
 int bm_trap_code(void) { return (int)bm_trap_val; }
 int bm_trap_namep(void) { return (int)(intptr_t)bm_trap_name; }
 void dbg_ev(uint32_t x);
-#include "combined_off.c"
-__attribute__((import_module("env"))) __attribute__((import_name("host_frame"))) void host_frame(int frame);
 static int frame_no;
 static uint8_t game_pad;
+static int pending_warp = -1;
+static int pending_warp_raw = -1;
+static int apu_tail;
+static void save_stage_freeze(void);
+#include "combined_off.c"
+__attribute__((import_module("env"))) __attribute__((import_name("host_frame"))) void host_frame(int frame);
 static uint32_t dbgev[2097152]; static int dbgn;
 void dbg_ev(uint32_t x) { if (dbgn < 2097152) dbgev[dbgn++] = x; }
 int bm_dbgn(void) { return dbgn; }
 uint32_t bm_dbg(int i) { return (i >= 0 && i < dbgn) ? dbgev[i] : 0; }
-static int apu_tail;
 static uint8_t stage[131072];
 uint8_t chr[131072];
 uint8_t framebuf[256 * 240 * 4];
@@ -180,11 +183,9 @@ static void ppu_snap_take(void) {
 int bm_ppu_ptr(void) { return (int)(intptr_t)ppu_snap; }
 static uint32_t cpu_snap[6];
 int bm_cpu_ptr(void) { return (int)(intptr_t)cpu_snap; }
-static int pending_warp = -1;
 int bm_ram_rd(int a) { return ram[a & 0x7FF]; }
 void bm_ram_wr(int a, int v) { ram[a & 0x7FF] = (uint8_t)(v & 0xFF); }
 void bm_warp(int area) { pending_warp = area & 7; }
-static int pending_warp_raw = -1;
 void bm_warp_raw(int area) { pending_warp_raw = area & 15; }
 static void nmi_frame(void) {
   { uint32_t i; for (i = 0; i < 2048u; i++) presnap_ram[i] = presnap2_ram[i]; }
@@ -257,6 +258,149 @@ int bm_mem_size(void) {
   extern unsigned char __heap_base;
   return (int)(intptr_t)&__heap_base;
 }
+// ---- P4 entrance-save state (exact-state saves, no passwords) ----
+// Snapshot of every live global (audit 2026-11-24). stk lives inside
+// ram[0x100..]. Excluded (derived/refreshed/harmless): stage/chr/framebuf/
+// NESPAL/bg_opaque (load/render scratch), presnap*/ppu_snap/cpu_snap
+// (refreshed every frame), dbgev/dbgn (append-only debug log), const
+// string pointers (uw_caller/max_gap_site). APU has no voice regs
+// (RD(0x4015) returns constant 0; ring+head+tail fully determine audio).
+#define SAVE_MAGIC 0x424D5356u
+#define SAVE_VERSION 1u
+#define SAVE_MAX 8192u
+#define WAIT_PC0 0xE93Au
+#define WAIT_PC1 0xE93Cu
+static uint8_t save_stage[SAVE_MAX];
+static uint8_t thaw_stage[SAVE_MAX + 12];
+static int thaw_flag;
+static int thaw_result;
+static int last_int_pc;
+static uint32_t save_len;
+static void w32(uint8_t *d, uint32_t *o, uint32_t v) { d[(*o)++] = (uint8_t)v; d[(*o)++] = (uint8_t)(v >> 8); d[(*o)++] = (uint8_t)(v >> 16); d[(*o)++] = (uint8_t)(v >> 24); }
+static void w64(uint8_t *d, uint32_t *o, uint64_t v) { w32(d, o, (uint32_t)v); w32(d, o, (uint32_t)(v >> 32)); }
+static uint32_t r32(const uint8_t *d, uint32_t *o) { uint32_t v = d[*o] | ((uint32_t)d[*o+1] << 8) | ((uint32_t)d[*o+2] << 16) | ((uint32_t)d[*o+3] << 24); *o += 4; return v; }
+static uint64_t r64(const uint8_t *d, uint32_t *o) { uint64_t lo = r32(d, o), hi = r32(d, o); return lo | (hi << 32); }
+static int wait_ok(uint32_t pc) { return pc == WAIT_PC0 || pc == WAIT_PC1; }
+// NOTE: int_pc/nmi_pc record which wait-loop poll (E93A vs E93C) caught the
+// NMI. The poll phase can shift by one poll across a thaw (C resumes mid
+// wait-iteration); the label may swap E93A<->E93C with identical cycles and
+// gameplay state (RTI discards the pushed PC; resumption is via restored
+// state + C stack). Proof harnesses mask bytes 32-35 and 64-67.
+static uint32_t save_write(uint8_t *d, uint32_t int_pc) {
+  uint32_t o = 0;
+  uint32_t i;
+  w32(d, &o, SAVE_MAGIC); w32(d, &o, SAVE_VERSION); w32(d, &o, 0);
+  w32(d, &o, (uint32_t)frame_no); w32(d, &o, game_pad);
+  w32(d, &o, (uint32_t)pending_warp); w32(d, &o, (uint32_t)pending_warp_raw);
+  w32(d, &o, (uint32_t)oracle_align_done); w32(d, &o, int_pc);
+  w64(d, &o, wall_no); w64(d, &o, pad_wall); w64(d, &o, cycles);
+  w32(d, &o, _cycpp); w32(d, &o, nmi_pc); w64(d, &o, nmi_next_edge);
+  w32(d, &o, (uint32_t)nmi_armed); w32(d, &o, (uint32_t)in_nmi);
+  w32(d, &o, A); w32(d, &o, X); w32(d, &o, Y); w32(d, &o, S); w32(d, &o, P);
+  w32(d, &o, pad_bits); w32(d, &o, (uint32_t)pad_pos1); w32(d, &o, (uint32_t)pad_pos2); w32(d, &o, (uint32_t)strobe);
+  w32(d, &o, (uint32_t)mmc_shift); w32(d, &o, (uint32_t)mmc_count); w32(d, &o, mmc_ctrl);
+  w32(d, &o, scx); w32(d, &o, scy); w32(d, &o, (uint32_t)sc_latch);
+  w32(d, &o, ppu_addr); w32(d, &o, (uint32_t)ppu_latch); w32(d, &o, ppu_buf);
+  w32(d, &o, oam_addr); w32(d, &o, reg2000); w32(d, &o, reg2001);
+  w32(d, &o, chr0); w32(d, &o, chr1); w32(d, &o, ppu_openbus);
+  w32(d, &o, pad_latch1); w32(d, &o, pad_latch2);
+  w32(d, &o, (uint32_t)ppu_scan); w32(d, &o, (uint32_t)ppu_dot); w32(d, &o, ppu_frame);
+  w32(d, &o, vblank_on); w32(d, &o, cpu_nmi); w32(d, &o, cpu_nmi_prev);
+  w32(d, &o, need_nmi); w32(d, &o, prevent_vbl);
+  w64(d, &o, vbl_ack_wall); w64(d, &o, ppu_mclk); w64(d, &o, mcpu_clk); w64(d, &o, synced_cyc);
+  w64(d, &o, w2000_cyc); w32(d, &o, w2000_old); w32(d, &o, (uint32_t)w2000_has); w32(d, &o, (uint32_t)w2000_done);
+  w32(d, &o, frame_pad); w32(d, &o, polled_pad); w64(d, &o, last_poll_cyc);
+  w64(d, &o, max_poll_gap); w64(d, &o, max_gap_wall); w64(d, &o, max_gap_cyc);
+  w32(d, &o, (uint32_t)trim_L6CD); w32(d, &o, (uint32_t)trim_8C00);
+  w32(d, &o, (uint32_t)(swbank - prg[0]) / 0x4000u);
+  w32(d, &o, (uint32_t)apu_head); w32(d, &o, (uint32_t)apu_tail);
+  w32(d, &o, (uint32_t)uw_abort); w32(d, &o, (uint32_t)uw_888C); w32(d, &o, (uint32_t)uw_9488); w32(d, &o, (uint32_t)uw_9434);
+  w32(d, &o, (uint32_t)uw_LA100); w32(d, &o, (uint32_t)uw_seq); w32(d, &o, (uint32_t)uw_sidd); w32(d, &o, (uint32_t)uw_9007);
+  w32(d, &o, (uint32_t)uw_sid[0]); w32(d, &o, (uint32_t)uw_sid[1]); w32(d, &o, (uint32_t)uw_sid[2]); w32(d, &o, (uint32_t)uw_sid[3]);
+  for (i = 0; i < 2048u; i++) d[o++] = ram[i];
+  for (i = 0; i < 2048u; i++) d[o++] = vram[i];
+  for (i = 0; i < 32u; i++) d[o++] = pal[i];
+  for (i = 0; i < 256u; i++) d[o++] = oam[i];
+  for (i = 0; i < 256u; i++) { w32(d, &o, apu_ring[i].a); w32(d, &o, apu_ring[i].v); w32(d, &o, apu_ring[i].c); }
+  d[8] = (uint8_t)o; d[9] = (uint8_t)(o >> 8); d[10] = (uint8_t)(o >> 16); d[11] = (uint8_t)(o >> 24);
+  return o;
+}
+static void save_read(const uint8_t *d) {
+  uint32_t o = 12;
+  uint32_t i;
+  uint64_t w;
+  frame_no = (int)r32(d, &o); game_pad = (uint8_t)r32(d, &o);
+  pending_warp = (int)r32(d, &o); pending_warp_raw = (int)r32(d, &o);
+  oracle_align_done = (int)r32(d, &o); o += 4;
+  wall_no = r64(d, &o); pad_wall = r64(d, &o); cycles = r64(d, &o);
+  _cycpp = (uint16_t)r32(d, &o); nmi_pc = (uint16_t)r32(d, &o); nmi_next_edge = r64(d, &o);
+  nmi_armed = (int)r32(d, &o); in_nmi = (int)r32(d, &o);
+  A = (uint8_t)r32(d, &o); X = (uint8_t)r32(d, &o); Y = (uint8_t)r32(d, &o); S = (uint8_t)r32(d, &o); P = (uint8_t)r32(d, &o);
+  pad_bits = (uint8_t)r32(d, &o); pad_pos1 = (int)r32(d, &o); pad_pos2 = (int)r32(d, &o); strobe = (int)r32(d, &o);
+  mmc_shift = (int)r32(d, &o); mmc_count = (int)r32(d, &o); mmc_ctrl = (uint8_t)r32(d, &o);
+  scx = (uint8_t)r32(d, &o); scy = (uint8_t)r32(d, &o); sc_latch = (int)r32(d, &o);
+  ppu_addr = (uint16_t)r32(d, &o); ppu_latch = (int)r32(d, &o); ppu_buf = (uint8_t)r32(d, &o);
+  oam_addr = (uint8_t)r32(d, &o); reg2000 = (uint8_t)r32(d, &o); reg2001 = (uint8_t)r32(d, &o);
+  chr0 = (uint8_t)r32(d, &o); chr1 = (uint8_t)r32(d, &o); ppu_openbus = (uint8_t)r32(d, &o);
+  pad_latch1 = (uint8_t)r32(d, &o); pad_latch2 = (uint8_t)r32(d, &o);
+  ppu_scan = (int)r32(d, &o); ppu_dot = (int)r32(d, &o); ppu_frame = r32(d, &o);
+  vblank_on = (uint8_t)r32(d, &o); cpu_nmi = (uint8_t)r32(d, &o); cpu_nmi_prev = (uint8_t)r32(d, &o);
+  need_nmi = (uint8_t)r32(d, &o); prevent_vbl = (uint8_t)r32(d, &o);
+  vbl_ack_wall = r64(d, &o); ppu_mclk = r64(d, &o); mcpu_clk = r64(d, &o); synced_cyc = r64(d, &o);
+  w2000_cyc = r64(d, &o); w2000_old = (uint8_t)r32(d, &o); w2000_has = (int)r32(d, &o); w2000_done = (int)r32(d, &o);
+  frame_pad = (uint8_t)r32(d, &o); polled_pad = (uint8_t)r32(d, &o); last_poll_cyc = r64(d, &o);
+  max_poll_gap = r64(d, &o); max_gap_wall = r64(d, &o); max_gap_cyc = r64(d, &o);
+  trim_L6CD = (int)r32(d, &o); trim_8C00 = (int)r32(d, &o);
+  w = r32(d, &o); swbank = prg[w & 7u];
+  apu_head = (int)r32(d, &o); apu_tail = (int)r32(d, &o);
+  uw_abort = (int)r32(d, &o); uw_888C = (int)r32(d, &o); uw_9488 = (int)r32(d, &o); uw_9434 = (int)r32(d, &o);
+  uw_LA100 = (int)r32(d, &o); uw_seq = (int)r32(d, &o); uw_sidd = (int)r32(d, &o); uw_9007 = (int)r32(d, &o);
+  uw_sid[0] = (int)r32(d, &o); uw_sid[1] = (int)r32(d, &o); uw_sid[2] = (int)r32(d, &o); uw_sid[3] = (int)r32(d, &o);
+  for (i = 0; i < 2048u; i++) ram[i] = d[o++];
+  for (i = 0; i < 2048u; i++) vram[i] = d[o++];
+  for (i = 0; i < 32u; i++) pal[i] = d[o++];
+  for (i = 0; i < 256u; i++) oam[i] = d[o++];
+  for (i = 0; i < 256u; i++) { apu_ring[i].a = (uint16_t)r32(d, &o); apu_ring[i].v = (uint8_t)r32(d, &o); apu_ring[i].c = r32(d, &o); }
+  for (i = 0; i < 2048u; i++) presnap2_ram[i] = ram[i];
+  presnap2_cyc = cycles;
+  presnap2_S = S; presnap2_P = P; presnap2_A = A; presnap2_X = X; presnap2_Y = Y; presnap2_pc = nmi_pc;
+  presnap2_wall = wall_no;
+}
+static void save_stage_freeze(void) {
+  save_len = save_write(save_stage, (uint32_t)last_int_pc);
+}
+void thaw_maybe(void) {
+  uint32_t f0;
+  last_int_pc = (int)nmi_pc;
+  f0 = thaw_stage[0] | ((uint32_t)thaw_stage[1] << 8) | ((uint32_t)thaw_stage[2] << 16) | ((uint32_t)thaw_stage[3] << 24);
+  if (f0) {
+    const uint8_t *d = thaw_stage + 12;
+    uint32_t o = 0, len;
+    thaw_stage[0] = thaw_stage[1] = thaw_stage[2] = thaw_stage[3] = 0;
+    thaw_flag = 0;
+    thaw_result = -1;
+    len = thaw_stage[8] | ((uint32_t)thaw_stage[9] << 8) | ((uint32_t)thaw_stage[10] << 16) | ((uint32_t)thaw_stage[11] << 24);
+    if (len < 64 || len > SAVE_MAX) { thaw_result = -1; goto tw_done; }
+    if (r32(d, &o) != SAVE_MAGIC) { thaw_result = -2; goto tw_done; }
+    if (r32(d, &o) != SAVE_VERSION) { thaw_result = -3; goto tw_done; }
+    if (r32(d, &o) != len) { thaw_result = -4; goto tw_done; }
+    o += 4 * 5;
+    { uint32_t frozen_pc = r32(d, &o);
+      if (!wait_ok(frozen_pc)) { thaw_result = -5; goto tw_done; }
+      if (!wait_ok((uint32_t)nmi_pc)) { thaw_result = -6; goto tw_done; } }
+    save_read(d);
+    thaw_result = 1;
+  tw_done:
+    thaw_stage[4] = (uint8_t)thaw_result; thaw_stage[5] = (uint8_t)((uint32_t)thaw_result >> 8); thaw_stage[6] = (uint8_t)((uint32_t)thaw_result >> 16); thaw_stage[7] = (uint8_t)((uint32_t)thaw_result >> 24);
+  } else {
+    save_stage_freeze();
+  }
+}
+int bm_savestate_ptr(void) { return (int)(intptr_t)save_stage; }
+int bm_savestate_len(void) { return (int)save_len; }
+int bm_thaw_staging_ptr(void) { return (int)(intptr_t)thaw_stage; }
+int bm_last_int_pc(void) { return last_int_pc; }
+int bm_thaw_result(void) { return thaw_result; }
 void bm_boot(void) {
   memset(ram, 0x00, sizeof ram); // Mesen parity: power-on RAM reads 0 (probe-proven over 120568f; 0xFF diverges at f=144)
   memset(vram, 0, sizeof vram);

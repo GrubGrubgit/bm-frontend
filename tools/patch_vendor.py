@@ -3,6 +3,7 @@
 #  1. runtime.h globals: APU event ring (apu_ring/apu_head).
 #  2. runtime.h WR(): log $4000-$4017 writes into the ring.
 # Canonical gen/ files are never modified. Fails loudly on anchor drift.
+#  5. Save-state thaw check at NMI-fire top (thaw_maybe, defined in bm_api.c).
 #  3. LE351 story-skip unwind resumes at C2AC (single static caller chain, G2 target-resume).
 #  4. Oracle-phase alignment (TAS tick-identity, one-shot +3 cy at E62A): the VBLANK
 #     edge at wall 85144 lands exactly at the end of main E62A LDA $12 (cut+111+3
@@ -81,6 +82,9 @@ def main():
     R4 = ("static int oracle_align_done = 0;" + chr(10) + A4
           + "    if (!oracle_align_done && wall_no == 85144u && S == 247u && RD(0x12) == 0x40u) { cycles += 3u; oracle_align_done = 1; }" + chr(10))
     co = co.replace(A4, R4)
+    A5 = "static void nmi_fire_now(uint64_t frame, const char *site) {"
+    assert co.count(A5) == 1, "fire_now anchor drift"
+    co = co.replace(A5, "extern void thaw_maybe(void);\n" + A5 + "\n    thaw_maybe();")
     (OUT / "combined_off.c").write_text(co)
     print("vendor patched: runtime.h APU ring + combined_off.c + LE351resume")
 main()

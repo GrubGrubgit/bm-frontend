@@ -141,10 +141,21 @@ Acceptance: all-16-level byte-identical round-trip; edited map boots and
 plays on both engines (warp + walk a scroll region on wasm); overflow
 produces an error, never a corrupt pack.
 
-### P2 — CHR + palette editors
-Steps: chr.js 2bpp codec; 8x8 pixel editor bound to (bank,tile), live
-preview with level palette; per-level palette editor (16B); write-back via
-overlay patches.
+### P2 — CHR + palette editors (CLOSED 2026-11-24, frontend commit P2, tools/verify-pack-p2.mjs 20/20)
+Done: src/pack/chr.js 2bpp codec (decodeTile/encodeTile/bank helpers, copy-on-write setTile);
+8x8 pixel editor bound to (4KB bank, tile) with bank picker defaulting to the level bg bank
+(BG_CHR_BANK labels), 256-tile grid, 4 inks + subpalette select, tile preview in all 4
+subpalettes, live map repaint via chrBankView overlays; per-level 16B palette editor
+(16 slot buttons + full 64-color picker, same-size edit = serialize fast path, in-place);
+write-back via overlay patches (chr area, base = active pack, diff vs stock; prg path
+unchanged). editorVersion p2.
+Acceptance (all headless): codec round-trips all 16 stock chr banks (8192 tiles) +
+rejects bad input; pal edit = one run inside the pal span, reparse ok; most-used L1 tile
+solid + sky/accent pal shift boots trap-free on wasm with identical gameplay state
+(warp(0) tank, same px) but different video at f3000; mesen stock-vs-edited SAD 400k /
+14.6k px fullscreen. (Calibrations learned: title-screen video is edit-invariant —
+compare gameplay frames; wasm f4300 converges because the tank walks out of edited L1;
+mesen needs Start+Right drive script, no warp available.)
 Acceptance: pixel round-trip; edited tile visible in-game on both engines.
 
 ### P3 — Enemies (gated on 6.1 bank-3 RE)
@@ -197,6 +208,7 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
 - 2026-11-23: pack overlay (not forked packs) so stock stays pristine and
   both engines share one apply path.
 - 2026-11-23 P1 acceptance closed: all-16-level byte-identical round-trip (verify-pack-p1 57/57) + edited map boots and plays on BOTH engines (verify-pack-p1-play 15/15: wasm warp(0)+walk dx=9792 trap-free, mesen stock-vs-edited divergence + scroll motion).
+- 2026-11-24 P2 closed (verify-pack-p2 20/20; P0 32/32, P1 57/57, P1-play 15/15, debt 45/45, 6.2 18/18 re-green = 187 checks): chr.js codec, CHR tab + palette editor in the editor view (shell gains palette-picker + CHR-tab DOM, mirrored to workspace root index.html), editorVersion p2. Next: rebundle 0.2.55 + private bridge sync. P3 (enemies, gated on 6.1 bank-3 RE) not started.
 - 2026-11-23 P1 completion: H row-flag mapping + V row-indexed mapping proven
   headless (column-hypothesis refuted dynamically; V bit6 no-shift confirmed
   twice); door-combo highlight + H +32 row markers shipped; 6.2 closed

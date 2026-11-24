@@ -97,7 +97,15 @@ button{padding:10px 14px;margin:2px}
 <div class="shellRow"><span>H plane</span></div>
 <div id="edScrollH" style="overflow:auto"></div>
 <div id="edScrollHint" style="font-size:12px;color:#9c9"></div>
-<div class="shellRow"><span>bg palette (viewer; editable in P2)</span><canvas id="edPal" height="24"></canvas></div>
+<div class="shellRow"><span>bg palette (P2: click a slot, pick a color)</span><canvas id="edPal" height="24"></canvas></div>
+<div class="shellRow"><span>slot</span><span id="edPalSlots"></span><span id="edPalInfo"></span></div>
+<div id="edPalPick" style="text-align:left;max-width:560px"></div>
+<div class="shellRow"><span>CHR tiles (P2)</span></div>
+<div class="shellRow"><label>CHR bank <select id="edChrBank"></select></label><span id="edChrInfo"></span></div>
+<div style="overflow:auto;max-height:40vh;border:1px solid #444"><canvas id="edChrGrid" style="image-rendering:pixelated"></canvas></div>
+<div class="shellRow"><span>tile</span><canvas id="edChrTile" width="128" height="128" style="image-rendering:pixelated"></canvas><span id="edChrPrev"></span></div>
+<div class="shellRow"><span>ink</span><span id="edChrInk"></span><label>subpal <select id="edChrSub"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label></div>
+<div id="edChrPix" style="text-align:left"></div>
 <div class="shellRow"><label>pack name <input id="edPackName" type="text" size="24" placeholder="my level edit"></label><button id="edSaveBtn">Save as pack</button><span id="edStatus"></span></div>
 </div>
 <hr>

@@ -4,13 +4,21 @@
 // research 6.2 (bit meanings PROVEN headless, see levels.js).
 import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/levels.js";
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
+import { decodeTile, encodeTile, TILES_PER_BANK4K } from "../pack/chr.js";
 import { makePatch, newCustomId } from "../pack/overlay.js";
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
   brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
+  chr: {}, chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
 };
+// 4KB CHR bank -> levels using it as bg bank (labels for the bank picker).
+const BANK_USERS = {};
+for (const [lvl, b] of Object.entries(BG_CHR_BANK)) {
+  (BANK_USERS[b] = BANK_USERS[b] || []).push(lvl);
+}
+for (const k of Object.keys(BANK_USERS)) BANK_USERS[k].sort((a, b) => a - b);
 function el(id) { return document.getElementById(id); }
 function log(m) { try { api.log(m); } catch (e) {} }
 function cur() { return S.parsed[S.level] ? S.parsed[S.level].L : null; }
@@ -25,10 +33,27 @@ function effLevel(L) {
     blocks: e.blocks || L.blocks, map: e.map || L.map,
   };
 }
+function chrBankView(b4) {
+  // active-pack 4KB bank image with this session's chr edits applied
+  let bytes = chrBankBytes(S.resolved.chr, b4);
+  const ov = S.chr[b4];
+  if (ov) {
+    bytes = bytes.slice();
+    for (const t of Object.keys(ov)) bytes.set(encodeTile(ov[t]), (t | 0) * 16);
+  }
+  return bytes;
+}
 function bgBank() {
-  const pack = S.resolved;
-  const b4 = BG_CHR_BANK[S.level];
-  return chrBankBytes(pack.chr, b4);
+  return chrBankView(BG_CHR_BANK[S.level]);
+}
+function chrTilePx(b4, tile) {
+  const ov = S.chr[b4];
+  if (ov && ov[tile]) return ov[tile];
+  return decodeTile(chrBankBytes(S.resolved.chr, b4), tile * 16);
+}
+function setChrPx(b4, tile, px) {
+  if (!S.chr[b4]) S.chr[b4] = {};
+  S.chr[b4][tile] = px;
 }
 function repaint() {
   const L = cur();
@@ -62,13 +87,52 @@ function repaint() {
   renderInspector(E);
   renderScrollGrids(E);
   renderPalStrip(E);
+  fillChrBankSel();
+  renderChrTab(E);
 }
 function renderPalStrip(E) {
   const cv = el("edPal");
-  if (!cv) return;
-  cv.width = 16 * 24; cv.height = 24;
-  const ctx = cv.getContext("2d");
-  for (let i = 0; i < 16; i++) { ctx.fillStyle = NES_PALETTE[E.pal[i] & 63]; ctx.fillRect(i * 24, 0, 24, 24); }
+  if (cv) {
+    cv.width = 16 * 24; cv.height = 24;
+    const ctx = cv.getContext("2d");
+    for (let i = 0; i < 16; i++) {
+      ctx.fillStyle = NES_PALETTE[E.pal[i] & 63]; ctx.fillRect(i * 24, 0, 24, 24);
+      if (i === S.palSlot) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.strokeRect(1, 1, 22, 22); }
+    }
+  }
+  // slot buttons
+  const slots = el("edPalSlots");
+  if (slots) {
+    slots.innerHTML = "";
+    for (let i = 0; i < 16; i++) {
+      const b = document.createElement("button");
+      b.textContent = i;
+      b.title = "slot " + i + " = $" + E.pal[i].toString(16).padStart(2, "0");
+      b.style.cssText = "width:30px;height:24px;margin:1px;background:" + NES_PALETTE[E.pal[i] & 63] + ";color:#fff;border:" + (i === S.palSlot ? "2px solid #fff" : "1px solid #666");
+      b.addEventListener("click", () => { S.palSlot = i; repaint(); });
+      slots.appendChild(b);
+    }
+  }
+  const info = el("edPalInfo");
+  if (info) info.textContent = " slot " + S.palSlot + " = $" + E.pal[S.palSlot].toString(16).padStart(2, "0") + " (sub" + (S.palSlot >> 2) + " color" + (S.palSlot & 3) + ")";
+  // 64-color picker
+  const pick = el("edPalPick");
+  if (pick) {
+    pick.innerHTML = "";
+    for (let c = 0; c < 64; c++) {
+      const b = document.createElement("button");
+      b.title = "$" + c.toString(16).padStart(2, "0");
+      b.style.cssText = "width:28px;height:20px;margin:1px;background:" + NES_PALETTE[c] + ";border:" + (E.pal[S.palSlot] === c ? "2px solid #fff" : "1px solid #333");
+      b.addEventListener("click", () => {
+        const arr = ((S.edited[E.level] && S.edited[E.level].pal) || E.pal).slice();
+        arr[S.palSlot] = c;
+        editsFor(E.level).pal = arr;
+        log("editor: L" + E.level + " pal[" + S.palSlot + "] -> $" + c.toString(16).padStart(2, "0"));
+        repaint();
+      });
+      pick.appendChild(b);
+    }
+  }
 }
 const ATTR_BITS_TANK = ["pal0", "pal1", "door/ent0", "door/ent1", "damage", "ladder", "water(brk)", "solid"];
 const ATTR_BITS_OVERHEAD = ["pal0", "pal1", "door/ent0", "door/ent1", "bit4(no-eff)", "bit5(unused)", "bit6(solid-only)", "solid"]; // 6.2
@@ -245,6 +309,121 @@ function scrollHint(E) {
   if (!evenScreens) msgs.push("doorway check n/a (rows not multiple of 4)");
   hint.textContent = msgs.join(" | ") + " [" + effFreeLine() + "]";
 }
+function fillChrBankSel() {
+  const sel = el("edChrBank");
+  if (!sel) return;
+  if (sel.options.length === 32) { sel.value = S.chrBank; return; }
+  sel.innerHTML = "";
+  for (let b = 0; b < 32; b++) {
+    const o = document.createElement("option");
+    o.value = b;
+    o.textContent = "bank " + b + (BANK_USERS[b] ? " (L" + BANK_USERS[b].join(",L") + ")" : "");
+    sel.appendChild(o);
+  }
+  sel.value = S.chrBank;
+}
+function renderChrTab(E) {
+  const info = el("edChrInfo");
+  if (info) {
+    const n = S.chr[S.chrBank] ? Object.keys(S.chr[S.chrBank]).length : 0;
+    info.textContent = (BANK_USERS[S.chrBank] ? "bg for L" + BANK_USERS[S.chrBank].join(",L") : "no level bg use") +
+      " | editing tile " + S.chrTile + (n ? " (" + n + " tile(s) edited in bank)" : "");
+  }
+  const sub = S.chrSub & 3;
+  const col = v => NES_PALETTE[E.pal[sub * 4 + (v & 3)] & 63];
+  // tile grid (16x16 tiles @8px)
+  const grid = el("edChrGrid");
+  if (grid) {
+    grid.width = 128; grid.height = 128;
+    grid.style.width = "512px"; grid.style.height = "512px";
+    const ctx = grid.getContext("2d");
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, 128, 128);
+    for (let t = 0; t < TILES_PER_BANK4K; t++) {
+      const px = chrTilePx(S.chrBank, t);
+      const tx = (t % 16) * 8, ty = Math.floor(t / 16) * 8;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        ctx.fillStyle = col(px[y * 8 + x]);
+        ctx.fillRect(tx + x, ty + y, 1, 1);
+      }
+    }
+    if (S.chrTile >= 0) {
+      ctx.strokeStyle = "#ff0"; ctx.lineWidth = 2;
+      ctx.strokeRect((S.chrTile % 16) * 8 + 1, Math.floor(S.chrTile / 16) * 8 + 1, 6, 6);
+    }
+  }
+  // big pixel editor (8x8 rects @16px)
+  const big = el("edChrTile");
+  if (big) {
+    const ctx = big.getContext("2d");
+    const px = chrTilePx(S.chrBank, S.chrTile);
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      ctx.fillStyle = col(px[y * 8 + x]);
+      ctx.fillRect(x * 16, y * 16, 16, 16);
+    }
+    ctx.strokeStyle = "#444"; ctx.lineWidth = 1;
+    for (let i = 0; i <= 8; i++) {
+      ctx.beginPath(); ctx.moveTo(i * 16 + 0.5, 0); ctx.lineTo(i * 16 + 0.5, 128); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * 16 + 0.5); ctx.lineTo(128, i * 16 + 0.5); ctx.stroke();
+    }
+  }
+  // 4-subpalette preview of the selected tile
+  const prev = el("edChrPrev");
+  if (prev) {
+    prev.innerHTML = "";
+    const px = chrTilePx(S.chrBank, S.chrTile);
+    for (let s2 = 0; s2 < 4; s2++) {
+      const lab = document.createElement("span");
+      lab.textContent = "sub" + s2 + " ";
+      prev.appendChild(lab);
+      const cv = document.createElement("canvas");
+      cv.width = 8; cv.height = 8;
+      cv.style.cssText = "image-rendering:pixelated;width:48px;height:48px;vertical-align:middle;margin-right:8px";
+      const ctx = cv.getContext("2d");
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        ctx.fillStyle = NES_PALETTE[E.pal[s2 * 4 + px[y * 8 + x]] & 63];
+        ctx.fillRect(x, y, 1, 1);
+      }
+      prev.appendChild(cv);
+    }
+  }
+  // ink buttons in current subpalette
+  const inks = el("edChrInk");
+  if (inks) {
+    inks.innerHTML = "";
+    for (let v = 0; v < 4; v++) {
+      const b = document.createElement("button");
+      b.textContent = v;
+      b.title = "ink " + v;
+      b.style.cssText = "width:36px;height:28px;margin:1px;background:" + col(v) + ";color:#fff;border:" + (S.chrInk === v ? "3px solid #ff0" : "1px solid #666");
+      b.addEventListener("click", () => { S.chrInk = v; renderChrTab(cur() ? effLevel(cur()) : E); });
+      inks.appendChild(b);
+    }
+  }
+}
+function onChrGridClick(ev) {
+  const grid = el("edChrGrid");
+  if (!grid) return;
+  const r = grid.getBoundingClientRect();
+  const tx = Math.floor((ev.clientX - r.left) / r.width * 16);
+  const ty = Math.floor((ev.clientY - r.top) / r.height * 16);
+  if (tx < 0 || ty < 0 || tx > 15 || ty > 15) return;
+  S.chrTile = ty * 16 + tx;
+  log("editor: chr bank " + S.chrBank + " tile " + S.chrTile);
+  repaint();
+}
+function onChrTileClick(ev) {
+  const big = el("edChrTile");
+  if (!big) return;
+  const r = big.getBoundingClientRect();
+  const px = Math.floor((ev.clientX - r.left) / r.width * 8);
+  const py = Math.floor((ev.clientY - r.top) / r.height * 8);
+  if (px < 0 || py < 0 || px > 7 || py > 7) return;
+  const cur = chrTilePx(S.chrBank, S.chrTile).slice();
+  cur[py * 8 + px] = S.chrInk;
+  setChrPx(S.chrBank, S.chrTile, cur);
+  log("editor: chr bank " + S.chrBank + " tile " + S.chrTile + " (" + px + "," + py + ") -> " + S.chrInk);
+  repaint();
+}
 function renderScrollGrids(E) {
   const v = el("edScrollV"), h = el("edScrollH");
   if (!v || !h) return;
@@ -310,6 +489,21 @@ async function saveAsPack() {
   try {
     if (!S.stock) throw new Error("no stock pack (pick a ROM first)");
     const patches = [];
+    // P2: chr edits -> 8KB-bank diffs (base = active pack, so prior custom
+    // chr edits survive; diff vs stock captures everything).
+    for (const b4s of Object.keys(S.chr)) {
+      const b4 = b4s | 0;
+      const tiles = S.chr[b4];
+      if (!tiles || !Object.keys(tiles).length) continue;
+      const b8 = b4 >> 1;
+      const base = S.resolved.chr[b8].slice();
+      const half = (b4 & 1) * 4096;
+      for (const ts of Object.keys(tiles)) base.set(encodeTile(tiles[ts]), half + (ts | 0) * 16);
+      for (const run of diffRuns(S.stock.chr[b8], base)) {
+        patches.push(makePatch("chr", b8, run.off, run.bytes));
+      }
+      log("editor: chr bank " + b4 + " (" + Object.keys(tiles).length + " tiles)");
+    }
     for (const b of [0, 1, 2]) {
       const P = S.parsed["b" + b];
       if (!P) continue;
@@ -324,9 +518,10 @@ async function saveAsPack() {
     }
     if (!patches.length) { say("no changes to save"); return; }
     const id = newCustomId();
-    const doc = { customVersion: 1, id, name, baseCrc: S.stock.meta.crc32, patches, editorVersion: "p1", builtAt: new Date().toISOString() };
+    const doc = { customVersion: 1, id, name, baseCrc: S.stock.meta.crc32, patches, editorVersion: "p2", builtAt: new Date().toISOString() };
     await saveCustomPack(doc);
     S.edited = {};
+    S.chr = {};
     try { await api.refreshPacks(); } catch (e) {}
     try { if (api.setPack) api.setPack(id); } catch (e2) {}
     say("saved pack " + name + " [" + id + "] (" + patches.length + " patches, now active)");
@@ -346,6 +541,12 @@ async function loadAll() {
     for (const L of r.levels) S.parsed[L.level] = { L, bank: b };
   }
   S.edited = {};
+  S.chr = {};
+  S.chrBank = -1;
+  S.chrTile = 0;
+  S.chrInk = 3;
+  S.chrSub = 0;
+  S.palSlot = 0;
 }
 function fillLevelSel() {
   const sel = el("edLevelSel");
@@ -361,6 +562,8 @@ function fillLevelSel() {
 }
 async function selectLevel(lvl) {
   S.level = lvl;
+  S.chrBank = BG_CHR_BANK[lvl];
+  S.chrTile = 0;
   S.selCell = -1; S.selStruct = -1; S.selCombo = -1;
   const badge = el("edModeBadge");
   if (badge) badge.textContent = LEVEL_MODE[lvl];
@@ -396,6 +599,14 @@ export async function toggleEditor(a) {
   if (br) br.onchange = () => { S.brush = Math.max(0, br.value | 0); };
   const sv = el("edSaveBtn");
   if (sv) sv.onclick = saveAsPack;
+  const grid = el("edChrGrid");
+  if (grid) grid.onclick = onChrGridClick;
+  const big = el("edChrTile");
+  if (big) big.onclick = onChrTileClick;
+  const cbs = el("edChrBank");
+  if (cbs) cbs.onchange = () => { S.chrBank = cbs.value | 0; S.chrTile = 0; repaint(); };
+  const sbs = el("edChrSub");
+  if (sbs) sbs.onchange = () => { S.chrSub = sbs.value | 0; repaint(); };
   await selectLevel(S.level);
   log("editor: open (level " + S.level + ", " + Object.keys(S.parsed).filter(k => k[0] === "b").length + " banks)");
 }

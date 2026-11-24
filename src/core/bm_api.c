@@ -232,6 +232,7 @@ void bm_set_pad(int m) { game_pad = (uint8_t)(m & 0xFF); }
 static int enhanced_mode = 0;
 void bm_enhanced_set(int v) { enhanced_mode = v ? 1 : 0; }
 int bm_enhanced_get(void) { return enhanced_mode; }
+
 int bm_audio_read(int dst_ptr, int max) {
   uint8_t *dst = (uint8_t *)(intptr_t)dst_ptr;
   int n = 0;
@@ -407,6 +408,90 @@ int bm_savestate_len(void) { return (int)save_len; }
 int bm_thaw_staging_ptr(void) { return (int)(intptr_t)thaw_stage; }
 int bm_last_int_pc(void) { return last_int_pc; }
 int bm_thaw_result(void) { return thaw_result; }
+// ---- E1 in-engine SRAM (exact-state slots, no passwords) ----
+// Battery-backed-style NVRAM for the core: 8 slots x SAVE_MAX bytes.
+// Slots + flags are engine CONFIG (excluded from freeze/thaw blobs,
+// sticky across bm_boot -- SRAM survives reset by definition). Shell
+// persists blobs (export/import); engine owns capture/rewind/metadata.
+// Blob layout recap: header 0..379, ram @380, vram @2428, pal/oam after.
+#define SRAM_SLOTS 8
+static uint8_t sram_blob[SRAM_SLOTS][SAVE_MAX];
+static uint32_t sram_len[SRAM_SLOTS];
+static int sram_occ[SRAM_SLOTS];
+static int sram_area[SRAM_SLOTS], sram_x[SRAM_SLOTS], sram_y[SRAM_SLOTS];
+static int sram_frame[SRAM_SLOTS];
+static uint32_t sram_crc[SRAM_SLOTS];
+static int sram_last = -1;
+static int saving_on = 0; // E1 lives rule gate (enforcement: lives RE)
+void bm_saving_set(int v) { saving_on = v ? 1 : 0; }
+int bm_saving_get(void) { return saving_on; }
+static int sram_valid_blob(const uint8_t *d, uint32_t len) {
+  uint32_t o = 0;
+  if (len < 64 || len > SAVE_MAX) return -1;
+  if (r32(d, &o) != SAVE_MAGIC) return -2;
+  if (r32(d, &o) != SAVE_VERSION) return -3;
+  if (r32(d, &o) != len) return -4;
+  return 0;
+}
+int bm_sram_save(int slot, uint32_t crc) {
+  uint32_t i, o = 12;
+  if (slot < 0 || slot >= SRAM_SLOTS) return -1;
+  if (sram_valid_blob(save_stage, save_len) != 0) return -2;
+  for (i = 0; i < save_len; i++) sram_blob[slot][i] = save_stage[i];
+  sram_len[slot] = save_len;
+  sram_frame[slot] = (int)r32(save_stage, &o);
+  sram_area[slot] = (int)(save_stage[380 + 0x14] & 15);
+  sram_x[slot] = (int)save_stage[380 + 0x49];
+  sram_y[slot] = (int)save_stage[380 + 0x4B];
+  sram_crc[slot] = crc; sram_occ[slot] = 1; sram_last = slot;
+  return 0;
+}
+int bm_sram_store(int slot, uint32_t crc) {
+  const uint8_t *d = thaw_stage + 12;
+  uint32_t len = thaw_stage[8] | ((uint32_t)thaw_stage[9] << 8) | ((uint32_t)thaw_stage[10] << 16) | ((uint32_t)thaw_stage[11] << 24);
+  uint32_t i, o = 12;
+  if (slot < 0 || slot >= SRAM_SLOTS) return -1;
+  if (sram_valid_blob(d, len) != 0) return -2;
+  for (i = 0; i < len; i++) sram_blob[slot][i] = d[i];
+  sram_len[slot] = len;
+  sram_frame[slot] = (int)r32(d, &o);
+  sram_area[slot] = (int)(d[380 + 0x14] & 15);
+  sram_x[slot] = (int)d[380 + 0x49];
+  sram_y[slot] = (int)d[380 + 0x4B];
+  sram_crc[slot] = crc; sram_occ[slot] = 1; sram_last = slot;
+  return 0;
+}
+int bm_sram_load(int slot, uint32_t crc) {
+  uint32_t i;
+  if (slot < 0 || slot >= SRAM_SLOTS) return -1;
+  if (!sram_occ[slot]) return -2;
+  if (sram_crc[slot] != crc) return -3;
+  for (i = 0; i < sram_len[slot]; i++) thaw_stage[12 + i] = sram_blob[slot][i];
+  thaw_stage[8] = (uint8_t)(sram_len[slot] & 255); thaw_stage[9] = (uint8_t)((sram_len[slot] >> 8) & 255);
+  thaw_stage[10] = (uint8_t)((sram_len[slot] >> 16) & 255); thaw_stage[11] = (uint8_t)((sram_len[slot] >> 24) & 255);
+  thaw_stage[0] = 1; thaw_stage[1] = thaw_stage[2] = thaw_stage[3] = 0;
+  return 1;
+}
+int bm_sram_info(int slot, int field) {
+  if (slot < 0 || slot >= SRAM_SLOTS) return -1;
+  if (!sram_occ[slot] && field != 0) return -2;
+  if (field == 0) return sram_occ[slot];
+  if (field == 1) return sram_area[slot];
+  if (field == 2) return sram_x[slot];
+  if (field == 3) return sram_y[slot];
+  if (field == 4) return sram_frame[slot];
+  if (field == 5) return (int)sram_crc[slot];
+  return -1;
+}
+int bm_sram_last(void) { return sram_last; }
+int bm_sram_blob_ptr(int slot) {
+  if (slot < 0 || slot >= SRAM_SLOTS || !sram_occ[slot]) return 0;
+  return (int)(intptr_t)sram_blob[slot];
+}
+int bm_sram_blob_len(int slot) {
+  if (slot < 0 || slot >= SRAM_SLOTS || !sram_occ[slot]) return 0;
+  return (int)sram_len[slot];
+}
 void bm_boot(void) {
   memset(ram, 0x00, sizeof ram); // Mesen parity: power-on RAM reads 0 (probe-proven over 120568f; 0xFF diverges at f=144)
   memset(vram, 0, sizeof vram);

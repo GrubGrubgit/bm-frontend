@@ -337,6 +337,30 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   -- keep boss-active windows short). Editor rule: NEVER delete/retype/move
   the boss record far (kill sets $03FB; the egg needs its camera band).
 
+## P4 Enhancements menu + entrance save system (OPEN, user order 2026-11-24)
+- Decisions: saving OPTIONAL, default off (original experience preserved);
+  new Enhancements panel modeled on cheats/tweaks (future home of widescreen;
+  earlier widescreen research not found in repo -- re-research when ordered);
+  save points at area/dungeon entrances: Up on entrance -> save prompt (Down
+  still enters, unchanged); NO passwords ever (exact-state saves).
+- Door/entrance RE (headless-proven, see 6.4i probes): dispatcher b7
+  C78F/C79D/C7A8 -- 6-byte column pointers from [($7A)] ($DD76/77); scan
+  INY/BNE over Y: areas[Y]==$14 AND xcol[Y]==$49 AND ycol[Y]==$4B (EXACT byte
+  equality, no tolerance); FOUND: Y^=1 (EOR-1 pair), $14/$49/$4B = pair row
+  (teleport). Player X=$49, Y=$4B (dispatcher WR(0x49)/WR(0x4B) post-Down-gate).
+  Down gate b6 $82E4: $F3&$04 (Down) + X=$4E slot state ($0500+X>=$C0, bit $08)
+  via b7 D238, then $B7=1. Up game-bit = $08 (bit-reversed pad map).
+  Up-save mirrors the same qualify + overlap test in JS.
+- Engine: bm_freeze/bm_thaw in bm_api.c (full live state at host_frame edge;
+  tailcall model resumes exactly); proof = freeze@F, run, thaw, hash-equality.
+  Rebuild via tools/build_game.sh; full battery re-green (engine change).
+- UI: Enhancements <details> (enable checkbox default off, slots, widescreen
+  placeholder), Up-edge detect in per-frame hook, pause + confirm menu, kv
+  slots keyed by pack id, load into live instance at frame edge.
+- Suite: tools/verify-pack-p4.mjs (overlap unit tests, freeze/thaw hash
+  equality x2, kv round-trip, disabled-by-default untouched, prompt fires on
+  poked-door + Up). Mirror game.wasm + UI files, MANIFEST hashes.
+
 ## 7. Risks
 - Pointer-relocation bugs corrupting packs -> mitigated by byte-identical
   round-trip tests + validator + never touching stock.

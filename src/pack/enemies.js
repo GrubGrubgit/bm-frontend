@@ -113,3 +113,44 @@ export const SPR_B = [0x54,0x56,0x58,0x5B,0x5D,0x5F,0x62,0x64,0x66,0x68,0x6A,0x6
 export function spriteFor(type) {
   return { a: type < SPR_A.length ? SPR_A[type] : -1, b: type < SPR_B.length ? SPR_B[type] : -1 };
 }
+
+// ---- 6.1b: per-type stat table (bank6, overhead areas) ----
+// 30 entries x 4 bytes at CPU $A36A (bank-rel $236A), ends $A3E1; code
+// resumes $A3E2 (JMP $A40A). Proven headless (verify-pack-6.1b, 25 green):
+// byte0 = max HP (slot $040D), byte1 = contact/attack damage ($44 -> $7E
+// grid, D697 subtract; $40 = L898D fallback constant, not table-driven).
+// statidx = record type for types 0-29 EXCEPT type1->e2 (shares actor $59
+// with type2); types 30+ have no entry (HP stays $20 spawn default).
+// Tank areas (bank4 actors) do NOT use this table (6.1c open).
+export const STAT_BANK = 6;
+export const STAT_TABLE_CPU = 0xA36A;
+export const STAT_TABLE_REL = 0x236A;
+export const STAT_ENTRY_LEN = 4;
+export const STAT_COUNT = 30;
+export function statIdxFor(type) {
+  if (type === 1) return 2;
+  if (type >= 0 && type < STAT_COUNT) return type;
+  return -1;
+}
+export function statByteRel(idx, field) {
+  return STAT_TABLE_REL + idx * STAT_ENTRY_LEN + field;
+}
+// Empirical type->actor map (area-9 overhead sweep, 64 values; trap +
+// no-actor outcomes excluded -- editor must validate per area before pack).
+export const TYPE_ACTOR = {
+  0: 0x55, 1: 0x59, 2: 0x59, 3: 0x5C, 4: 0x5E, 5: 0x60, 6: 0x63, 7: 0x65,
+  8: 0x67, 10: 0x6B, 11: 0x6D, 12: 0x6F, 13: 0x71, 14: 0x73, 16: 0x77,
+  17: 0x79, 18: 0x7B, 19: 0x4F, 20: 0x51, 22: 0x81, 23: 0x83, 24: 0x86,
+  26: 0x89, 27: 0x8B, 28: 0x8E, 32: 0x32, 42: 0x25, 43: 0x27, 44: 0x29,
+  53: 0x10, 55: 0x60, 57: 0x03, 58: 0x86, 62: 0x86,
+};
+// Types 33-41 -> actor 0x35 (powerup, subtype = type-33 in slot byte10).
+export function powerupSubtype(type) {
+  return type >= 33 && type <= 41 ? type - 33 : -1;
+}
+// Types that trap (area-9, activation-time, deterministic x2) or yield no
+// actor (00 empty / 01 dormant-forever). Do not pack without per-area proof.
+export const INVALID_TYPES = new Set([
+  9, 15, 21, 25, 29, 30, 31, 45, 46, 47, 48, 49, 50, 51, 52, 54, 56,
+  59, 60, 61, 63,
+]);

@@ -215,10 +215,41 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   (fixed-bank vec $8124->$815B->$813C tests |pos-cam+8|&$7F<$20); patched
   entry stayed dormant to +600 (still proves x mapping), converts on
   approach (drive-run: slot8 cycled dormant->02->despawn->respawn).
-  Follow-ups (6.1b, NOT blocking P3 placement editing): record-type->actor
-  id map location inside bank6 vector[0] init; A-group target format
-  (pointer-lists + coordinate ladders, tank-mode consumer); R1 indices
-  other than 1; per-type HP/damage stat tables.
+  6.1b CLOSED 2026-11-24 (tools/verify-pack-6.1b.mjs, 25/25 green).
+  Stat table (bank6, CPU $A36A, 30x4B entries e0-e29, ends $A3E1, code resumes
+  JMP $A40A): byte0 = max HP, byte1 = contact/attack damage ($44 published to
+  $7E grid, D697 subtracts $45&$7F from victim $53; $40 = L898D fallback
+  constant). statidx = record type for types 0-29 EXCEPT type1->e2 (shares
+  actor $59 with type2); types 30+ have no entry (HP stays $20 default).
+  Proofs (deterministic x2): e5.byte0->02 type5 HP=02; e3.byte0->07 type3
+  HP=07; e0.byte1 08->30 moves first-hit damage 08->30 (walk-right contact
+  run, fine snaps); stock control first-hit=08.
+  Type->actor empirical map (area-9 overhead, 64 values swept, determinism
+  x2): 0:55 1:59 2:59 3:5c 4:5e 5:60 6:63 7:65 8:67 10:6b 11:6d 12:6f
+  13:71 14:73 16:77 17:79 18:7b 19:4f 20:51 22:81 23:83 24:86 26:89 27:8b
+  28:8e 32:32 33-41:35(subtype=type-33 in slot byte10) 42:25 43:27 44:29
+  53:10 55:60 57:03(Sophia!) 58:86 62:86; no-actor outcomes: 30/31/46/50/59
+  ->byte0 00, 51/63->dormant 01; TRAP set (area-9 init/behavior, x2 determin:
+  9 15 21 25 29 45 47 48 49 52 54 56 60 61. Trap is activation-time (type9
+  dormant to f80, traps by f150). Validity beyond area 9 NOT proven (area-12
+  probe hit an unpatched out-of-band entry, inconclusive) -- editor must
+  validate types per area before packing (P3 follow-up).
+  Type->actor conversion CODE location still open (micro-item): actor id
+  reaches slot byte0 between spawn and activation; writers audited (CA89=01,
+  LC928/DF29 full-copy, D851/DF46 script-spawn) but the dormant->actor step
+  for table spawns is unidentified.
+  A-group consumer CLOSED: warp_raw(0..5,7) -> $14=area, ZP parks A-group
+  triplet tail (area0: a1 27 a2 ac a2 = A0), slot8 spawns (area0 entry92
+  type14 -> actor 45, same CA89 path, ZP quirk: $00 reads 00, copy lands
+  $01-$05). R1 others documented: R1[0]=$8004 variant table (EA3A $30
+  callers, incl. C742 area-variant select via LC76A), R1[14]=$0042 ZP/SRAM
+  stub path (dead, $D8 never written), R1[2..13,15] bank3 data (map/attr,
+  exact decode future work). STOCK warp_raw(6) traps (area-6 entry itself
+  broken pre-existing, not spawn-list-caused; A6 edits still valid data).
+  6.1c OPEN (tank-side stats, needs bank4 RE): tank slots differ (byte0=
+  actor at spawn, byte1=00, HP $20 unset at observation), bank6 HP table
+  pattern absent from bank4, tank type->actor map unswept. Overhead HP/
+  damage editing shippable now; tank attribute editing gated on 6.1c.
 - 6.2 Overhead physics bit meanings (CLOSED 2026-11-23, headless proofs):
   door bits 2-3 shared (all 15 overhead door-table entries sit on 0x8/0x9/
   0xB combos); bit7 solid (boundary-exact stops; cleared cells entered);

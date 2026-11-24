@@ -6,7 +6,7 @@ import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/lev
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
-import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC } from "../pack/enemies.js";
+import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel } from "../pack/enemies.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
@@ -465,7 +465,7 @@ function onMapClick(ev) {
     repaint();
   }
 }
-function enemyKeyForLevel(level) { return level <= 8 ? 'A' + (level - 1) : 'B' + (level - 9); }
+function enemyKeyForLevel(level) { return keyForLevel(level); } // single source: enemies.js (palette-proven mapping)
 function effEnemyList(key) {
   if (!S.enemies || !S.enemies.ok) return null;
   const L = S.enemies.lists.find(l => l.key === key);
@@ -616,11 +616,11 @@ function renderStatTbl() {
   const key = enemyKeyForLevel(S.level);
   const E = effEnemyList(key);
   if (!E) { if (info) info.textContent = ''; return; }
-  if (E.L.mode !== 'overhead') {
-    if (info) info.textContent = 'tank area: enemy stats live in bank-4 actors (6.1c open), not editable here';
+  if (E.L.mode !== 'tank') {
+    if (info) info.textContent = 'A-list area ($14 0-7): stats live in the bank-4 table (6.1c), not editable here';
     return;
   }
-  if (info) info.textContent = 'bank-6 table: edits are GLOBAL per type (all overhead areas)';
+  if (info) info.textContent = 'bank-6 table: GLOBAL per type (all B-list areas: levels 1-8, $14 8-15)';
   const seen = {};
   const rows = [];
   const noEntry = [];

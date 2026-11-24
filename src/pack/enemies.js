@@ -1,7 +1,9 @@
 // src/pack/enemies.js -- bank-3 spawn-list parser/serializer. Pure, no DOM.
 // Layout (PROVEN headless, research 6.1 + P3 survey):
 // R1 (bank-rel 0, 16xLE CPU) -> R1[1] = area spawn-list table (16xLE:
-// A0-A7 tank areas (levels 1-8), B0-B7 overhead areas (levels 9-16)).
+// A0-A7 serve levels 9-16 ($14 0-7), B0-B7 serve levels 1-8 ($14 8-15).
+// (Palette-proven 2026-11-24: warp_raw(k) loads the level map whose bg
+// palette matches level k<8?k+9:k-7; $14 6 excluded, stock init trap.)
 // Each subpointer aims at a 6-byte triplet [type[]][x[]][y[]] (CPU addrs)
 // followed immediately by the arrays: type[n+1] (type[n] is the $FF scan
 // terminator on stock), x[n], y[n]. n = x-segment length; y is capped at
@@ -20,9 +22,21 @@ for (let i = 0; i < 8; i++) SUB_KEYS.push('A' + i);
 for (let i = 0; i < 8; i++) SUB_KEYS.push('B' + i);
 export function subLevel(key) {
   const i = key.charCodeAt(1) - 48;
-  return key[0] === 'A' ? i + 1 : i + 9;
+  return key[0] === 'A' ? i + 9 : i + 1;
 }
-export function subMode(key) { return key[0] === 'A' ? 'tank' : 'overhead'; }
+export function subMode(key) { return key[0] === 'A' ? 'overhead' : 'tank'; }
+// Palette-proven 2026-11-24 (warp_raw(k) bg-palette == level-map palette):
+// editor levels 1-8 are $14 8-15 (B0-B7), levels 9-16 are $14 0-7 (A0-A7).
+export function keyForLevel(level) {
+  if (!Number.isInteger(level) || level < 1 || level > 16) return null;
+  return level <= 8 ? 'B' + (level - 1) : 'A' + (level - 9);
+}
+export function levelForKey(key) {
+  if (typeof key !== 'string' || key.length !== 2) return null;
+  const i = key.charCodeAt(1) - 48;
+  if (!(i >= 0 && i <= 7) || (key[0] !== 'A' && key[0] !== 'B')) return null;
+  return key[0] === 'A' ? i + 9 : i + 1;
+}
 function u16le(b, o) { return b[o] | (b[o + 1] << 8); }
 export function parseSpawns(bankBytes) {
   const errors = [];

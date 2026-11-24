@@ -121,7 +121,7 @@ export function spriteFor(type) {
 // grid, D697 subtract; $40 = L898D fallback constant, not table-driven).
 // statidx = record type for types 0-29 EXCEPT type1->e2 (shares actor $59
 // with type2); types 30+ have no entry (HP stays $20 spawn default).
-// Tank areas (bank4 actors) do NOT use this table (6.1c open).
+// Tank areas (bank4 actors) do NOT use this table (6.1c: $B326 table).
 export const STAT_BANK = 6;
 export const STAT_TABLE_CPU = 0xA36A;
 export const STAT_TABLE_REL = 0x236A;
@@ -138,7 +138,7 @@ export function statByteRel(idx, field) {
 // ---- P3c: per-type attribute read/serialize (bank-6 stat table) ----
 // Table: 30 entries x 4 bytes at STAT_TABLE_REL; byte0 = max HP, byte1 =
 // damage; bytes 2-3 UNIDENTIFIED (never written by the editor). Overhead
-// areas only (bank6 actor inits); tank areas use bank-4 actors (6.1c open).
+// areas only (bank6 actor inits); tank areas use bank-4 actors (6.1c closed).
 // edited: {idx: {hp?, dmg?}} with integers 0-255. No-op serializes
 // byte-identical (base = active pack bytes, so prior custom edits survive).
 export function getStatEntry(bank6, idx) {
@@ -175,6 +175,88 @@ export function serializeStats(bank6, edited) {
   }
   if (errors.length) return { ok: false, errors };
   return { ok: true, errors: [], bytes: out };
+}
+// ---- 6.1c: tank-side stat table (bank4, tank areas) ----
+// 16 entries x 4 bytes at CPU $B326 (bank-rel $3326), ends $B366; code
+// resumes JMP $B392. Proven headless (verify-pack-6.1c, 21 green):
+// byte0 = max HP (matches alone-method sweep 16/16), byte1 = shot/ranged
+// damage (walk-right run: control hits 16/16/16 -> patched e1.byte1 48
+// gives 16/48/16 at identical frames; first hit is CONTACT on a separate
+// fixed path, T1 = 16 regardless of byte1). Bytes 2-3 UNIDENTIFIED (never
+// written). statidx = record type for types 0-15; types 16-31 are empty
+// (actor 01, no entry), 32+ are special (egg/powerup/splitter/boss/
+// dormant -- HP from other paths; T49 boss HP = $80, source unknown).
+export const TANK_STAT_BANK = 4;
+export const TANK_STAT_TABLE_CPU = 0xB326;
+export const TANK_STAT_TABLE_REL = 0x3326;
+export const TANK_STAT_ENTRY_LEN = 4;
+export const TANK_STAT_COUNT = 16;
+export function tankStatIdxFor(type) {
+  if (type >= 0 && type < TANK_STAT_COUNT) return type;
+  return -1;
+}
+export function tankStatByteRel(idx, field) {
+  return TANK_STAT_TABLE_REL + idx * TANK_STAT_ENTRY_LEN + field;
+}
+// edited: {idx: {hp?, dmg?}} with integers 0-255. No-op serializes
+// byte-identical (base = active pack bytes, so prior custom edits survive).
+export function getTankStatEntry(bank4, idx) {
+  if (!(bank4 instanceof Uint8Array) || bank4.length !== BANK_SIZE) return null;
+  if (!(idx >= 0 && idx < TANK_STAT_COUNT && (idx | 0) === idx)) return null;
+  const o = tankStatByteRel(idx, 0);
+  return { hp: bank4[o], dmg: bank4[o + 1] };
+}
+export function serializeTankStats(bank4, edited) {
+  const errors = [];
+  if (!(bank4 instanceof Uint8Array) || bank4.length !== BANK_SIZE) {
+    return { ok: false, errors: ['bad-bank4'] };
+  }
+  const out = new Uint8Array(BANK_SIZE);
+  out.set(bank4);
+  const keys = Object.keys(edited || {});
+  for (let i = 0; i < keys.length; i++) {
+    const idx = +keys[i];
+    if (!(idx >= 0 && idx < TANK_STAT_COUNT && (idx | 0) === idx)) {
+      errors.push(keys[i] + ':bad-idx');
+      continue;
+    }
+    const e = edited[keys[i]] || {};
+    const fields = [['hp', 0], ['dmg', 1]];
+    for (let f = 0; f < fields.length; f++) {
+      const v = e[fields[f][0]];
+      if (v === undefined) continue;
+      if (!Number.isInteger(v) || v < 0 || v > 255) {
+        errors.push(keys[i] + ':' + fields[f][0] + '-range');
+        continue;
+      }
+      out[tankStatByteRel(idx, fields[f][1])] = v;
+    }
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, errors: [], bytes: out };
+}
+// Empirical tank type->actor map (area-0 alone-method sweep, all 64 types,
+// determinism x2; slot8 read at warp+250). Single-actor entries below;
+// specials: 8:0x38 plus 4x 0x4F spawner children, 32:0x5B egg,
+// 33-41:0x23 powerup (subtype = type-33 in slot byte10, see
+// powerupSubtype), 48:0x74 PAIR (splitter, two spawns one record),
+// 49:0x63 boss (HP $80, source unknown, NOT table-driven).
+export const TANK_TYPE_ACTOR = {
+  1: 0x27, 2: 0x2A, 5: 0x31, 6: 0x33, 8: 0x38, 9: 0x3A, 10: 0x02,
+  11: 0x3E, 12: 0x40, 13: 0x42, 14: 0x45, 15: 0x47, 32: 0x5B,
+  46: 0x5B, 47: 0x5D, 48: 0x74, 49: 0x63, 53: 0x6A, 54: 0x6C,
+  56: 0x70, 57: 0x72, 58: 0x74, 62: 0x4F,
+};
+// Tank types that trap at activation (deterministic x2) or yield no actor:
+// 16-31 empty (actor 01); 43/45/63 dormant-forever (actor 00, HP $20
+// spawn default). Validity proven area-0 only -- editor must validate
+// types per area before packing.
+export const TANK_TRAP_TYPES = new Set([
+  0, 3, 4, 7, 42, 44, 50, 51, 52, 55, 59, 60, 61,
+]);
+export const TANK_DORMANT_TYPES = new Set([43, 45, 63]);
+export function tankEmptyType(type) {
+  return type >= 16 && type <= 31;
 }
 // Empirical type->actor map (area-9 overhead sweep, 64 values; trap +
 // no-actor outcomes excluded -- editor must validate per area before pack).

@@ -258,10 +258,35 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   stub path (dead, $D8 never written), R1[2..13,15] bank3 data (map/attr,
   exact decode future work). STOCK warp_raw(6) traps (area-6 entry itself
   broken pre-existing, not spawn-list-caused; A6 edits still valid data).
-  6.1c OPEN (tank-side stats, needs bank4 RE): tank slots differ (byte0=
-  actor at spawn, byte1=00, HP $20 unset at observation), bank6 HP table
-  pattern absent from bank4, tank type->actor map unswept. Overhead HP/
-  damage editing shippable now; tank attribute editing gated on 6.1c.
+  6.1c CLOSED 2026-11-24 (tools/verify-pack-6.1c.mjs, 21/21 green).
+  Tank stat table (bank4, CPU $B326, 16x4B entries e0-e15, ends $B366, code
+  resumes JMP $B392): byte0 = max HP, byte1 = shot/ranged damage; bytes 2-3
+  UNIDENTIFIED (never written). Stock rows: e0 04101a90 e1 01101a80 e2
+  02101e70 e3 01101c50 e4 02102040 e5 01101a60 e6 08101a80 e7 012021ff e8
+  18201cff e9 08201ca0 e10 08181a80 e11 08181a80 e12 06201c50 e13 083020ff
+  e14 203022ff e15 04201aa0. HP row matches alone-method sweep 16/16.
+  Proofs (deterministic x2): e1.byte0->07 type1 spawn HP=07; e1.byte1
+  16->48 moves walk-right hits 16/16/16 -> 16/48/16 at identical frames
+  (f310/405/535; first hit is CONTACT on a separate fixed path, T1 = 16
+  regardless of byte1). Dispatch: EA3A($40) = bank4 R1[0]=$8006 vector
+  base; EB51(actor-1)->init; vent spots 0x45->$BE61 0x5B->$9FB7
+  0x63->$A589; filler sets dormant=01/HP=$20 (bank7 LCB), converter
+  overwrites actor+HP from the table (converter type-read: single bank4
+  LDA ($00),Y at rel $76B, routine boundaries open micro-item).
+  Tank type->actor map (area-0 alone-method sweep, all 64 types, x2):
+  1:27 2:2a 5:31 6:33 8:38(+4x 0x4F spawner children) 9:3a 10:02 11:3e
+  12:40 13:42 14:45 15:47 16-31:empty(01) 32:5b egg 33-41:23 powerup
+  (subtype=type-33 in slot byte10) 43/45/63:dormant(00) 46:5b 47:5d
+  48:0x74 PAIR (splitter, two spawns one record) 49:63 boss HP $80
+  (source unknown, NOT table -- e49 unmapped, masking ruled out by
+  e1-byte0->7 test leaving T49 at $80) 53:6a 54:6c 56:70 57:72 58:74
+  62:4f; TRAP set (activation-time, x2): 0 3 4 7 42 44 50 51 52 55 59 60
+  61. Lib: TANK_STAT_* + tankStatIdxFor/tankStatByteRel/getTankStatEntry/
+  serializeTankStats + TANK_TYPE_ACTOR/TRAP/DORMANT/tankEmptyType in
+  src/pack/enemies.js. Open micro-items: boss-HP-128 source, T48 splitter
+  mechanics, T63 phantom player damage (HP df w/ no visible spawn),
+  T46/47 byte11=8b vs T32 4c, converter routine boundaries. Tank
+  attribute editing in UI is future work (P3d, not ordered).
 - 6.2 Overhead physics bit meanings (CLOSED 2026-11-23, headless proofs):
   door bits 2-3 shared (all 15 overhead door-table entries sit on 0x8/0x9/
   0xB combos); bit7 solid (boundary-exact stops; cleared cells entered);

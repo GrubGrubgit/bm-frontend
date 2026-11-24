@@ -6,7 +6,7 @@ import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/lev
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
-import { parseSpawns, serializeSpawns, spriteFor, SPAWN_BANK } from "../pack/enemies.js";
+import { parseSpawns, serializeSpawns, spriteFor, SPAWN_BANK, BOSS_TYPE, BOSS_REC } from "../pack/enemies.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
@@ -495,7 +495,10 @@ function renderEnemies() {
   const freq = {};
   for (let i = 0; i < L.n; i++) freq[E.types[i]] = (freq[E.types[i]] || 0) + 1;
   const uniq = Object.keys(freq).filter(function (t) { return freq[t] === 1; });
-  if (warn) warn.textContent = uniq.length ? ('unique type(s) ' + uniq.join(',') + ' here: possibly a boss/miniboss -- verify in-game before moving far (6.3 open).') : '';
+  const bIdx = BOSS_REC[key];
+  const bossHere = (bIdx !== undefined && E.types[bIdx] === BOSS_TYPE);
+  const others = uniq.filter(function (t) { return !(bossHere && +t === BOSS_TYPE); });
+  if (warn) warn.textContent = (bossHere ? ('BOSS record r' + bIdx + ' (type 32): killing it sets this area\'s clear bit -- do not delete/retype/move far. ') : '') + (others.length ? ('unique type(s) ' + others.join(',') + ' here: possibly a miniboss -- verify in-game before moving far.') : '');
   const hr = document.createElement('tr');
   const heads = ['rec', 'type', 'x', 'y', 'sprA/B'];
   for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }

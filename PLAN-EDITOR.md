@@ -168,13 +168,15 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   t[n]=$FF terminator enforced immutable, types <0x80, B7 y-tail past xlen
   excluded incl. $BF53 stub; add/remove fail loudly, P3b) + engine sprite
   tables SPR_A/SPR_B ($B51/$B7C) + spriteFor. Editor enemies tab: per-area
-  record table (type/x/y edit, sprite preview, unique-type boss warning, 6.3
-  open); save path via overlay prg-bank-3 patches (editorVersion p3).
+  record table (type/x/y edit, sprite preview, boss-record warning names the
+  $20 record per tank area, 6.3 CLOSED 34/34); save path via overlay
+  prg-bank-3 patches (editorVersion p3).
   tools/verify-pack-p3.mjs 17/17 green (round-trip identical, rejects bad
   input, overlay write path boots: type edit 00->05 gives actor 0x60, x edit
   moves spawn; warp(9) observed). REMAINING for P3 acceptance: add/remove
   records (needs bank-3 free-space map, P3b); per-type attributes HP/damage
-  (needs 6.1b stat tables); boss-room safeguards (needs 6.3); editor smoke
+  (6.1b CLOSED dcbc204, lib has stat API); boss-room safeguards (6.3 CLOSED:
+  BOSS_REC/isBossRecord in enemies.js, editor names the boss record); editor smoke
   test post-mirror (UI wiring syntax-checked only).
 
 ## 5. Shell UI plan
@@ -266,7 +268,7 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
 - 6.4 Full-game RE backlog (user order 2026-11-24: record now, pursue after P3; long-term goal is a complete reverse-engineering of the game). Not gated on anything; pick items as editor phases demand them:
   a. Per-level sprite palettes (would let the P2 CHR tab preview sprite banks exactly; currently bg-palette approximation, recorded as known limitation).
   b. Bank-3 enemy/powerup record formats (this is 6.1, active now as P3 groundwork).
-  c. Boss-room linkage (this is 6.3, required for P3 placement safeguards).
+  c. Boss-room linkage (CLOSED as 6.3 below; was required for P3 placement safeguards).
   d. Sprite-bank assignments per level (which 4KB CHR banks the PPU maps for sprites per area; Data Crystal CHR-ROM table covers bg only).
   e. Sound engine (song/sfx table layout; future music editor).
   f. Tank/Jason physics constants (accel/friction/jump arcs; would ground a future physics-accurate preview).
@@ -274,8 +276,31 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   h. Password/save encoding (continue-system math).
   i. Text/dialog encoding (font + message tables; future script editor).
   Rule: every item closes with a headless proof (byte-equality or observed in-engine effect), same bar as 6.2.
-- 6.3 Boss-room linkage (P3): how bosses bind to rooms/levels; death-warp
-  and $03FB boss-bit interactions must keep working with edited spawns.
+- 6.3 Boss-room linkage (P3 safeguards) CLOSED 2026-11-24
+  (tools/verify-pack-6.3.mjs, 34/34 green: 20 static + 14 dynamic, all x2).
+  One type-$20 record per tank area (static census A0-A7 at idx
+  29/125/164/3/186/19/42/122). In-band it spawns actor $5B (boss egg),
+  proven headless in A0/A1/A2/A3/A4/A5/A7 (A6 honest-open: warp_raw(6)
+  traps on stock and the cooked-warp spawn trajectory never covers its egg;
+  A6 rests on the static unique-type fact + the 7-area pattern).
+  Chain (bank4): $5B egg, $51=$C0 countdown ~192f -> area boss (observed
+  A0->0x63, A5->0x5F; L9FE6 table reads 62 5E 60 5C 64 5E 5C 66, so observed
+  = table+1 -- which routine adds +1 is an open micro-item). Kill: boss
+  HP->0 -> A07B, $03FD counts to $80 -> LA100 sets the $03FB area bit
+  (LBF8A masks 01..80) + actor $5A; re-entering then spawns $68/$6A (area 7
+  gets $68), or jumps LC14A/D804 when the $03FC area bit is set. $03FC is
+  normally $00 (sole direct writer is new-game clear; gameplay sets bits via
+  the hidden jsr-A072/ora/sta $03FC setter in data after L9FE6; readers in
+  prg4/6/7 gate upgrades/variants). C742/LC76A area-7/15 variant is
+  static-proven (boss bit7: level $0A else table 05 03 06 04 07 03 04 09;
+  door path only -- no headless door driver exists, dynamic open).
+  Spawn mechanics mapped en route (CA89 28/27px registration gate, $0100
+  dedupe holds record indices via sta $F8,y, CBA9 $FF-clear, $8E cursor is
+  scratch reuse and raw warps do not reset it: future spawn tests must place
+  records in the SETTLED camera band and mind cursor history; A5 boss
+  behavior traps the recomp engine ~f2000, a pre-existing area-5+ vector gap
+  -- keep boss-active windows short). Editor rule: NEVER delete/retype/move
+  the boss record far (kill sets $03FB; the egg needs its camera band).
 
 ## 7. Risks
 - Pointer-relocation bugs corrupting packs -> mitigated by byte-identical

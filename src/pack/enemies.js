@@ -154,3 +154,33 @@ export const INVALID_TYPES = new Set([
   9, 15, 21, 25, 29, 30, 31, 45, 46, 47, 48, 49, 50, 51, 52, 54, 56,
   59, 60, 61, 63,
 ]);
+
+// ---- 6.3: tank boss linkage (boss egg type $20, kill chain, $03FB bits) ----
+// One type-$20 record per tank area (static ROM census, all 8 areas). In
+// 7/8 areas it is proven to spawn actor $5B (boss egg) when in the camera
+// band (A0/A1/A2/A3/A4/A7 headless, verify-pack-6.3; A5 needs stacking onto
+// an active spawner; A6 honest-open: warp_raw(6) traps on stock and the
+// cooked-warp spawn trajectory never covers its egg, so A6 rests on the
+// static unique-type fact + the 7-area pattern).
+// Chain (bank4): $20 -> $5B egg -> per-frame $51 countdown (~192f, set $C0
+// on spawn while boss alive) -> morph to the area boss (observed A0->0x63,
+// A5->0x5F; L9FE6 table reads 62 5E 60 5C 64 5E 5C 66, i.e. observed = table
+// +1, micro-item open). Killing the boss (HP->0) runs A07B: $03FD counts to
+// $80, then LA100 sets the $03FB area bit (LBF8A masks 01..80) + actor $5A;
+// re-entering then spawns $68/$6A ($68 if area==7), or jumps LC14A/D804 when
+// the $03FC area bit is set ($03FC is normally $00: sole direct writer is
+// new-game clear; gameplay sets bits via the hidden jsr-A072/ora/sta $03FC
+// setter after L9FE6; readers in prg4/6/7 gate upgrades/variants).
+// C742/LC76A picks the area-7/15 variant (boss bit7: level $0A else table
+// 05 03 06 04 07 03 04 09); door-path only, static-proven, no headless door
+// driver exists so dynamic is open. Editor rule: NEVER delete/retype/move
+// the boss record far (kill sets $03FB; the egg needs its camera band: CA89
+// 28/27px gate, $8E cursor is scratch and raw warps do not reset it).
+export const BOSS_TYPE = 0x20;
+export const BOSS_REC = { A0: 29, A1: 125, A2: 164, A3: 3, A4: 186, A5: 19, A6: 42, A7: 122 };
+export function isBossRecord(key, idx) {
+  return BOSS_REC[key] === idx;
+}
+export function areaBitFor(area) {
+  return 1 << (area & 7);
+}

@@ -135,6 +135,47 @@ export function statIdxFor(type) {
 export function statByteRel(idx, field) {
   return STAT_TABLE_REL + idx * STAT_ENTRY_LEN + field;
 }
+// ---- P3c: per-type attribute read/serialize (bank-6 stat table) ----
+// Table: 30 entries x 4 bytes at STAT_TABLE_REL; byte0 = max HP, byte1 =
+// damage; bytes 2-3 UNIDENTIFIED (never written by the editor). Overhead
+// areas only (bank6 actor inits); tank areas use bank-4 actors (6.1c open).
+// edited: {idx: {hp?, dmg?}} with integers 0-255. No-op serializes
+// byte-identical (base = active pack bytes, so prior custom edits survive).
+export function getStatEntry(bank6, idx) {
+  if (!(bank6 instanceof Uint8Array) || bank6.length !== BANK_SIZE) return null;
+  if (!(idx >= 0 && idx < STAT_COUNT && (idx | 0) === idx)) return null;
+  const o = statByteRel(idx, 0);
+  return { hp: bank6[o], dmg: bank6[o + 1] };
+}
+export function serializeStats(bank6, edited) {
+  const errors = [];
+  if (!(bank6 instanceof Uint8Array) || bank6.length !== BANK_SIZE) {
+    return { ok: false, errors: ['bad-bank6'] };
+  }
+  const out = new Uint8Array(BANK_SIZE);
+  out.set(bank6);
+  const keys = Object.keys(edited || {});
+  for (let i = 0; i < keys.length; i++) {
+    const idx = +keys[i];
+    if (!(idx >= 0 && idx < STAT_COUNT && (idx | 0) === idx)) {
+      errors.push(keys[i] + ':bad-idx');
+      continue;
+    }
+    const e = edited[keys[i]] || {};
+    const fields = [['hp', 0], ['dmg', 1]];
+    for (let f = 0; f < fields.length; f++) {
+      const v = e[fields[f][0]];
+      if (v === undefined) continue;
+      if (!Number.isInteger(v) || v < 0 || v > 255) {
+        errors.push(keys[i] + ':' + fields[f][0] + '-range');
+        continue;
+      }
+      out[statByteRel(idx, fields[f][1])] = v;
+    }
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, errors: [], bytes: out };
+}
 // Empirical type->actor map (area-9 overhead sweep, 64 values; trap +
 // no-actor outcomes excluded -- editor must validate per area before pack).
 export const TYPE_ACTOR = {

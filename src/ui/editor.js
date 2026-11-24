@@ -6,14 +6,14 @@ import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/lev
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
-import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, BOSS_TYPE, BOSS_REC } from "../pack/enemies.js";
+import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC } from "../pack/enemies.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
   brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
-  chr: {}, enemies: null, edEnemies: {},
+  chr: {}, enemies: null, edEnemies: {}, edStats: {},
   chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
 };
 // 4KB CHR bank -> levels using it as bg bank (labels for the bank picker).
@@ -90,6 +90,7 @@ function repaint() {
   renderInspector(E);
   renderScrollGrids(E);
   renderEnemies();
+  renderStatTbl();
   renderPalStrip(E);
   fillChrBankSel();
   renderChrTab(E);
@@ -589,6 +590,82 @@ function renderEnemies() {
     tbl.appendChild(tr);
   }
 }
+function effStat(idx) {
+  const base = S.resolved ? S.resolved.prg[STAT_BANK] : null;
+  const cur = getStatEntry(base, idx) || { hp: 0, dmg: 0 };
+  const e = S.edStats[idx];
+  if (e) { if (e.hp !== undefined) cur.hp = e.hp; if (e.dmg !== undefined) cur.dmg = e.dmg; }
+  return cur;
+}
+function commitStat(idx, field, value) {
+  if (!(idx >= 0) || !Number.isInteger(value) || value < 0 || value > 255) {
+    log('editor: stats refusing out-of-range e' + idx + '.' + field + '=' + value);
+    return;
+  }
+  const cur = S.edStats[idx] || {};
+  S.edStats[idx] = cur;
+  cur[field] = value;
+  log('editor: stats e' + idx + '.' + field + ' -> ' + value + ' (GLOBAL per type)');
+  repaint();
+}
+function renderStatTbl() {
+  const info = el('edStatInfo'), tbl = el('edStatTbl');
+  if (!tbl) return;
+  tbl.innerHTML = '';
+  const key = enemyKeyForLevel(S.level);
+  const E = effEnemyList(key);
+  if (!E) { if (info) info.textContent = ''; return; }
+  if (E.L.mode !== 'overhead') {
+    if (info) info.textContent = 'tank area: enemy stats live in bank-4 actors (6.1c open), not editable here';
+    return;
+  }
+  if (info) info.textContent = 'bank-6 table: edits are GLOBAL per type (all overhead areas)';
+  const seen = {};
+  const rows = [];
+  const noEntry = [];
+  for (let i = 0; i < E.n; i++) {
+    const t = E.types[i];
+    const idx = statIdxFor(t);
+    if (idx < 0) { if (noEntry.indexOf(t) < 0) noEntry.push(t); continue; }
+    if (seen[idx] !== undefined) continue;
+    seen[idx] = t;
+    rows.push({ type: t, idx: idx });
+  }
+  rows.sort(function (a, b) { return a.idx - b.idx; });
+  const hr = document.createElement('tr');
+  const heads = ['type', 'actor', 'HP', 'dmg', ''];
+  for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }
+  tbl.appendChild(hr);
+  for (let r = 0; r < rows.length; r++) {
+    const type = rows[r].type, idx = rows[r].idx;
+    const locked = INVALID_TYPES.has(type);
+    const st = effStat(idx);
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td'); td0.textContent = type + ' (e' + idx + ')'; tr.appendChild(td0);
+    const tdA = document.createElement('td');
+    const av = TYPE_ACTOR[type];
+    tdA.textContent = (av === undefined) ? '?' : ('$' + av.toString(16)); tr.appendChild(tdA);
+    const fields = [['hp', st.hp], ['dmg', st.dmg]];
+    for (let k = 0; k < fields.length; k++) {
+      const td = document.createElement('td');
+      if (locked) { td.textContent = fields[k][1]; }
+      else {
+        const inp = document.createElement('input');
+        inp.type = 'number'; inp.min = 0; inp.max = 255; inp.value = fields[k][1];
+        inp.style.width = '64px';
+        inp.dataset.idx = idx; inp.dataset.f = fields[k][0];
+        inp.addEventListener('change', function () { commitStat(this.dataset.idx | 0, this.dataset.f, this.value | 0); });
+        td.appendChild(inp);
+      }
+      tr.appendChild(td);
+    }
+    const tdN = document.createElement('td');
+    tdN.textContent = locked ? 'locked: activation-traps here' : (idx === 2 ? 'shared by types 1+2' : '');
+    tr.appendChild(tdN);
+    tbl.appendChild(tr);
+  }
+  if (noEntry.length && info) info.textContent += ' | no table entry (stock HP): types ' + noEntry.join(',');
+}
 async function saveAsPack() {
   const nameEl = el("edPackName");
   const stEl = el("edStatus");
@@ -615,6 +692,13 @@ async function saveAsPack() {
         patches.push(makePatch("prg", b, run.off, run.bytes));
       }
     }
+    if (Object.keys(S.edStats).length) {
+      const sr = serializeStats(S.resolved.prg[STAT_BANK], S.edStats);
+      if (!sr.ok) throw new Error('serialize stats: ' + sr.errors.join(' '));
+      for (const run of diffRuns(S.stock.prg[STAT_BANK], sr.bytes)) {
+        patches.push(makePatch('prg', STAT_BANK, run.off, run.bytes));
+      }
+    }
     if (Object.keys(S.edEnemies).length) {
       let structural = false;
       for (const k of Object.keys(S.edEnemies)) {
@@ -636,6 +720,7 @@ async function saveAsPack() {
     S.edited = {};
     S.chr = {};
     S.edEnemies = {};
+    S.edStats = {};
     repaint();
     try { await api.refreshPacks(); } catch (e) {}
     try { if (api.setPack) api.setPack(id); } catch (e2) {}
@@ -658,6 +743,7 @@ async function loadAll() {
   S.edited = {};
   S.chr = {};
   S.edEnemies = {};
+  S.edStats = {};
   const pe = parseSpawns(active.prg[SPAWN_BANK]);
   if (!pe.ok) throw new Error("parse enemies: " + pe.errors.join(" "));
   S.enemies = pe;

@@ -171,6 +171,7 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   record table (type/x/y edit, sprite preview, boss-record warning names the
   $20 record per tank area, 6.3 CLOSED 34/34); save path via overlay
   prg-bank-3 patches (editorVersion p3).
+  P3c CLOSED 2026-11-24: per-type HP/damage editing (bank-6 table, byte0=HP byte1=damage; lib getStatEntry/serializeStats; editor stat table per overhead area, GLOBAL-per-type, traps locked, tank areas 6.1c-gated). tools/verify-pack-p3c.mjs 25/25 green (static guards + boot: slot byte13==HP, first-drop==damage, tank unaffected). Editor save writes bank-6 patches via overlay diff. P3 placement now add/remove + attribute capable; REMAINING for P3 acceptance: in-page editor smoke post-mirror.
   P3b CLOSED 2026-11-24: zero-sum compacting rebuild (region [0x219B,0x3CA5)
  exactly full, 0 slack: every add funded by removals, over-budget rejected).
  tools/verify-pack-p3b.mjs 27/27 green (no-op byte-identical, remove/add/move,

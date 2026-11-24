@@ -53,6 +53,23 @@ static void save_stage_freeze(void);
 // BEFORE the engine include so the vendored lives-gate (hook 6) can see it.
 // Sticky across bm_boot, excluded from freeze/thaw blobs (like enhanced_mode).
 static int saving_on = 0;
+// ---- E2 main menu session state (early: pad_fn + forward decls) ----
+// Menu lives in the engine (no shell dependence). Opens on the title-screen
+// Start edge and the intro skip button while enhanced (stock path untouched
+// when off). Session state resets on bm_boot; the E4-core settings below are
+// sticky config (persisted + shell-synced in E4).
+static int menu_phase = 0;    // 0=off 1=main 2=load 3=settings
+static int menu_cursor = 0;
+static int menu_cooldown = 0; // set on START/LOAD/CONTINUE dismiss; clears at init
+static int menu_swallow = 0;  // pad filter: game sees 0 while menu is modal
+static int menu_prevpad = 0;
+static int setting_volume = 8; // 0-10 (shell divides by 10 in E4)
+static int setting_mute = 0;   // 0-1
+static int setting_scale = 0;  // 0 INTEGER 1 FIT 2 FILL 3 STRETCH
+static int setting_filter = 0; // 0 NEAREST 1 BILINEAR
+void menu_tick(void);
+void menu_draw(void);
+
 #include "combined_off.c"
 __attribute__((import_module("env"))) __attribute__((import_name("host_frame"))) void host_frame(int frame);
 static uint32_t dbgev[2097152]; static int dbgn;
@@ -67,7 +84,7 @@ static const uint8_t NESPAL[64][3] = {
 {0xBC,0xBC,0xBC},{0x00,0x78,0xF8},{0x00,0x58,0xF8},{0x68,0x44,0xFC},{0xD8,0x00,0xCC},{0xE4,0x00,0x58},{0xF8,0x38,0x00},{0xE4,0x5C,0x10},{0xAC,0x7C,0x00},{0x00,0xB8,0x00},{0x00,0xA8,0x00},{0x00,0xA8,0x44},{0x00,0x88,0x88},{0x00,0x00,0x00},{0x00,0x00,0x00},{0x00,0x00,0x00},
 {0xF8,0xF8,0xF8},{0x3C,0xBC,0xFC},{0x68,0x88,0xFC},{0x98,0x78,0xF8},{0xF8,0x78,0xF8},{0xF8,0x58,0x98},{0xF8,0x78,0x58},{0xFC,0xA0,0x44},{0xF8,0xB8,0x00},{0xB8,0xF8,0x18},{0x58,0xD8,0x54},{0x58,0xF8,0x98},{0x00,0xE8,0xD8},{0x78,0x78,0x78},{0x00,0x00,0x00},{0x00,0x00,0x00},
 {0xFC,0xFC,0xFC},{0xA4,0xE4,0xFC},{0xB8,0xB8,0xF8},{0xD8,0xB8,0xF8},{0xF8,0xB8,0xF8},{0xF8,0xA8,0xC0},{0xF0,0xD0,0xB0},{0xFC,0xE0,0xA8},{0xF8,0xD8,0x78},{0xD8,0xF8,0x78},{0xB8,0xF8,0xB8},{0xB8,0xF8,0xD8},{0x00,0xFC,0xFC},{0xF8,0xD8,0xF8},{0x00,0x00,0x00},{0x00,0x00,0x00}};
-static uint8_t pad_fn(uint64_t f) { (void)f; return game_pad; }
+static uint8_t pad_fn(uint64_t f);
 static uint8_t bg_opaque[256*240];
 static void render(void) {
   int mode8k = !(mmc_ctrl & 0x10);
@@ -197,6 +214,7 @@ static void nmi_frame(void) {
   cpu_snap[0]=presnap2_S; cpu_snap[1]=presnap2_P; cpu_snap[2]=presnap2_A; cpu_snap[3]=presnap2_X; cpu_snap[4]=presnap2_Y; cpu_snap[5]=presnap2_pc;
   ppu_snap_take();
   b7_entry_EB7E();
+  menu_draw();
   render();
   host_frame(frame_no++);
   if (pending_warp >= 0) {
@@ -406,6 +424,7 @@ void thaw_maybe(void) {
   } else {
     save_stage_freeze();
   }
+  menu_tick();
 }
 int bm_savestate_ptr(void) { return (int)(intptr_t)save_stage; }
 int bm_savestate_len(void) { return (int)save_len; }
@@ -495,7 +514,207 @@ int bm_sram_blob_len(int slot) {
   if (slot < 0 || slot >= SRAM_SLOTS || !sram_occ[slot]) return 0;
   return (int)sram_len[slot];
 }
+// ---- E2 main menu (engine-side, no shell dependence) ----
+// Opens on title/intro Start edge while enhanced_mode is on. Full-NT0
+// takeover drawn post-game-logic (menu_draw, from nmi_frame) so the menu
+// always wins regardless of background phase. Pad filtered via menu_swallow
+// in pad_fn. Dismissals: START (stock new game, cooldown through init),
+// CONTINUE/LOAD (stage sram thaw, cooldown through apply), submenu BACK
+// (back to main list, no cooldown). Pregame gate (lives==0 && cont==0) keeps
+// the menu out of gameplay (incl. the transient lives==0 mid-game case, where
+// continues are nonzero), attract demo (lives==2), and game-over flow.
+int bm_setting_get(int id) {
+  if (id == 0) return setting_volume;
+  if (id == 1) return setting_mute;
+  if (id == 2) return setting_scale;
+  if (id == 3) return setting_filter;
+  return -1;
+}
+void bm_setting_set(int id, int v) {
+  if (id == 0) { if (v < 0) v = 0; if (v > 10) v = 10; setting_volume = v; }
+  else if (id == 1) setting_mute = v ? 1 : 0;
+  else if (id == 2) { if (v < 0) v = 0; if (v > 3) v = 3; setting_scale = v; }
+  else if (id == 3) setting_filter = v ? 1 : 0;
+}
+static void menu_text(int row, int col, const char *s) {
+  int i = 0;
+  while (s[i] && col < 32) { vram[row * 32 + col] = (uint8_t)s[i]; col++; i++; }
+}
+static void menu_num2(int row, int col, int v) {
+  if (v >= 10) { vram[row * 32 + col] = (uint8_t)((v / 10) + 48); vram[row * 32 + col + 1] = (uint8_t)((v % 10) + 48); }
+  else vram[row * 32 + col] = (uint8_t)(v + 48);
+}
+// main-list actions: 0=START 1=CONTINUE 2=LOAD 3=SETTINGS
+static int menu_main_count(void) {
+  int n = 2;
+  if (saving_on) {
+    n++;
+    if (sram_last >= 0 && sram_last < 8 && sram_occ[sram_last]) n++;
+  }
+  return n;
+}
+static int menu_main_action(int idx) {
+  int i;
+  if (idx == 0) return 0;
+  i = 1;
+  if (saving_on && sram_last >= 0 && sram_last < 8 && sram_occ[sram_last]) { if (idx == i) return 1; i++; }
+  if (saving_on) { if (idx == i) return 2; }
+  return 3;
+}
+static const char *menu_main_label(int a) {
+  if (a == 0) return "START";
+  if (a == 1) return "CONTINUE";
+  if (a == 2) return "LOAD";
+  return "SETTINGS";
+}
+static void menu_adjust(int dir) {
+  if (menu_cursor == 0) bm_setting_set(0, setting_volume + dir);
+  else if (menu_cursor == 1) bm_setting_set(1, setting_mute ? 0 : 1);
+  else if (menu_cursor == 2) { int v = setting_scale + dir; if (v < 0) v = 3; if (v > 3) v = 0; bm_setting_set(2, v); }
+  else if (menu_cursor == 3) bm_setting_set(3, setting_filter ? 0 : 1);
+}
+// F1: race-free open inside pad_fn. The game polls the pad in the main slice
+// BEFORE NMI entry, while menu_tick runs at NMI entry AFTER the host sets the
+// pad -- so a tick-side open always loses the race (game starts AND menu opens).
+// pad_fn is sampled at scan-241 (main slice, before the game strobes $4016) and
+// at NMI entry, so the first sighting of the Start edge opens the menu and
+// returns 0 synchronously: the game never sees the opening press. The edge is
+// consumed (menu_prevpad = game_pad) so the held Start does not instantly
+// confirm START on the next tick. In-menu navigation stays in menu_tick.
+static uint8_t pad_fn(uint64_t f) {
+  (void)f;
+  if (!enhanced_mode) { menu_prevpad = game_pad; return game_pad; }
+  if (!menu_phase && !menu_cooldown && ram[0xDD] == 0 && ram[0x37E] == 0) {
+    if ((game_pad & 8) && !(menu_prevpad & 8)) {
+      menu_phase = 1; menu_cursor = 0; menu_swallow = 1;
+      menu_prevpad = game_pad;
+      return 0;
+    }
+  }
+  if (menu_swallow) return 0;
+  return game_pad;
+}
+void menu_tick(void) {
+  int gp = game_pad;
+  int e = (gp ^ menu_prevpad) & gp;
+  int pregame = (ram[0xDD] == 0 && ram[0x37E] == 0);
+  if (!enhanced_mode) {
+    menu_phase = 0; menu_cursor = 0; menu_cooldown = 0; menu_swallow = 0;
+    menu_prevpad = gp; return;
+  }
+  if (menu_phase && !pregame) {
+    menu_phase = 0; menu_cursor = 0; menu_cooldown = 1; menu_swallow = 0;
+    menu_prevpad = gp; return;
+  }
+  if (!menu_phase) {
+    menu_swallow = 0;
+    if (!menu_cooldown && pregame && (e & 8)) { menu_phase = 1; menu_cursor = 0; menu_swallow = 1; }
+    else if (!pregame) menu_cooldown = 0;
+    menu_prevpad = gp; return;
+  }
+  menu_swallow = 1;
+  if (menu_phase == 1) {
+    int n = menu_main_count();
+    if (menu_cursor >= n) menu_cursor = n - 1;
+    if (e & 32) menu_cursor = (menu_cursor + 1) % n;
+    if (e & 16) menu_cursor = (menu_cursor + n - 1) % n;
+    if (e & (8 | 1)) {
+      int a = menu_main_action(menu_cursor);
+      if (a == 0) { menu_phase = 0; menu_cooldown = 1; menu_swallow = 0; }
+      else if (a == 1) { bm_sram_load(sram_last, sram_crc[sram_last]); menu_phase = 0; menu_cooldown = 1; menu_swallow = 0; }
+      else if (a == 2) { menu_phase = 2; menu_cursor = 0; }
+      else { menu_phase = 3; menu_cursor = 0; }
+    }
+  } else if (menu_phase == 2) {
+    if (e & 32) menu_cursor = (menu_cursor + 1) % 9;
+    if (e & 16) menu_cursor = (menu_cursor + 8) % 9;
+    if (e & 2) { menu_phase = 1; menu_cursor = 0; }
+    else if (e & (8 | 1)) {
+      if (menu_cursor == 8) { menu_phase = 1; menu_cursor = 0; }
+      else if (menu_cursor >= 0 && menu_cursor < 8 && sram_occ[menu_cursor]) {
+        bm_sram_load(menu_cursor, sram_crc[menu_cursor]);
+        menu_phase = 0; menu_cooldown = 1; menu_swallow = 0;
+      }
+    }
+  } else if (menu_phase == 3) {
+    if (e & 32) menu_cursor = (menu_cursor + 1) % 5;
+    if (e & 16) menu_cursor = (menu_cursor + 4) % 5;
+    if (e & 64) menu_adjust(-1);
+    if (e & 128) menu_adjust(1);
+    if (e & 2) { menu_phase = 1; menu_cursor = 0; }
+    else if (e & (8 | 1)) { if (menu_cursor == 4) { menu_phase = 1; menu_cursor = 0; } }
+  }
+  menu_prevpad = gp;
+}
+static void menu_draw_main(void) {
+  int idx, row;
+  int n = menu_main_count();
+  menu_text(4, 9, "BLASTER MASTER");
+  row = 8;
+  for (idx = 0; idx < n; idx++) {
+    vram[row * 32 + 9] = (uint8_t)(idx == menu_cursor ? 1 : 0);
+    menu_text(row, 11, menu_main_label(menu_main_action(idx)));
+    row += 2;
+  }
+}
+static void menu_draw_load(void) {
+  int s, row;
+  menu_text(4, 14, "LOAD");
+  row = 7;
+  for (s = 0; s < 8; s++) {
+    vram[row * 32 + 8] = (uint8_t)(s == menu_cursor ? 1 : 0);
+    menu_text(row, 10, "SLOT ");
+    menu_num2(row, 15, s + 1);
+    if (sram_occ[s]) { menu_text(row, 17, "AREA "); menu_num2(row, 22, sram_area[s]); }
+    else menu_text(row, 17, "EMPTY");
+    row++;
+  }
+  vram[16 * 32 + 8] = (uint8_t)(menu_cursor == 8 ? 1 : 0);
+  menu_text(16, 10, "BACK");
+}
+static void menu_draw_settings(void) {
+  menu_text(4, 12, "SETTINGS");
+  vram[8 * 32 + 8] = (uint8_t)(menu_cursor == 0 ? 1 : 0);
+  menu_text(8, 10, "VOLUME "); menu_num2(8, 17, setting_volume);
+  vram[10 * 32 + 8] = (uint8_t)(menu_cursor == 1 ? 1 : 0);
+  menu_text(10, 10, "MUTE ");
+  menu_text(10, 15, setting_mute ? "ON" : "OFF");
+  vram[12 * 32 + 8] = (uint8_t)(menu_cursor == 2 ? 1 : 0);
+  menu_text(12, 10, "SCALE ");
+  menu_text(12, 16, setting_scale == 0 ? "INTEGER" : (setting_scale == 1 ? "FIT" : (setting_scale == 2 ? "FILL" : "STRETCH")));
+  vram[14 * 32 + 8] = (uint8_t)(menu_cursor == 3 ? 1 : 0);
+  menu_text(14, 10, "FILTER ");
+  menu_text(14, 17, setting_filter ? "BILINEAR" : "NEAREST");
+  vram[16 * 32 + 8] = (uint8_t)(menu_cursor == 4 ? 1 : 0);
+  menu_text(16, 10, "BACK");
+}
+void menu_draw(void) {
+  int i;
+  if (!menu_phase) return;
+  for (i = 0; i < 1024; i++) vram[i] = 0;
+  for (i = 0; i < 64; i++) vram[960 + i] = 0;
+  pal[0] = 0x0F; pal[1] = 0x30; pal[2] = 0x30; pal[3] = 0x30;
+  scx = 0; scy = 0;
+  reg2000 = (uint8_t)(reg2000 & 0xFC);
+  for (i = 0; i < 256; i += 4) oam[i] = 0xFF;
+  for (i = 4; i <= 27; i++) { vram[2 * 32 + i] = 1; vram[27 * 32 + i] = 1; }
+  for (i = 3; i <= 26; i++) { vram[i * 32 + 4] = 1; vram[i * 32 + 27] = 1; }
+  if (menu_phase == 1) menu_draw_main();
+  else if (menu_phase == 2) menu_draw_load();
+  else menu_draw_settings();
+}
+
+
+// Headless observability for menu tests (phase/cursor/prevpad/cooldown, pad+swallow).
+// Kept in shipped code: 2 lines, no secrets, lets future suites assert menu state.
+int bm_menu_dbg(void) { return (menu_phase & 255) | ((menu_cursor & 255) << 8) | ((menu_prevpad & 255) << 16) | ((menu_cooldown & 255) << 24); }
+int bm_menu_dbg2(void) { return ((int)game_pad & 255) | ((menu_swallow & 255) << 8); }
+static void menu_boot_reset(void) {
+  menu_phase = 0; menu_cursor = 0;
+  menu_cooldown = 0; menu_swallow = 0; menu_prevpad = 0;
+}
 void bm_boot(void) {
+  menu_boot_reset();
   memset(ram, 0x00, sizeof ram); // Mesen parity: power-on RAM reads 0 (probe-proven over 120568f; 0xFF diverges at f=144)
   memset(vram, 0, sizeof vram);
   memset(pal, 0, sizeof pal);

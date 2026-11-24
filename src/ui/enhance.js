@@ -10,6 +10,7 @@ import { parseDoors, matchDoor } from '../pack/doors.js';
 import { UP_MASK, createDetector, stepDetector, resetDetector } from '../pack/entrance.js';
 import { saveEntrance, loadEntrance } from '../pack/store.js';
 const LS_KEY = 'bm-enhance-v1';
+const MASTER_KEY = 'bm-enhance-master-v1';
 const SAVE_MAGIC = 0x424D5356;
 function loadFlag() {
   try { return !!JSON.parse(localStorage.getItem(LS_KEY) || '{}').enabled; }
@@ -17,6 +18,13 @@ function loadFlag() {
 }
 function storeFlag(v) {
   try { localStorage.setItem(LS_KEY, JSON.stringify({ enabled: !!v })); } catch (e) {}
+}
+function loadMaster() {
+  try { return !!JSON.parse(localStorage.getItem(MASTER_KEY) || '{}').master; }
+  catch (e) { return false; }
+}
+function storeMaster(v) {
+  try { localStorage.setItem(MASTER_KEY, JSON.stringify({ master: !!v })); } catch (e) {}
 }
 function row(parent, cls) {
   const d = document.createElement('div');
@@ -52,7 +60,7 @@ export function buildEnhancePanel(env) {
   const anchor = document.getElementById('logEl');
   if (!anchor) { log('enhance: logEl missing'); return () => {}; }
   const st = {
-    enabled: loadFlag(), rows: null, packId: null,
+    enabled: loadFlag(), master: loadMaster(), pushedMaster: -1, enableInp: null, rows: null, packId: null,
     det: createDetector(6), pending: null, lastFrame: -1,
     atText: '', listEl: null, promptEl: null,
   };
@@ -62,12 +70,21 @@ export function buildEnhancePanel(env) {
   sum.textContent = 'Enhancements (entrance saves, wasm engine only)';
   sum.style.cssText = 'cursor:pointer;padding:8px;background:#223;font-size:16px';
   det.appendChild(sum);
+  let mr = row(det);
+  checkBox(mr, 'enhanced mode (master toggle for engine enhancements)', st.master, (v) => {
+    st.master = v; storeMaster(v);
+    log('enhance: enhanced mode ' + (v ? 'on' : 'off'));
+    if (st.enableInp) st.enableInp.disabled = !v;
+    try { const h = env.host(); if (h && h.inst) { const ex = h.inst.exports; if (ex.bm_enhanced_set) { ex.bm_enhanced_set(v ? 1 : 0); st.pushedMaster = v ? 1 : 0; } } } catch (e) {}
+    if (!v) { st.pending = null; resetDetector(st.det); renderPrompt(); }
+  });
   let r = row(det);
-  checkBox(r, 'enable entrance saves (Up at doorways)', st.enabled, (v) => {
+  st.enableInp = checkBox(r, 'enable entrance saves (Up at doorways)', st.enabled, (v) => {
     st.enabled = v; storeFlag(v);
     log('enhance: entrance saves ' + (v ? 'on' : 'off'));
     if (!v) { st.pending = null; resetDetector(st.det); renderPrompt(); }
   });
+  if (!st.master && st.enableInp) st.enableInp.disabled = true;
   r = row(det);
   const wlab = document.createElement('span');
   wlab.textContent = 'widescreen mode (later): ';
@@ -99,7 +116,7 @@ export function buildEnhancePanel(env) {
     if (!p) {
       const s = document.createElement('span');
       s.style.cssText = 'font-size:12px;color:#888';
-      s.textContent = st.enabled ? 'stand on a doorway and press Up to file a save' : 'enable above, then stand on a doorway and press Up';
+      s.textContent = !st.master ? 'enable enhanced mode above to unlock entrance saves' : (st.enabled ? 'stand on a doorway and press Up to file a save' : 'enable entrance saves above, then stand on a doorway and press Up');
       el.appendChild(s);
       return;
     }
@@ -189,6 +206,8 @@ export function buildEnhancePanel(env) {
         st.pending = null; resetDetector(st.det); st.lastFrame = f; renderPrompt();
       } else if (f >= 0) st.lastFrame = f;
       ensureRows();
+      try { if (ex.bm_enhanced_set && st.pushedMaster !== (st.master ? 1 : 0)) { ex.bm_enhanced_set(st.master ? 1 : 0); st.pushedMaster = st.master ? 1 : 0; } } catch (e) {}
+      if (!st.master) { setAt('door: — (enhanced mode off)'); return; }
       if (!st.enabled || !st.rows) { setAt('door: —'); return; }
       if (env.engine() !== 'wasm') { setAt('door: — (wasm only)'); return; }
       if (!ex.bm_pre_ptr || !ex.bm_savestate_ptr || !ex.bm_savestate_len) { setAt('door: — (engine too old)'); return; }

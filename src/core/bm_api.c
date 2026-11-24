@@ -226,6 +226,12 @@ int bm_cycles_hi(void) { return (int)((cycles >> 32) & 0xFFFFFFFFu); }
 // the same pad the oracle/probe latch (cycle-measured, STROBE-verified).
 uint32_t bm_pad_wall(void) { return (uint32_t)(pad_wall & 0xFFFFFFFFu); }
 void bm_set_pad(int m) { game_pad = (uint8_t)(m & 0xFF); }
+// ---- E6 enhanced-mode master toggle ----
+// Engine config (NOT game state): excluded from freeze/thaw blobs, sticky
+// across bm_boot, default off. Gates all engine enhancements (E1+).
+static int enhanced_mode = 0;
+void bm_enhanced_set(int v) { enhanced_mode = v ? 1 : 0; }
+int bm_enhanced_get(void) { return enhanced_mode; }
 int bm_audio_read(int dst_ptr, int max) {
   uint8_t *dst = (uint8_t *)(intptr_t)dst_ptr;
   int n = 0;

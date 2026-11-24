@@ -182,3 +182,74 @@ console.log('----');
 console.log('pass=' + pass + ' fail=' + fail);
 if (fail) process.exit(1);
 
+// --- entrance detector units (src/pack/entrance.js) ---
+import { createDetector, stepDetector, resetDetector, UP_MASK, STABLE_NEED } from '../src/pack/entrance.js';
+ok('UP mask is host-Up 0x10', UP_MASK === 0x10);
+ok('stable need is 6', STABLE_NEED === 6);
+{
+  let d = createDetector(6), r = null;
+  for (let i = 0; i < 5; i++) r = stepDetector(d, true, 9, 69, 75, true);
+  ok('detector waits for stability', r.stable === false && r.prompt === false);
+  r = stepDetector(d, true, 9, 69, 75, true);
+  ok('detector prompts on stable overlap + Up', r.stable === true && r.prompt === true);
+  r = stepDetector(d, true, 9, 69, 75, true);
+  ok('detector does not re-nag same spot', r.prompt === false);
+  r = stepDetector(d, true, 9, 69, 75, false);
+  ok('detector stays stable without Up, no prompt', r.stable === true && r.prompt === false);
+  r = stepDetector(d, false, 0, 0, 0, false);
+  ok('detector resets on leave', r.stable === false && r.prompt === false);
+  for (let i = 0; i < 6; i++) r = stepDetector(d, true, 8, 9, 125, true);
+  ok('detector re-arms at pair side', r.prompt === true);
+  resetDetector(d);
+  for (let i = 0; i < 3; i++) stepDetector(d, true, 9, 69, 75, true);
+  stepDetector(d, false, 0, 0, 0, true);
+  for (let i = 0; i < 6; i++) r = stepDetector(d, true, 9, 69, 75, true);
+  ok('detector flicker resets run', r.prompt === true);
+}
+// --- headless UI-flow proof: presnap overlap + Up capture + load ---
+async function entranceFlow() {
+  let win = null, det = createDetector(6), captured = null, capF = -1;
+  let SA = null, SB = null, tres = null, phase = 0, done = false, frames = 0;
+  const inst = (await WebAssembly.instantiate(WASMB, { env: { host_frame: (f) => {
+    const ex = win.exports; frames++;
+    ex.bm_set_pad((f >= 61 && f <= 65) ? 8 : 0);
+    if (f === 1000) ex.bm_warp_raw(9);
+    const mem = new Uint8Array(ex.memory.buffer);
+    const pp = ex.bm_pre_ptr();
+    const area = mem[pp + 0x14] & 15, x = mem[pp + 0x49], y = mem[pp + 0x4B];
+    const m = matchDoor(pd.rows, area, x, y);
+    const up = (f >= 1010 && f < 1030);
+    const r = stepDetector(det, !!m, area, x, y, up);
+    if (r.prompt && !captured) { capF = f; const p = ex.bm_savestate_ptr(), l = ex.bm_savestate_len(); captured = mem.slice(p, p + l); phase = 1; }
+    if (phase === 1 && f === 1060) {
+      SA = mem.slice(ex.bm_savestate_ptr(), ex.bm_savestate_ptr() + ex.bm_savestate_len());
+      stageBuf(ex, captured); phase = 2;
+    }
+    else if (phase === 2 && f < 1060) phase = 3;
+    else if (phase === 3 && f === 1060) { SB = mem.slice(ex.bm_savestate_ptr(), ex.bm_savestate_ptr() + ex.bm_savestate_len()); tres = ex.bm_thaw_result(); done = true; }
+    if (done || frames > 60000) throw new Error('STOP');
+  } } })).instance;
+  win = { exports: inst.exports };
+  try {
+    const mm = () => new Uint8Array(inst.exports.memory.buffer);
+    const cat = new Uint8Array(16384 * NB);
+    for (let b = 0; b < NB; b++) cat.set(rom.slice(16 + b * 16384, 16 + (b + 1) * 16384), b * 16384);
+    mm().set(cat, inst.exports.bm_stage_ptr()); inst.exports.bm_load_prg();
+    const chroff = 16 + 262144;
+    const nbchr = Math.floor((rom.length - chroff) / 8192);
+    const cc = new Uint8Array(8192 * nbchr);
+    for (let b = 0; b < nbchr; b++) cc.set(rom.slice(chroff + b * 8192, chroff + (b + 1) * 8192), b * 8192);
+    mm().set(cc, inst.exports.bm_stage_ptr()); inst.exports.bm_load_chr();
+    inst.exports.bm_boot();
+  } catch (e) { if (e.message !== 'STOP') return { error: String(e.message).slice(0, 80) }; }
+  if (!SA || !SB) return { error: 'incomplete capF=' + capF };
+  return { capF, capLen: captured.length, tres, ndiff: maskedDiff(SA, SB).length };
+}
+const flow = await entranceFlow();
+ok('flow captures on Up at door (f=1010, 7836B)', flow.capF === 1010 && flow.capLen === 7836, 'capF=' + flow.capF + ' len=' + flow.capLen + ' ' + (flow.error || ''));
+ok('flow load rewinds (tres==1)', flow.tres === 1, 'tres=' + flow.tres);
+ok('flow re-run masked byte-identical', flow.ndiff === 0, 'ndiff=' + flow.ndiff);
+console.log('----');
+console.log('pass=' + pass + ' fail=' + fail);
+if (fail) process.exit(1);
+

@@ -98,3 +98,28 @@ export async function listCustomPackIds() {
   db.close();
   return (keys || []).filter(k => typeof k === "string" && k.indexOf("custom-") === 0).map(k => k.slice(7));
 }
+
+// Entrance saves (P4): exact-state snapshots, keyed apart from replay
+// slots so the two systems never clobber each other. No legacy fallback
+// (new namespace). Shape: {v:3, kind:'entrance', engine:'wasm', pack,
+// packCrc, frame, hash, area, x, y, savedAt, bytes:[...]}.
+export function entranceKeyFor(n, packId) {
+  const base = 'entrance-' + (n | 0);
+  if (typeof packId !== 'string' || !packId.length || packId === 'unknown') return base;
+  if (!/^[A-Za-z0-9-]+$/.test(packId)) return base;
+  return base + '::' + packId;
+}
+export async function saveEntrance(n, data) {
+  const key = entranceKeyFor(n, data && data.pack);
+  const db = await openDb();
+  await tx(db, STORES.saves, 'readwrite', s => s.put(data, key));
+  db.close();
+}
+export async function loadEntrance(n, packId) {
+  const key = entranceKeyFor(n, packId);
+  const db = await openDb();
+  const d = await tx(db, STORES.saves, 'readonly', s => s.get(key));
+  db.close();
+  return d || null;
+}
+

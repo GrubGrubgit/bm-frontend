@@ -45,10 +45,12 @@ GameHost.prototype.audioFrame = function () {
 // Cheat hook (set by app.js from ui/tweaks.js): runs while the engine is
 // suspended inside host_frame, so RAM writes land cleanly between edges.
 GameHost.prototype.cheatsApply = null;
+GameHost.prototype.entranceApply = null;
 GameHost.prototype.onFrame = function (f) {
   var self = this;
   var ex = this.inst.exports;
   try { if (this.cheatsApply) this.cheatsApply(ex); } catch (eCheat) {}
+  try { if (this.entranceApply) this.entranceApply(ex); } catch (eEnt) {}
   var mem = new Uint8Array(ex.memory.buffer);
   var vp = ex.bm_video_ptr();
   var vd = mem.slice(vp, vp + VBYTES);

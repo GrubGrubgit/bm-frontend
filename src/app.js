@@ -680,6 +680,7 @@ import { loadPrefs, savePrefs } from "./ui/prefs.js";
 import { wireInstall } from "./ui/pwa.js";
 import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
 import { buildTweaksPanel, applyTweaks } from "./ui/tweaks.js";
+import { buildEnhancePanel } from "./ui/enhance.js";
 const prefs = loadPrefs();
 const shellStatusEl = document.getElementById("shellStatus");
 const logEl = document.getElementById("logEl");
@@ -1853,6 +1854,20 @@ try {
     log: shellLog,
   });
   wasmHost.cheatsApply = function (ex) { try { applyTweaks(ex); } catch (e) {} };
+try {
+  const enhanceApply = buildEnhancePanel({
+    pad: () => padBus.getMask(),
+    slot: () => Math.max(1, Math.min(8, parseInt(slotSel.value, 10) || 1)),
+    engine: () => prefs.engine,
+    pack: () => (l2host && l2host.pack) || null,
+    packTag: () => l2host.packTag(),
+    host: () => wasmHost,
+    frame: () => l2host.frame(),
+    log: shellLog,
+  });
+  wasmHost.entranceApply = function (ex) { try { enhanceApply(ex); } catch (e) {} };
+} catch (e) { shellLog("enhance err " + String((e && e.message) || e).slice(0, 80)); }
+
 } catch (e) { shellLog("tweaks err " + String((e && e.message) || e).slice(0, 80)); }
 setInterval(() => {
   try {

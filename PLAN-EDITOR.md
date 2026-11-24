@@ -388,3 +388,68 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
 - 2026-11-24 P4 engine CLOSED (tools/verify-pack-p4.mjs 32/32; battery p3/p3b/p3c/6.1/6.1b/6.1c/6.3/p0 re-green): freeze+thaw BOTH at NMI-entry top (thaw_maybe, patch_vendor.py hook 5). First draft froze at end-of-nmi_frame: skipped the main-slice wait (wall+1/cycles-28k divergence). Fix: entry-freeze, byte-exact re-runs (K=1/10 ndiff=0). Wait-poll labels int_pc/nmi_pc (E93A/E93C) may swap rarely with identical gameplay (RTI discards; proof masks 8B). Door table: bank7 0x1D7E 108 rows, (9,69,75)r1<->(8,9,125)r0 (Down-drive proven), (10,85,7)r5<->(9,22,93)r4. New lib src/pack/doors.js. UI phase (Enhancements panel + entrance saves) next.
 - 2026-11-24 P4 UI: Enhancements panel (opt-in, default off) + entrance saves. Up on a doorway captures the exact-state freeze and offers Save-to-slot; Down entry unchanged. Slots in IDB entrance-<n>::<pack> (apart from replay slots); loads stage thaw bytes and rewind live. Widescreen placeholder (disabled). New: src/ui/enhance.js, src/pack/entrance.js (pure detector: 6-frame stability, one prompt per side); hook entranceApply in host.js onFrame (suspended, read-only). Suite p4 now 44 checks (detector units + headless presnap/Up/capture/load flow).
 - 2026-11-24 P3d CLOSED (tools/verify-pack-p3d.mjs 27/27 green: 21 static + 6 dynamic headless x2): tank-side per-type HP/damage editing via bank-4 table ($B326, 16x4B; lib getTankStatEntry/serializeTankStats pre-existing from 6.1c). Editor stat table now covers A-list areas (levels 9-16, $14 0-7), GLOBAL-per-type, trap types locked, boss egg ($20) noted HP-$80-not-table-driven, no-entry types listed (16-31 empty, 32+ special). Save writes bank-4 patches via overlay diff (base = active pack). Boot proofs: alone-method area-0 span-250 (byte13==HP for e1->07 and e14->09), walk-damage 16/16/16 control vs 16/48/16 patched at identical frames, B-area boot unaffected by tank edit. No engine/recomp/disasm changes.
+- 2026-11-24 Text survey (6.4i groundwork, user-prompted): game text is plain ASCII in FIXED bank7 ($8000-mapped): SELECT START AREA AND PRESS START @rel 3525, CREDIT @35C8, ENTERING INTO AREA @3709, CONTINUE/END @37C4/37CD, LEFT @3814, full staff roll @3B40+ (VERY THANKS !! PRESENTED BY / DIRECTOR H.HIGASIYA / K.KITAZUMI / MANAGER K.YOSHIDA / GAME DESIGN FANKY. / CHARACTER DESIGN FANKY. / ART DESIGN / PGM-F1 / MUSIC COMPOSER NAOKI KODAKA / SOUND PROGRAM MARUMO ...). Separators observed: / and . (engine mapping TBD). Text-draw routine NOT yet identified (auto-disasm has no labels at these addrs); next step is xrefing loads from $B525-$BE00 to find it + the font tile/CHR bank. No dialog-box UI exists in-game (title/pause/game-over/credits only).
+- 2026-11-24 Recommended working order (SUPERSEDED by P5 Enhanced-mode program below): 1) 6.4i font-map + text routine (small, unblocks 2); 2) save-prompt game-feel pass -- canvas overlay in the game typeface + pause-while-prompting, NO ROM patch (small, immediate P4 payoff); 3) 6.4d sprite-bank assignments then 6.4a sprite palettes (pair, exact CHR-tab sprite preview); 4) 6.4f physics constants (preview accuracy); 5) widescreen SPIKE first (likely infeasible on NES mirroring -- decide drop vs margins/HUD use -- before any implementation); 6) 6.4g enemy AI incl. 6.1c micro-items (big, only when behavior editing demands); 7) 6.4e sound engine (big, fully independent, anytime/parallel). Rationale: dependencies first, value/effort next, spikes before commitments, independent-big-items last.
+- 2026-11-24 ARCHITECTURE RULE (user order): enhancements must live in the ENGINE (wasm core) behind a stable API, never in the shell -- they must work if the core moves to a different frontend. Current P4 save system violates this (DOM panel + shell log/IDB in enhance.js/store.js, JS detector on presnap). Required redesign (after 6.4i): engine owns doorway match (live RAM + bank7 table, no presnap), Up detector on pad bits, capture into static slot buffers, prompt state machine, pause (hold core, keep emitting frames), in-canvas prompt drawn into framebuf post-render in the game typeface, pad-driven choice, blob export/import + slot metadata exports. Frontend (any) only renders the canvas and persists opaque blobs. Proof bar: headless suite driving stable exports only (pad in, frames/blobs out -- no DOM), which itself proves frontend-independence. Wasm-core-only constraint unchanged (mesen has no exports).
+
+## P5 Enhanced mode: engine enhancement platform (user order 2026-11-24)
+- Vision: the stock game has no main menu and almost no menus at all (only the
+  graphical pause display and the game-over CONTINUE/END cursor list at bank7
+  rel 37C4/37CD). Enhanced mode adds: a master toggle, an injected main menu,
+  an in-game pause menu, in-engine SRAM saves, and future enhancements
+  (widescreen, map). All of it lives in the ENGINE (wasm core) behind stable
+  additive exports per the 2026-11-24 architecture rule -- no shell dependence.
+- Global bars (every phase): enhanced mode defaults OFF with stock behavior
+  bit-identical (full battery re-green); headless proofs, same bar as 6.2;
+  engine suites drive stable exports only, no DOM (proves frontend-portability).
+- E0 6.4i text/font (PREREQUISITE for every menu below). Deliverables: ASCII
+  byte->tile-index map, the text-draw routine entry + calling convention, the
+  font CHR bank(s), control-code meanings (/ and . separators observed).
+  Anchors: fixed-bank7 strings at rel 3525/35C8/3709/37C4/37CD/3814/3B40+.
+  Menu precedent: game-over cursor list (reuses existing game structure;
+  basic text-only menus are the target style, no wheel reinvention).
+- E1 SRAM in-engine. The cart never shipped SRAM (header battery bit clear);
+  we add NVRAM to the core (ROM-hack precedent exists for real hardware, so
+  this is legitimate). Scope: in-core save storage, exact-state freeze/thaw
+  slots (NO passwords, per P4 decisions), last-save tracking for Continue,
+  blob export/import for frontend persistence, per-pack namespacing kept.
+- E6 Enhanced-mode master toggle (build FIRST after E0 -- everything gates
+  on it). Engine flag, persisted in the settings blob, default off. Shell
+  checkbox binds it. Unlocks: main-menu injection, in-game settings changes,
+  entrance saves, and all future enhancements.
+- E2 Main menu (needs E0+E1+E6). Injection point: the title-screen Start edge
+  and the intro-cutscene skip button -- instead of starting the game, enter
+  the menu when enhanced mode is on (stock path untouched when off). Options:
+  START (new game), CONTINUE (last save; hidden unless saving enabled and a
+  save exists), LOAD (save-slot menu; same visibility rule), SETTINGS.
+  Cursor-list style per the game-over precedent, game typeface via E0.
+- E4 Settings core (needs E6; wanted by E2/E3 menus). Canonical store moves
+  into the core: volume, mute, scale, filter, with get/set exports; shell
+  prefs.js becomes a sync wrapper. Shell controls ALWAYS work (not locked
+  behind enhancements); the in-game settings menu requires enhancements on.
+  Engine/slot/pad-swap/pack/touch stay frontend-owned (not game settings).
+- E3 In-game pause menu (needs E0+E1+E4+E6). Confirm headless FIRST that
+  Select-during-pause is currently a no-op (pad injection + state hash),
+  then bind it: CONTINUE (resume), LOAD (slot menu, saving-enabled only),
+  SETTINGS (E4 store), QUIT TO TITLE (engine reset into the E2 main menu --
+  the in-engine equivalent of pressing reset).
+- E5 Entrance-save engine port (needs E0+E1+E6; SUPERSEDES the P4 shell
+  implementation). Per the architecture rule: detector (live RAM + bank7
+  door table, no presnap), capture, prompt state machine, pause-while-prompt,
+  in-canvas prompt in the game typeface, pad-driven choice, core slot buffers.
+  Shell enhance.js shrinks to blob persistence + optional slot list; the JS
+  detector retires (keep for cross-check). Suite must be DOM-free.
+- Build order: E0 -> E6 -> E1 -> E2 -> E4 -> E3 -> E5, then E7 spike, then E8.
+- E7 True widescreen (needs PPU/scroll/mirroring RE). NOTE: a previous
+  session judged feasibility promising but it was NEVER recorded (confirmed
+  missing 2026-11-24) -- so this starts as fresh research, and this time the
+  findings land in the plan either way. Spike first (record!): can the engine
+  draw beyond the stock viewport (nametable/attribute/sprite-edge limits)?
+  Implement or drop on the spike result.
+- E8 Map system (own sub-plan; big). Minimap HUD filled in as you explore +
+  full map on the pause screen (option or button press, TBD in sub-plan).
+  Symbols for dungeon entrances, gates/doors, and upgrade-gated blocks
+  (hyper/crusher). Metroid-style, plain, built from repurposed game assets.
+  Sub-plan phases: M1 world/room-topology RE, M2 exploration tracking
+  in-engine, M3 HUD minimap rendering, M4 pause full-map + symbols/legend.
+- 2026-11-24 E0 font-map CLOSED (tools/verify-text-font.mjs 16/16 green: 12 static + 4 dynamic headless x1): text bytes are ASCII with tile index == byte ($00 = blank/space separator; proven on the title screen: NT0 rows spell SUN CORPORATION OF AMERICA / LICENSED BY NINTENDO OF / (c)1988 with identity indices). Font glyphs live in CHR bank 3 $1000-half (4KB page 7 of concatenated stock.chr, offset 0x7000): digits + uppercase complete, $00 blank, $01-$03 present (possible cursor tiles for E2/E3 menus). Open micro-items: text-draw routine entry unidentified (NOT needed for engine overlay -- overlay blits harvested glyph pixels directly); literal $2E periods exist in the staff roll but tile $2E is blank on the title page (credits font page or routine translation TBD in E2).

@@ -72,7 +72,23 @@ ok('dominant L1 tile found', !!top && top[1] > 100, JSON.stringify(top));
 const b4 = BG_CHR_BANK[1]; // 4KB bank for L1 bg
 const chr8 = b4 >> 1, chrOff = (b4 & 1) * 4096 + top[0] * 16;
 const patches = runs.map(r => OV.makePatch('prg', 0, r.off, r.bytes));
-patches.push(OV.makePatch('chr', chr8, chrOff, CHR.encodeTile(solid)));
+// editor save path, verbatim (saveAsPack): helper -> makePatch
+const chrEdits = {};
+chrEdits[b4] = {}; chrEdits[b4][top[0]] = solid;
+const descs = CHR.chrPatchDescs(stock.chr, stock.chr, chrEdits);
+ok('helper yields one desc inside edited tile', descs.length === 1 && descs[0].bank === chr8 && descs[0].offset >= chrOff && descs[0].offset < chrOff + 16, JSON.stringify(descs.map(d => [d.bank, d.offset, d.bytes.length])));
+ok('helper descs reconstruct solid tile', (() => { const r = stock.chr[chr8].slice(); for (const d of descs) r.set(d.bytes, d.offset); return CHR.decodeTile(r, (b4 & 1) * 4096 + top[0] * 16).every(v => v === 3); })());
+for (const d of descs) patches.push(OV.makePatch('chr', d.bank, d.offset, d.bytes));
+// helper edge cases
+ok('helper empty edits -> no descs', CHR.chrPatchDescs(stock.chr, stock.chr, {}).length === 0);
+ok('helper skips tile-less bank', CHR.chrPatchDescs(stock.chr, stock.chr, {8: {}}).length === 0);
+let threwH = 0;
+try { CHR.chrPatchDescs(stock.chr, stock.chr, {32: {0: solid}}); } catch (e) { threwH++; }
+try { CHR.chrPatchDescs(stock.chr, stock.chr, {8: {256: solid}}); } catch (e) { threwH++; }
+try { CHR.chrPatchDescs(stock.chr, stock.chr, {8: {0: new Uint8Array(64).fill(9)}}); } catch (e) { threwH++; }
+ok('helper rejects bad bank/tile/pixel (3/3 throw)', threwH === 3, 'threw=' + threwH);
+// overlay diffRuns (moved module) agrees with editor re-export on the pal case
+ok('overlay diffRuns == editor diffRuns', JSON.stringify(OV.diffRuns(stock.prg[0], sr.bytes)) === JSON.stringify(ED.diffRuns(stock.prg[0], sr.bytes)));
 const doc = { customVersion: 1, id: 'c-p2', name: 'p2', baseCrc: stock.meta.crc32, patches, editorVersion: 'p2', builtAt: 't' };
 ok('p2 custom validates', OV.validateCustomPack(doc).ok, OV.validateCustomPack(doc).errors.join(' '));
 const rr = OV.applyOverlay(stock, doc);

@@ -4,8 +4,9 @@
 // research 6.2 (bit meanings PROVEN headless, see levels.js).
 import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/levels.js";
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
-import { decodeTile, encodeTile, TILES_PER_BANK4K } from "../pack/chr.js";
-import { makePatch, newCustomId } from "../pack/overlay.js";
+import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
+import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
+export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
@@ -460,27 +461,6 @@ function onMapClick(ev) {
     repaint();
   }
 }
-export function diffRuns(a, b) {
-  const runs = [];
-  let i = 0;
-  while (i < a.length) {
-    if (a[i] === b[i]) { i++; continue; }
-    let j = i;
-    while (j < a.length && a[j] !== b[j]) j++;
-    // coalesce small equal gaps (<16B) to keep patch count low
-    let k = j;
-    while (k < a.length) {
-      let eq = 0;
-      while (k + eq < a.length && a[k + eq] === b[k + eq] && eq < 16) eq++;
-      if (eq >= 16 || k + eq >= a.length) break;
-      k += eq;
-      while (k < a.length && a[k] !== b[k]) k++;
-    }
-    runs.push({ off: i, bytes: b.slice(i, k) });
-    i = k;
-  }
-  return runs;
-}
 async function saveAsPack() {
   const nameEl = el("edPackName");
   const stEl = el("edStatus");
@@ -489,21 +469,12 @@ async function saveAsPack() {
   try {
     if (!S.stock) throw new Error("no stock pack (pick a ROM first)");
     const patches = [];
-    // P2: chr edits -> 8KB-bank diffs (base = active pack, so prior custom
-    // chr edits survive; diff vs stock captures everything).
-    for (const b4s of Object.keys(S.chr)) {
-      const b4 = b4s | 0;
-      const tiles = S.chr[b4];
-      if (!tiles || !Object.keys(tiles).length) continue;
-      const b8 = b4 >> 1;
-      const base = S.resolved.chr[b8].slice();
-      const half = (b4 & 1) * 4096;
-      for (const ts of Object.keys(tiles)) base.set(encodeTile(tiles[ts]), half + (ts | 0) * 16);
-      for (const run of diffRuns(S.stock.chr[b8], base)) {
-        patches.push(makePatch("chr", b8, run.off, run.bytes));
-      }
-      log("editor: chr bank " + b4 + " (" + Object.keys(tiles).length + " tiles)");
+    // P2: chr edits -> 8KB-bank diffs via the covered chr.js helper
+    // (base = active pack, so prior custom chr edits survive).
+    for (const d of chrPatchDescs(S.stock.chr, S.resolved.chr, S.chr)) {
+      patches.push(makePatch("chr", d.bank, d.offset, d.bytes));
     }
+    if (Object.keys(S.chr).length) log("editor: chr banks " + Object.keys(S.chr).join(","));
     for (const b of [0, 1, 2]) {
       const P = S.parsed["b" + b];
       if (!P) continue;

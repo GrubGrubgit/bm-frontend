@@ -48,6 +48,53 @@ export function encodeBank4k(all) {
   for (let t = 0; t < TILES_PER_BANK4K; t++) out.set(encodeTile(all.subarray(t * 64, t * 64 + 64)), t * TILE_BYTES);
   return out;
 }
+// Session-edit assembly (pure; the exact logic the editor save path uses,
+// covered headless in verify-pack-p2). chrEdits = {bank4k: {tile: px64}}.
+// base = active-pack chr banks (so prior custom chr edits survive), stock =
+// stock-pack chr banks (diff target). Returns descriptors
+// [{bank: b8, offset, bytes}] with changed runs only (same <16B coalescing
+// rule as overlay diffRuns). The caller wraps each in a patch.
+export function runsFor(a, b) {
+  const runs = [];
+  let i = 0;
+  while (i < a.length) {
+    if (a[i] === b[i]) { i++; continue; }
+    let j = i;
+    while (j < a.length && a[j] !== b[j]) j++;
+    let k = j;
+    while (k < a.length) {
+      let eq = 0;
+      while (k + eq < a.length && a[k + eq] === b[k + eq] && eq < 16) eq++;
+      if (eq >= 16 || k + eq >= a.length) break;
+      k += eq;
+      while (k < a.length && a[k] !== b[k]) k++;
+    }
+    runs.push({ off: i, bytes: b.slice(i, k) });
+    i = k;
+  }
+  return runs;
+}
+export function chrPatchDescs(stockChr, baseChr, chrEdits) {
+  const descs = [];
+  for (const b4s of Object.keys(chrEdits || {})) {
+    const b4 = b4s | 0;
+    const tiles = chrEdits[b4];
+    if (!tiles || !Object.keys(tiles).length) continue;
+    if (b4 < 0 || b4 >= 32) throw new RangeError('chrPatchDescs: bad-bank:' + b4);
+    const b8 = b4 >> 1;
+    const base = baseChr[b8].slice();
+    const half = (b4 & 1) * BANK4K_BYTES;
+    for (const ts of Object.keys(tiles)) {
+      const t = ts | 0;
+      if (t < 0 || t >= TILES_PER_BANK4K) throw new RangeError('chrPatchDescs: bad-tile:' + t);
+      base.set(encodeTile(tiles[t]), half + t * TILE_BYTES);
+    }
+    for (const run of runsFor(stockChr[b8], base)) {
+      descs.push({ bank: b8, offset: run.off, bytes: run.bytes });
+    }
+  }
+  return descs;
+}
 // Get/set one tile within a 4KB bank image. getTile decodes; setTile
 // returns a NEW bank image with the tile replaced (stock never mutated).
 export function getTile(bank4k, tile) {

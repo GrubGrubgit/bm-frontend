@@ -63,6 +63,30 @@ export function validateCustomPack(p) {
   if (errors.length) return { ok: false, errors: errors };
   return { ok: true, errors: [], clean: clean };
 }
+// Byte-run diff with small-gap coalescing (<16B equal gaps fold into the
+// surrounding run to keep patch counts low). Pure; used by the editor save
+// path for prg banks and by chr.js patch assembly for chr banks.
+export function diffRuns(a, b) {
+  const runs = [];
+  let i = 0;
+  while (i < a.length) {
+    if (a[i] === b[i]) { i++; continue; }
+    let j = i;
+    while (j < a.length && a[j] !== b[j]) j++;
+    // coalesce small equal gaps (<16B) to keep patch count low
+    let k = j;
+    while (k < a.length) {
+      let eq = 0;
+      while (k + eq < a.length && a[k + eq] === b[k + eq] && eq < 16) eq++;
+      if (eq >= 16 || k + eq >= a.length) break;
+      k += eq;
+      while (k < a.length && a[k] !== b[k]) k++;
+    }
+    runs.push({ off: i, bytes: b.slice(i, k) });
+    i = k;
+  }
+  return runs;
+}
 export function resolvedBytesCrc(prg, chr) {
   const all = new Uint8Array(8 * 16384 + 16 * 8192);
   for (let i = 0; i < 8; i++) all.set(prg[i], i * 16384);

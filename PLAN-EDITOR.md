@@ -208,6 +208,7 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
 - 2026-11-23: pack overlay (not forked packs) so stock stays pristine and
   both engines share one apply path.
 - 2026-11-23 P1 acceptance closed: all-16-level byte-identical round-trip (verify-pack-p1 57/57) + edited map boots and plays on BOTH engines (verify-pack-p1-play 15/15: wasm warp(0)+walk dx=9792 trap-free, mesen stock-vs-edited divergence + scroll motion).
+- 2026-11-24 P2 debt closure (verify-pack-p2 26/26): save path covered by pure chr.js helper chrPatchDescs (saveAsPack uses it verbatim; diffRuns moved to overlay.js with editor re-export so old imports keep working); dead edChrPix container removed from shell; 5695c78 repaint-after-save recorded. Known limitation (NOT debt): CHR tab previews every bank with the level bg palette, so sprite banks preview approximately (per-level sprite palettes are un-RE'd; codec + write-back are bank-agnostic and covered). Next: rebundle 0.2.57 + private bridge sync.
 - 2026-11-24 P2 closed (verify-pack-p2 20/20; P0 32/32, P1 57/57, P1-play 15/15, debt 45/45, 6.2 18/18 re-green = 187 checks): chr.js codec, CHR tab + palette editor in the editor view (shell gains palette-picker + CHR-tab DOM, mirrored to workspace root index.html), editorVersion p2. Next: rebundle 0.2.55 + private bridge sync. P3 (enemies, gated on 6.1 bank-3 RE) not started.
 - 2026-11-23 P1 completion: H row-flag mapping + V row-indexed mapping proven
   headless (column-hypothesis refuted dynamically; V bit6 no-shift confirmed

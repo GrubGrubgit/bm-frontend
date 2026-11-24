@@ -522,6 +522,7 @@ async function saveAsPack() {
     await saveCustomPack(doc);
     S.edited = {};
     S.chr = {};
+    repaint();
     try { await api.refreshPacks(); } catch (e) {}
     try { if (api.setPack) api.setPack(id); } catch (e2) {}
     say("saved pack " + name + " [" + id + "] (" + patches.length + " patches, now active)");

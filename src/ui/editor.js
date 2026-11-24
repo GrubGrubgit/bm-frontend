@@ -6,7 +6,7 @@ import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/lev
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
-import { parseSpawns, serializeSpawns, spriteFor, SPAWN_BANK, BOSS_TYPE, BOSS_REC } from "../pack/enemies.js";
+import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, BOSS_TYPE, BOSS_REC } from "../pack/enemies.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
@@ -470,11 +470,22 @@ function effEnemyList(key) {
   const L = S.enemies.lists.find(l => l.key === key);
   if (!L) return null;
   const e = S.edEnemies[key] || {};
-  return { L, types: e.types || L.types, xs: e.xs || L.xs, ys: e.ys || L.ys };
+  const types = e.types || L.types, xs = e.xs || L.xs, ys = e.ys || L.ys;
+  return { L, types, xs, ys, n: xs.length };
+}
+function bossIdxOf(key, types, n) {
+  if (key[0] !== 'A') return -1;
+  for (let i = 0; i < n; i++) if (types[i] === BOSS_TYPE) return i;
+  return -1;
 }
 function commitEnemyRec(key, i, field, value) {
   const E = effEnemyList(key);
-  if (!E) return;
+  if (!E || i < 0 || i >= E.n) return;
+  if (field === 't' && i === bossIdxOf(key, E.types, E.n) && (value | 0) !== BOSS_TYPE) {
+    log('editor: enemies refusing to retype BOSS record r' + i);
+    repaint();
+    return;
+  }
   const cur = S.edEnemies[key] || { types: E.L.types.slice(), xs: E.L.xs.slice(), ys: E.L.ys.slice() };
   S.edEnemies[key] = cur;
   if (field === 't') cur.types[i] = Math.max(0, Math.min(127, value | 0));
@@ -483,29 +494,76 @@ function commitEnemyRec(key, i, field, value) {
   log('editor: enemies ' + key + '[' + i + '].' + field + ' -> ' + value);
   repaint();
 }
+function deleteEnemyRec(key, i) {
+  const E = effEnemyList(key);
+  if (!E || i < 0 || i >= E.n) return;
+  if (i === bossIdxOf(key, E.types, E.n)) {
+    log('editor: enemies refusing to delete BOSS record r' + i + ' (killing it sets the clear bit)');
+    repaint();
+    return;
+  }
+  const t = Array.from(E.types.slice(0, E.n)); t.splice(i, 1); t.push(0xFF);
+  const x = Array.from(E.xs); x.splice(i, 1);
+  const y = Array.from(E.ys); y.splice(i, 1);
+  S.edEnemies[key] = { types: Uint8Array.from(t), xs: Uint8Array.from(x), ys: Uint8Array.from(y) };
+  log('editor: enemies deleted ' + key + '[' + i + '] (' + E.n + '->' + x.length + ')');
+  repaint();
+}
+function addEnemyRec(key) {
+  const E = effEnemyList(key);
+  if (!E) return;
+  const tEl = el('edEnemyType'), xEl = el('edEnemyX'), yEl = el('edEnemyY');
+  const t = Math.max(0, Math.min(127, (tEl && tEl.value | 0) || 0));
+  const x = Math.max(0, Math.min(255, (xEl && xEl.value | 0) || 0));
+  const y = Math.max(0, Math.min(255, (yEl && yEl.value | 0) || 0));
+  if (key[0] === 'A' && t === BOSS_TYPE) {
+    log('editor: enemies refusing to add a second type-32 to tank area ' + key);
+    repaint();
+    return;
+  }
+  const types = Uint8Array.from([...E.types.slice(0, E.n), t, 0xFF]);
+  const xs = Uint8Array.from([...E.xs, x]);
+  const ys = Uint8Array.from([...E.ys, y]);
+  const trial = {};
+  for (const k of Object.keys(S.edEnemies)) trial[k] = S.edEnemies[k];
+  trial[key] = { types, xs, ys };
+  const bud = spawnBudget(S.enemies, trial);
+  if (!bud.ok || bud.free < 0) {
+    log('editor: enemies over budget (need ' + (-bud.free) + ' more bytes: delete records first)');
+    repaint();
+    return;
+  }
+  S.edEnemies[key] = { types, xs, ys };
+  log('editor: enemies added ' + key + '[' + E.n + '] t=' + t + ' x=' + x + ' y=' + y);
+  repaint();
+}
 function renderEnemies() {
-  const info = el('edEnemyInfo'), tbl = el('edEnemyTbl'), warn = el('edEnemyWarn');
+  const info = el('edEnemyInfo'), tbl = el('edEnemyTbl'), warn = el('edEnemyWarn'), bud = el('edEnemyBudget');
   if (!tbl) return;
   const key = enemyKeyForLevel(S.level);
   const E = effEnemyList(key);
   tbl.innerHTML = '';
   if (!E) { if (info) info.textContent = 'no spawn data'; if (warn) warn.textContent = ''; return; }
-  const L = E.L;
-  if (info) info.textContent = 'area ' + key + ' (' + L.mode + '): ' + L.n + ' spawn records';
+  const n = E.n;
+  if (info) info.textContent = 'area ' + key + ' (' + E.L.mode + '): ' + n + ' spawn records';
   const freq = {};
-  for (let i = 0; i < L.n; i++) freq[E.types[i]] = (freq[E.types[i]] || 0) + 1;
+  for (let i = 0; i < n; i++) freq[E.types[i]] = (freq[E.types[i]] || 0) + 1;
   const uniq = Object.keys(freq).filter(function (t) { return freq[t] === 1; });
-  const bIdx = BOSS_REC[key];
-  const bossHere = (bIdx !== undefined && E.types[bIdx] === BOSS_TYPE);
+  const bIdx = bossIdxOf(key, E.types, n);
+  const bossHere = bIdx >= 0;
   const others = uniq.filter(function (t) { return !(bossHere && +t === BOSS_TYPE); });
-  if (warn) warn.textContent = (bossHere ? ('BOSS record r' + bIdx + ' (type 32): killing it sets this area\'s clear bit -- do not delete/retype/move far. ') : '') + (others.length ? ('unique type(s) ' + others.join(',') + ' here: possibly a miniboss -- verify in-game before moving far.') : '');
+  if (warn) warn.textContent = (bossHere ? ('BOSS record r' + bIdx + ' (type 32): killing it sets this area' + String.fromCharCode(39) + 's clear bit -- do not delete/retype/move far. ') : '') + (others.length ? ('unique type(s) ' + others.join(',') + ' here: possibly a miniboss -- verify in-game before moving far.') : '');
+  const trial = {};
+  for (const k of Object.keys(S.edEnemies)) trial[k] = S.edEnemies[k];
+  const bg = spawnBudget(S.enemies, trial);
+  if (bud) bud.textContent = bg.ok ? ('bank-3 budget: ' + bg.free + ' bytes free (~' + Math.max(0, Math.floor(bg.free / 3)) + ' adds)') : 'bank-3 budget: n/a';
   const hr = document.createElement('tr');
-  const heads = ['rec', 'type', 'x', 'y', 'sprA/B'];
+  const heads = ['rec', 'type', 'x', 'y', 'sprA/B', ''];
   for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }
   tbl.appendChild(hr);
-  for (let i = 0; i < L.n; i++) {
+  for (let i = 0; i < n; i++) {
     const tr = document.createElement('tr');
-    const td0 = document.createElement('td'); td0.textContent = i; tr.appendChild(td0);
+    const td0 = document.createElement('td'); td0.textContent = (i === bIdx ? i + ' BOSS' : i); tr.appendChild(td0);
     const fields = [['t', E.types[i], 127], ['x', E.xs[i], 255], ['y', E.ys[i], 255]];
     for (let k = 0; k < fields.length; k++) {
       const td = document.createElement('td');
@@ -520,6 +578,14 @@ function renderEnemies() {
     const td = document.createElement('td');
     td.textContent = String.fromCharCode(36) + sp.a.toString(16) + '/' + String.fromCharCode(36) + sp.b.toString(16);
     tr.appendChild(td);
+    const tdD = document.createElement('td');
+    const del = document.createElement('button');
+    del.textContent = 'x';
+    del.title = (i === bIdx) ? 'BOSS record: cannot delete' : 'delete record ' + i;
+    del.disabled = (i === bIdx);
+    del.dataset.i = i;
+    del.addEventListener('click', function () { deleteEnemyRec(key, this.dataset.i | 0); });
+    tdD.appendChild(del); tr.appendChild(tdD);
     tbl.appendChild(tr);
   }
 }
@@ -550,7 +616,14 @@ async function saveAsPack() {
       }
     }
     if (Object.keys(S.edEnemies).length) {
-      const er = serializeSpawns(S.enemies, S.edEnemies);
+      let structural = false;
+      for (const k of Object.keys(S.edEnemies)) {
+        const L = S.enemies.lists.find(l => l.key === k);
+        const e = S.edEnemies[k] || {};
+        const xs = e.xs || (L && L.xs);
+        if (L && xs && xs.length !== L.n) structural = true;
+      }
+      const er = structural ? rebuildSpawns(S.enemies, S.edEnemies) : serializeSpawns(S.enemies, S.edEnemies);
       if (!er.ok) throw new Error("serialize enemies: " + er.errors.join(" "));
       for (const run of diffRuns(S.stock.prg[SPAWN_BANK], er.bytes)) {
         patches.push(makePatch("prg", SPAWN_BANK, run.off, run.bytes));
@@ -645,6 +718,8 @@ export async function toggleEditor(a) {
   if (br) br.onchange = () => { S.brush = Math.max(0, br.value | 0); };
   const sv = el("edSaveBtn");
   if (sv) sv.onclick = saveAsPack;
+  const eAdd = el('edEnemyAddBtn');
+  if (eAdd) eAdd.onclick = () => addEnemyRec(enemyKeyForLevel(S.level));
   const grid = el("edChrGrid");
   if (grid) grid.onclick = onChrGridClick;
   const big = el("edChrTile");

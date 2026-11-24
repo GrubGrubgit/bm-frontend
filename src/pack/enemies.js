@@ -10,8 +10,8 @@
 // Record i spawns via CA89 as a slot ($403=xhi, $405=yhi, sprite base
 // LCB51/LCB7C[type[i]], actor id via the bank6 vector[0] init); dormant
 // slots (byte0=1) convert near the camera (~32px band, 813C test).
-// serializeSpawns only supports same-size (in-place) edits; structural
-// changes (add/remove records) fail loudly -- no free-space map yet (P3b).
+// serializeSpawns only supports same-size (in-place) edits; use
+// rebuildSpawns (P3b) for add/remove: zero-sum compacting rebuild.
 export const SPAWN_BANK = 3;
 export const BANK_SIZE = 16384, CPU_BASE = 0x8000;
 export const R1_REL = 0, R1_SPAWN_INDEX = 1;
@@ -183,4 +183,111 @@ export function isBossRecord(key, idx) {
 }
 export function areaBitFor(area) {
   return 1 << (area & 7);
+}
+
+// ---- P3b: add/remove records via compacting rebuild (zero-sum bank) ----
+// Bank 3 spawn region is EXACTLY full: triplets + arrays pack [0x219B,
+// 0x3CA5) contiguously with zero slack (measured 2026-11-24: arrays need
+// 6826 + triplets 96 = region 6922). The tail [0x3CA5,0x4000) is live
+// code/data and the gap [0x2194,0x219B) is live bytes, so growth is strictly
+// zero-sum: every added record (+3 bytes: type+x+y) must be funded by
+// removals. (Candidate future space: 79x-FF run at 0x3F93 -- UNPROVEN, do
+// not use without reference analysis.)
+// rebuildSpawns lays triplets + arrays out compactly from TRIS_BASE in ROM
+// order (SUB_KEYS order == triplet order, verified). The A174 list table
+// stays FIXED (entries rewritten to the new triplet addresses); each
+// triplet's 3 array pointers are rewritten. Shrinks leave dead bytes before
+// ARRAY_END (unreferenced). Stock-with-no-edits rebuilds byte-identical.
+// Invariants: types <0x80, terminator FF, non-empty, exactly one type-20
+// per TANK list (boss census -- removing/retyping the boss fails loudly).
+// BOSS_REC indices are STOCK-layout-only; after structural edits locate the
+// boss dynamically (the single 0x20 in a tank list).
+export const TABLE_REL = 0x2174;
+export const TRIS_BASE = 0x219B;
+export const ARRAY_END = 0x3CA5;
+export const TRIPLET_BYTES = 96;
+function normArr(a) {
+  if (a instanceof Uint8Array) return a.slice();
+  if (Array.isArray(a)) return Uint8Array.from(a.map(function (v) { return v & 0xFF; }));
+  return null;
+}
+export function spawnBudget(parsed, edited) {
+  if (!parsed || !parsed.ok) return { ok: false, free: 0 };
+  var byKey = {};
+  for (var i = 0; i < parsed.lists.length; i++) byKey[parsed.lists[i].key] = parsed.lists[i];
+  var need = TRIPLET_BYTES;
+  for (var k = 0; k < SUB_KEYS.length; k++) {
+    var L = byKey[SUB_KEYS[k]];
+    if (!L) return { ok: false, free: 0 };
+    var e = (edited && edited[SUB_KEYS[k]]) || {};
+    var x = e.xs ? normArr(e.xs) : null;
+    var n = x ? x.length : L.n;
+    need += (n + 1) + n + n;
+  }
+  var cap = ARRAY_END - TRIS_BASE;
+  return { ok: true, free: cap - need, cap: cap, need: need };
+}
+export function rebuildSpawns(parsed, edited) {
+  var errors = [];
+  if (!parsed || !parsed.ok || !(parsed.bytes instanceof Uint8Array)) {
+    return { ok: false, errors: ['bad-parsed'] };
+  }
+  var byKey = {};
+  for (var i = 0; i < parsed.lists.length; i++) byKey[parsed.lists[i].key] = parsed.lists[i];
+  if (edited) for (var uk of Object.keys(edited)) {
+    if (!byKey[uk]) errors.push(uk + ':bad-key');
+  }
+  var specs = [];
+  for (var s = 0; s < SUB_KEYS.length; s++) {
+    var key = SUB_KEYS[s];
+    var L = byKey[key];
+    if (!L) { errors.push(key + ':missing-list'); continue; }
+    var e = (edited && edited[key]) || {};
+    var t = e.types ? normArr(e.types) : L.types.slice();
+    var x = e.xs ? normArr(e.xs) : L.xs.slice();
+    var y = e.ys ? normArr(e.ys) : L.ys.slice();
+    if (!t || !x || !y) { errors.push(key + ':bad-arrays'); continue; }
+    if (t.length !== x.length + 1 || x.length !== y.length) {
+      errors.push(key + ':len-mismatch');
+      continue;
+    }
+    var n = x.length;
+    if (n <= 0) { errors.push(key + ':empty-list'); continue; }
+    var bad = false;
+    for (var j = 0; j < n; j++) {
+      if (t[j] >= 0x80) { errors.push(key + ':type-control-byte:' + j); bad = true; break; }
+    }
+    if (bad) continue;
+    if (t[n] !== 0xFF) { errors.push(key + ':terminator-not-FF'); continue; }
+    if (key[0] === 'A') {
+      var bosses = 0;
+      for (var bi = 0; bi < n; bi++) if (t[bi] === BOSS_TYPE) bosses++;
+      if (bosses !== 1) { errors.push(key + ':boss-count=' + bosses); continue; }
+    }
+    specs.push({ key: key, idx: s, n: n, t: t, x: x, y: y });
+  }
+  if (errors.length) return { ok: false, errors: errors };
+  var need = TRIPLET_BYTES;
+  for (var q = 0; q < specs.length; q++) need += (specs[q].n + 1) + specs[q].n + specs[q].n;
+  var cap = ARRAY_END - TRIS_BASE;
+  if (need > cap) {
+    return { ok: false, errors: ['over-budget:' + (need - cap)] };
+  }
+  var out = new Uint8Array(BANK_SIZE);
+  out.set(parsed.bytes);
+  var setU16 = function (o, v) { out[o] = v & 0xFF; out[o + 1] = (v >> 8) & 0xFF; };
+  var cur = TRIS_BASE;
+  for (var w = 0; w < specs.length; w++) {
+    var sp = specs[w];
+    var tri = cur, tb = tri + 6, xb = tb + sp.n + 1, yb = xb + sp.n;
+    out.set(sp.t, tb);
+    out.set(sp.x, xb);
+    out.set(sp.y, yb);
+    setU16(tri, CPU_BASE + tb);
+    setU16(tri + 2, CPU_BASE + xb);
+    setU16(tri + 4, CPU_BASE + yb);
+    setU16(TABLE_REL + sp.idx * 2, CPU_BASE + tri);
+    cur = yb + sp.n;
+  }
+  return { ok: true, errors: [], bytes: out };
 }

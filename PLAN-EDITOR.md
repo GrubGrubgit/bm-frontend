@@ -171,6 +171,15 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   record table (type/x/y edit, sprite preview, boss-record warning names the
   $20 record per tank area, 6.3 CLOSED 34/34); save path via overlay
   prg-bank-3 patches (editorVersion p3).
+  P3b CLOSED 2026-11-24: zero-sum compacting rebuild (region [0x219B,0x3CA5)
+ exactly full, 0 slack: every add funded by removals, over-budget rejected).
+ tools/verify-pack-p3b.mjs 27/27 green (no-op byte-identical, remove/add/move,
+ boss-delete/retype rejected, boot: spawn gone/added, cross-area isolation,
+ early-list edit moves every later triplet transparently).
+ Editor: per-row delete (boss blocked), add form, budget readout, save picks
+ rebuild when lengths differ else serialize. P3 placement now add/remove-capable;
+ REMAINING for P3 acceptance: per-type attribute editing in UI (lib has 6.1b stat API),
+ boss-room safeguards (6.3 CLOSED), editor smoke test post-mirror.
   tools/verify-pack-p3.mjs 17/17 green (round-trip identical, rejects bad
   input, overlay write path boots: type edit 00->05 gives actor 0x60, x edit
   moves spawn; warp(9) observed). REMAINING for P3 acceptance: add/remove

@@ -139,6 +139,20 @@ import { GameHost } from "./core/host.js";
 const wasmHost = new GameHost();
 const mesenHost = new MesenHost();
 let l2host = wasmHost;
+// Asset-base fix (2026-11-25): bare relative fetch() resolves against
+// document.baseURI, which in the editor preview is the TOP-LEVEL page
+// (cross-origin from the game iframe, so the fetch throws and Start can
+// never spawn). Derive the true app root from this module own URL
+// (correct in preview, Pages, www, APK) and route engine-asset fetches
+// through it; bare-relative fallback preserved.
+try {
+  var __bmMod = String((import.meta && import.meta.url) || "");
+  if (/src\/app\.js([?#].*)?$/.test(__bmMod)) window.__BM_BASE = __bmMod.replace(/src\/app\.js([?#].*)?$/, "");
+} catch (eB) {}
+function wasmURL() {
+  try { if (window.__BM_BASE) return new URL("build/game.wasm", window.__BM_BASE).href; } catch (eW) {}
+  return "build/game.wasm";
+}
 let l2pack = null;
 let l2packKey = null;
 function packCacheKey(stockPack) {
@@ -194,7 +208,7 @@ async function l2ensurePackForTest() {
 }
 window.BM.bootL2 = async function () {
   const pack = await l2ensurePack();
-  return l2host.spawn(pack, "build/game.wasm");
+  return l2host.spawn(pack, wasmURL());
 };
 window.BM.runL2 = function (n, pad) { return l2host.go(n, pad || 0); };
 window.BM.stepL2 = function (pad) { return l2host.step(pad || 0); };
@@ -215,7 +229,7 @@ async function selfTestL2() {
     statusEl.textContent = "L2: loading pack";
     const pack = await l2ensurePackForTest();
     statusEl.textContent = "L2: booting engine";
-    await l2host.spawn(pack, "build/game.wasm");
+    await l2host.spawn(pack, wasmURL());
     const A = await l2host.go(40, 0);
     await l2host.reset();
     const B = await l2host.go(40, 0);
@@ -333,7 +347,7 @@ async function selfTestL3() {
   try {
     statusEl.textContent = "L3: boot engine";
     const pack = await l2ensurePackForTest();
-    await l2host.spawn(pack, "build/game.wasm");
+    await l2host.spawn(pack, wasmURL());
     await l2host.go(39, 0);
     if (l2host.frame() !== 39) return fail3("frame:" + l2host.frame());
     const v0 = l2host.videoBytes().slice();
@@ -479,7 +493,7 @@ async function selfTestL4() {
   try {
     statusEl.textContent = "L4: boot engine";
     const pack = await l2ensurePackForTest();
-    await l2host.spawn(pack, "build/game.wasm");
+    await l2host.spawn(pack, wasmURL());
     statusEl.textContent = "L4: 60s capture (start@2700)";
     const byf = new Map();
     let evTotal = 0;
@@ -638,7 +652,7 @@ async function selfTestL5() {
     if (padBus.getMask() !== 0) return fail5("combine-clear:" + padBus.getMask().toString(16));
     statusEl.textContent = "L5: agent 60s run (start@2700, hold L+A)";
     const pack = await l2ensurePackForTest();
-    await l2host.spawn(pack, "build/game.wasm");
+    await l2host.spawn(pack, wasmURL());
     for (let f = 1; f < 2700; f++) {
       agentPad.setPad(0);
       await l2host.go(1, padBus.getMask());
@@ -940,7 +954,7 @@ function shellOnStepErr(e) {
 async function shellStart() {
   if (shellRunning && !shellPaused) return l2host.frame();
   const pack = await l2ensurePack();
-  if (!l2host.inst || l2host.frame() < 0) await l2host.spawn(pack, "build/game.wasm");
+  if (!l2host.inst || l2host.frame() < 0) await l2host.spawn(pack, wasmURL());
   try { clearTrapBanner(); } catch (e) {}
   window.__bmStaticHint = false; window.__bmStaticN = 0;
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
@@ -987,7 +1001,7 @@ async function shellReset() {
   replay.movie = null; replay.mode = "idle"; replay.recording = null; replay.pauseSave = null; replay.trapped = false;
   anchorSave = null;
   const pack = await l2ensurePack();
-  await l2host.spawn(pack, "build/game.wasm");
+  await l2host.spawn(pack, wasmURL());
   try { clearTrapBanner(); } catch (e) {}
   window.__bmStaticHint = false; window.__bmStaticN = 0;
   try { if (audioPlayer) audioPlayer.reset(); } catch (e) {}
@@ -1348,7 +1362,7 @@ function replayIndex() {
 }
 async function replayEnsureSpawned() {
   const pack = await l2ensurePack();
-  if (!l2host.inst) await l2host.spawn(pack, "build/game.wasm");
+  if (!l2host.inst) await l2host.spawn(pack, wasmURL());
   return pack;
 }
 // Advance the live engine from its current frame to targetFrame (pads from
@@ -1388,7 +1402,7 @@ async function replayPositionForPlay() {
     return;
   }
   const pack = await l2ensurePack();
-  await l2host.spawn(pack, "build/game.wasm");
+  await l2host.spawn(pack, wasmURL());
 }
 async function replayLoadParsed(m) {
   replay.busy = true;
@@ -1422,18 +1436,18 @@ async function replayLoadParsed(m) {
   } else if (m.version === 2 && m.start > 0) {
     shellLog("replay self-contained prefix, advancing to take@" + m.start);
     const pack = await l2ensurePack();
-    await l2host.spawn(pack, "build/game.wasm");
+    await l2host.spawn(pack, wasmURL());
     await replayAdvanceTo(m.start, takeHash);
   } else if (m.version === 2) {
     if (replay.anchor.kind === "save") shellLog("replay save anchor is not the take anchor - using self-contained prefix instead");
     const pack = await l2ensurePack();
-    await l2host.spawn(pack, "build/game.wasm");
+    await l2host.spawn(pack, wasmURL());
     await replayAdvanceTo(m.start, takeHash);
   } else {
     if (replay.anchor.kind === "save") {
       shellLog("v1 replay: no anchor hash, starting from save (unverifiable)");
       replayProgress.last = -1; await l2host.load(replay.anchor.slot, replayProgress);
-    } else { const pack = await l2ensurePack(); await l2host.spawn(pack, "build/game.wasm"); }
+    } else { const pack = await l2ensurePack(); await l2host.spawn(pack, wasmURL()); }
   }
   replay.mode = "loaded";
   if (!shellRunning) { shellRunning = true; if (!shellRaf) shellLoop(); }
@@ -1583,7 +1597,7 @@ async function replayToggleRecord() {
     } else {
       shellLog("record: rebooting to boot so the take stays synced");
       var rpack = await l2ensurePack();
-      await l2host.spawn(rpack, "build/game.wasm");
+      await l2host.spawn(rpack, wasmURL());
     }
     try { clearTrapBanner(); } catch (e) {}
     window.__bmStaticHint = false; window.__bmStaticN = 0;
@@ -2106,7 +2120,7 @@ async function selfTestReplay() {
     anchorSave = null;
     replay.movie = null; replay.mode = "idle";
     const pack = await l2ensurePackForTest();
-    await l2host.spawn(pack, "build/game.wasm");
+    await l2host.spawn(pack, wasmURL());
     const script = (f) => (f >= 40 && f < 45) ? 8 : ((f % 120 < 5) ? 65 : 0);
     let f = 0;
     while (f < 300) { const q = script(f); let j = f + 1; while (j < 300 && script(j) === q) j++; await l2host.go(j - f, q); f = j; }
@@ -2169,7 +2183,7 @@ async function selfTestMovie() {
   document.title = "BM-MOVIE-RUNNING";
   try {
     const pack = await l2ensurePackForTest();
-    await l2host.spawn(pack, "build/game.wasm");
+    await l2host.spawn(pack, wasmURL());
     for (let f = 1; f < 2700; f++) await l2host.go(1, 0);
     await l2host.go(5, 8);
     for (let f = 2705; f < 3000; f++) await l2host.go(1, 129);

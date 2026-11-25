@@ -7,7 +7,7 @@
 // store (per-pack namespace). No doorway matching here (the retired P4
 // shell detector module is kept on disk for cross-check only). Slot map:
 // shell 1..8 <-> engine 0..7. Wasm engine only.
-import { saveEntrance, loadEntrance } from '../pack/store.js';
+import { saveEntrance, loadEntrance, saveVisits, loadVisits } from '../pack/store.js';
 const LS_KEY = 'bm-enhance-v1';
 const MASTER_KEY = 'bm-enhance-master-v1';
 const SAVE_MAGIC = 0x424D5356;
@@ -62,6 +62,7 @@ export function buildEnhancePanel(env) {
     enabled: loadFlag(), master: loadMaster(),
     pushedMaster: -1, pushedSaving: -1, enableInp: null,
     listEl: null, packKey: null, refreshing: false,
+    visitCache: null, visitCur: -2, visitTimer: 240, visitDirty: false, wasPregame: null,
   };
   const det = document.createElement('details');
   det.id = 'enhanceCtn';
@@ -166,6 +167,59 @@ export function buildEnhancePanel(env) {
     if (rc !== 0) { log('enhance: slot import rejected (' + rc + ')'); return; }
     log('enhance: imported browser slot ' + n + ' to memory (Area ' + d.area + ' ' + d.x + ',' + d.y + ')');
     refreshList().catch(() => {});
+  }
+  async function unionVisits() {
+    const ex = exOf();
+    if (!ex || !ex.bm_visit_ptr || !ex.bm_visit_set || !ex.bm_ram_rd) return;
+    try {
+      const mem = new Uint8Array(ex.memory.buffer);
+      const vp = ex.bm_visit_ptr();
+      const eng = Array.from(mem.slice(vp, vp + 128));
+      const tag = tagOf();
+      let rec = null;
+      try { rec = await loadVisits(tag.pack); } catch (e) { rec = null; }
+      const idb = (rec && rec.v === 1 && rec.bytes && rec.bytes.length === 128) ? rec.bytes : new Array(128).fill(0);
+      let engDiff = false, idbDiff = false;
+      for (let i = 0; i < 128; i++) {
+        const m = (eng[i] | (idb[i] & 255)) & 255;
+        if (m !== eng[i]) engDiff = true;
+        if (m !== (idb[i] & 255)) idbDiff = true;
+        eng[i] = m;
+      }
+      if (engDiff) {
+        for (let lv = 1; lv <= 16; lv++) for (let sc = 0; sc < 64; sc++) {
+          if ((eng[(lv - 1) * 8 + (sc >> 3)] >> (sc & 7)) & 1) {
+            try { ex.bm_visit_set(lv, sc % 8, (sc / 8) | 0, 1); } catch (e) {}
+          }
+        }
+      }
+      if (idbDiff || !rec) {
+        await saveVisits(tag.pack, { v: 1, kind: "visits", pack: tag.pack, packCrc: tag.packCrc, savedAt: new Date().toISOString(), bytes: eng });
+      }
+      st.visitCache = eng;
+    } catch (e) {}
+  }
+  function ensureVisits() {
+    const ex = exOf();
+    if (!ex || !ex.bm_visit_reset || !ex.bm_visit_set) return Promise.resolve();
+    return (async () => {
+      try {
+        const tag = tagOf();
+        let rec = null;
+        try { rec = await loadVisits(tag.pack); } catch (e) { rec = null; }
+        if (rec && rec.v === 1 && rec.bytes && rec.bytes.length === 128) {
+          try { ex.bm_visit_reset(); } catch (e) {}
+          for (let lv = 1; lv <= 16; lv++) for (let sc = 0; sc < 64; sc++) {
+            if ((rec.bytes[(lv - 1) * 8 + (sc >> 3)] >> (sc & 7)) & 1) {
+              try { ex.bm_visit_set(lv, sc % 8, (sc / 8) | 0, 1); } catch (e) {}
+            }
+          }
+          st.visitCache = rec.bytes.slice();
+        } else {
+          await unionVisits();
+        }
+      } catch (e) {}
+    })();
   }
   async function doLoad(n) {
     const ex = exOf();

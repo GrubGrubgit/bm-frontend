@@ -123,3 +123,28 @@ export async function loadEntrance(n, packId) {
   return d || null;
 }
 
+
+// Exploration visits (E8-M2): per-pack 128B visited-screens record.
+// Shape: {v:1, kind:'visits', pack, packCrc, savedAt, bytes:[128]}.
+// The engine holds a live monotonic cache; this record is the truth the
+// shell union-merges (bitwise OR, order-independent) on pack switches,
+// pregame edges and every 240 dirty frames.
+export function visitKeyFor(packId) {
+  const base = 'visits';
+  if (typeof packId !== 'string' || !packId.length || packId === 'unknown') return base;
+  if (!/^[A-Za-z0-9-]+$/.test(packId)) return base;
+  return base + '::' + packId;
+}
+export async function saveVisits(packId, data) {
+  const key = visitKeyFor(packId);
+  const db = await openDb();
+  await tx(db, STORES.saves, 'readwrite', s => s.put(data, key));
+  db.close();
+}
+export async function loadVisits(packId) {
+  const key = visitKeyFor(packId);
+  const db = await openDb();
+  const d = await tx(db, STORES.saves, 'readonly', s => s.get(key));
+  db.close();
+  return d || null;
+}

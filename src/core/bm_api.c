@@ -600,6 +600,44 @@ static void pmenu_restore_render(void) {
 // cursor. Modal swallows all other input. Interlocks: E3 gate requires
 // ev5_phase==0 and vice versa.
 #define EV5_NEED 6
+// ---- E8-M2 exploration tracking (visited screens per game level) ----
+// Monotonic live cache; shell IDB is the per-pack truth (union-merged).
+// Screens are 8x8 per level max (screensX=8 always); bit (sy*8+sx).
+static uint8_t visit_bits[16][8];
+static const uint8_t visit_rows[16] = { 32, 32, 32, 32, 32, 32, 32, 32, 25, 32, 32, 32, 29, 32, 32, 32 };
+static void visit_mark(void) {
+  int area = ram[0x14] & 15;
+  int lv = area < 8 ? area + 9 : area - 7;
+  int sx = (scx + 128) >> 8; if (sx < 0) sx = 0; if (sx > 7) sx = 7;
+  int sy = (scy + 120) >> 8; if (sy < 0) sy = 0;
+  int maxsy = (visit_rows[lv - 1] + 3) >> 2;
+  if (sy >= maxsy) sy = maxsy - 1;
+  visit_bits[lv - 1][((sy * 8 + sx) >> 3)] |= (uint8_t)(1 << ((sy * 8 + sx) & 7));
+}
+int bm_visit_ptr(void) { return (int)(intptr_t)visit_bits; }
+int bm_visit_get(int lv, int sx, int sy) {
+  if (lv < 1 || lv > 16 || sx < 0 || sx > 7 || sy < 0 || sy > 7) return -1;
+  return (visit_bits[lv - 1][((sy * 8 + sx) >> 3)] >> ((sy * 8 + sx) & 7)) & 1;
+}
+void bm_visit_set(int lv, int sx, int sy, int v) {
+  uint8_t m;
+  if (lv < 1 || lv > 16 || sx < 0 || sx > 7 || sy < 0 || sy > 7) return;
+  m = (uint8_t)(1 << ((sy * 8 + sx) & 7));
+  if (v) visit_bits[lv - 1][((sy * 8 + sx) >> 3)] |= m;
+  else visit_bits[lv - 1][((sy * 8 + sx) >> 3)] &= (uint8_t)~m;
+}
+int bm_visit_cur(void) {
+  int area, lv, sx, sy, maxsy;
+  if (ram[0xDD] == 0 && ram[0x37E] == 0) return -1;
+  area = ram[0x14] & 15;
+  lv = area < 8 ? area + 9 : area - 7;
+  sx = (scx + 128) >> 8; if (sx < 0) sx = 0; if (sx > 7) sx = 7;
+  sy = (scy + 120) >> 8; if (sy < 0) sy = 0;
+  maxsy = (visit_rows[lv - 1] + 3) >> 2;
+  if (sy >= maxsy) sy = maxsy - 1;
+  return (lv - 1) * 64 + sy * 8 + sx;
+}
+void bm_visit_reset(void) { memset(visit_bits, 0, sizeof visit_bits); }
 static int ev5_phase = 0;
 static int ev5_run = 0;
 static int ev5_lastkey = -1;
@@ -715,6 +753,7 @@ static void engine_reset_to_title(void) {
   frame_no = 0; game_pad = 0;
   pending_warp = -1; pending_warp_raw = -1; oracle_align_done = 0;
   bm_trap_seen = 0; bm_trap_val = 0; bm_trap_name[0] = 0; apu_head = 0; apu_tail = 0;
+  memset(visit_bits, 0, sizeof visit_bits);
   pad_sample_fn = pad_fn;
   nmi_fire_fn = nmi_frame;
   b7_entry_F23B();
@@ -869,6 +908,7 @@ void menu_tick(void) {
     ev5_phase = 0; ev5_run = 0; ev5_lastkey = -1; ev5_cursor = 0; ev5_cool = 0; ev5_pending_save = -1; ev5_pending_down = 0; ev5_down_inj = 0; ev5_snap_taken = 0; ev5_saw_one = 0; ev5_be0run = 0; ev5_curside = -1; ev5_curside = -1;
     return;
   }
+  if (gameplay) visit_mark();
   if (pmenu_swallow_cd > 0) pmenu_swallow_cd--;
   if (pmenu_inject > 0) pmenu_inject--;
   if (ev5_down_inj > 0) ev5_down_inj--;  // frame-counted: one NMI tick per poll-visible frame, exactly like a stock 8f tap

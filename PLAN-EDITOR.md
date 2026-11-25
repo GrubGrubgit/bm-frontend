@@ -433,6 +433,12 @@ Acceptance: per RE doc + in-game verification (warp to edited room, observe).
   then bind it: CONTINUE (resume), LOAD (slot menu, saving-enabled only),
   SETTINGS (E4 store), QUIT TO TITLE (engine reset into the E2 main menu --
   the in-engine equivalent of pressing reset).
+  2026-11-24 E3 findings (engine done, suite v3 tools/verify-pause-e3.mjs running on -O0):
+  stock Start-pause video BLINKS (2-cycle, b7 latches $04), stock Select-pause video FREEZES (b7 untouched); resume is same-button-only.
+  THAW CONSTRAINT (pre-existing, not E3): thaw of running-gameplay into a non-running destination wedges (idle message screen / freeze); destination must be booted+running (P4 only thawed title/transition/same-run).
+  Hence LOAD uses resume-then-thaw (pmenu_pending_load: confirm closes menu + injects stock Start, sram_load fires when presnap $BE==1); suite is single-run throughout (no cross-boot thaw).
+- 2026-11-24 E3 in-game pause menu CLOSED (tools/verify-pause-e3.mjs 49/49 green, full battery re-greened on ship build): engine-side menu in src/core/bm_api.c (E3 section). Opens on Select edge while Start-paused when enhanced (stock untouched when off). CONTINUE (stock resume via injected Start edge), LOAD (slot menu, saving-enabled only, resume-then-thaw via pmenu_pending_load), SETTINGS (E4 store), QUIT TO TITLE (in-engine reset into E2 main menu). Race-free pad_fn open (scan-241, returns 0 synchronously) + race-free CONTINUE confirm (same-frame Start so post-menu ram/full-state reconverges bit-identical with stock resume, probe30/31); post-dismiss echo swallowed by pmenu_swallow_cd=12; inject frame-counted in menu_tick. Stock models proven headless: Start-pause blinks + same-button resume, Select-pause freezes + same-button resume. Ship profile 2026-11-24 eve: -O0 + wasm-opt -O3 (1.32MB; bit-identical behavior, full battery green on the shipped bytes). clang -O1/-O2 builds were OOM/reap-killed all evening (device 387MB free + 3GB/4GB swap used by a sibling session; memguard STOPs + relay reaps session trees), so the C-level ship (-O2/-O3) is deferred to a quiet window (re-ship = rebuild + battery + mirror, no engine change).
+NEXT: E5 (entrance-save engine port).
 - E5 Entrance-save engine port (needs E0+E1+E6; SUPERSEDES the P4 shell
   implementation). Per the architecture rule: detector (live RAM + bank7
   door table, no presnap), capture, prompt state machine, pause-while-prompt,

@@ -10,6 +10,6 @@ HEAD=$(git -C ../recomp rev-parse --short HEAD)
 if [ "$PIN" != "$HEAD" ]; then echo "ENGINE_PIN $PIN != recomp HEAD $HEAD"; exit 1; fi
 python3 tools/patch_vendor.py
 python3 tools/patch_tailcalls.py
-clang --target=wasm32-unknown-unknown -O3 -mtail-call -ffreestanding -nostdlib -c -Itools/wasm-shim -Ibuild/vendor src/core/bm_api.c -o build/game.o
+clang --target=wasm32-unknown-unknown ${O_LEVEL:--O3} -mtail-call -ffreestanding -nostdlib -c -Itools/wasm-shim -Ibuild/vendor src/core/bm_api.c -o build/game.o
 wasm-ld --no-entry --export-all --no-gc-sections --build-id=none --allow-undefined build/game.o -o build/game.wasm
 ls -la build/game.wasm

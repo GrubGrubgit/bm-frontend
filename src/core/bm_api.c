@@ -514,6 +514,124 @@ int bm_sram_blob_len(int slot) {
   if (slot < 0 || slot >= SRAM_SLOTS || !sram_occ[slot]) return 0;
   return (int)sram_len[slot];
 }
+// ---- E3 in-game pause menu (engine-side, no shell dependence) ----
+// Opens on a Select edge while the game is Start-paused (enhanced only).
+// RE (headless probes, proven in tools/verify-pause-e3.mjs):
+// - Start toggles a Start-pause screen; Select toggles a Select-pause screen.
+//   Resume is same-button-only (Start resumes Start-pause, Select resumes
+//   Select-pause); cross buttons switch screens / transient-only, never resume.
+// - $BE sampled main-slice (presnap) is 1 while gameplay logic runs, 0 while
+//   idle (title/intro/pause). Live ram reads 0 at NMI time (the NMI prologue
+//   clears it; the main slice sets it iff running), so the gate MUST use
+//   presnap_ram[0xBE], never live ram.
+// - $B7 bit2 ($04) latches on any Start press (cleared at gameplay init, never
+//   on resume); door transit holds $B7==1. The gate requires ($B7&~4)==0.
+// - Pause-entry cause is attributed headlessly, not by $B7: menu_tick tracks
+//   the last Start/Select edges; a presnap-$BE 1->0 flip takes the nearest
+//   edge within 100 ticks (tie/no-edge -> SELECT/unknown -> gate closed).
+//   Immune to the stale $B7 latch (pause/resume/other-pause flows).
+// - Pause settles ~40f (video freeze), resume ~10-20f. All six other buttons
+//   are alive while paused, so Select hijacks a live button when enhanced
+//   (E2-analog tradeoff); stock is untouched when enhanced is off.
+// CONTINUE resumes via the STOCK path: a Start edge is injected (pad_fn ORs
+// bit3 for 8 frames (exactly one stock tap: same polls, same duration) so the game's
+// own toggle code runs the resume. LOAD stages an sram thaw. QUIT is the
+// in-engine equivalent of pressing reset (engine_reset_to_title preserves
+// enhanced/saving/settings/SRAM). Render state is snapshotted on open and
+// restored on CONTINUE/toggle-close so closing untouched reconverges EXACTLY
+// with never-pressed (LOAD/QUIT skip restore: thaw/reset replace it all).
+static void menu_text(int row, int col, const char *s);
+static void menu_num2(int row, int col, int v);
+static void menu_boot_reset(void);
+static int pmenu_phase = 0;    // 0=off 1=main 2=load 3=settings
+static int pmenu_cursor = 0;
+static int pmenu_cooldown = 0; // set on LOAD/QUIT dismiss; clears when unpaused
+static int pmenu_swallow = 0;  // pad filter: game sees 0 while menu is modal
+static int pmenu_prevpad = 0;
+static int pmenu_inject = 0;   // pending injected-Start pad_fn FRAMES (resume mimicry: one stock tap)
+static int pmenu_pending_load = -1; // LOAD slot awaiting resume-then-thaw (pause-dest thaw wedges, so resume first)
+static int pmenu_swallow_cd = 0;  // post-dismiss echo swallow (covers the dismissing tap tail so the game never sees it)
+static int pmenu_clock = 0;    // menu_tick counter for edge attribution
+static int pmenu_last_start = -1000000;  // last live-pad Start edge tick
+static int pmenu_last_select = -1000000; // last live-pad Select edge tick
+static int pmenu_cause = 0;    // pause-entry cause: 0 none 1 start 2 select/unknown
+static int pmenu_prev_be = 0;  // presnap $BE last tick
+static uint8_t pmenu_vram[1024], pmenu_pal[32], pmenu_oam[256];
+static int pmenu_scx, pmenu_scy, pmenu_r2000, pmenu_r2001, pmenu_chr0, pmenu_chr1, pmenu_mmc;
+static int pmenu_gameplay(void) { return !(ram[0xDD] == 0 && ram[0x37E] == 0); }
+static void pmenu_snap_render(void) {
+  int i;
+  for (i = 0; i < 1024; i++) pmenu_vram[i] = vram[i];
+  for (i = 0; i < 32; i++) pmenu_pal[i] = pal[i];
+  for (i = 0; i < 256; i++) pmenu_oam[i] = oam[i];
+  pmenu_scx = scx; pmenu_scy = scy; pmenu_r2000 = reg2000; pmenu_r2001 = reg2001;
+  pmenu_chr0 = chr0; pmenu_chr1 = chr1; pmenu_mmc = mmc_ctrl;
+}
+static void pmenu_restore_render(void) {
+  int i;
+  for (i = 0; i < 1024; i++) vram[i] = pmenu_vram[i];
+  for (i = 0; i < 32; i++) pal[i] = pmenu_pal[i];
+  for (i = 0; i < 256; i++) oam[i] = pmenu_oam[i];
+  scx = (uint8_t)pmenu_scx; scy = (uint8_t)pmenu_scy;
+  reg2000 = (uint8_t)pmenu_r2000; reg2001 = (uint8_t)pmenu_r2001;
+  chr0 = (uint8_t)pmenu_chr0; chr1 = (uint8_t)pmenu_chr1; mmc_ctrl = (uint8_t)pmenu_mmc;
+}
+// main-list actions: 0=CONTINUE 1=LOAD 2=SETTINGS 3=QUIT
+static int pmenu_main_count(void) {
+  int n = 3;
+  if (saving_on) n++;
+  return n;
+}
+static int pmenu_main_action(int idx) {
+  if (idx == 0) return 0;
+  if (saving_on) {
+    if (idx == 1) return 1;
+    if (idx == 2) return 2;
+    return 3;
+  }
+  if (idx == 1) return 2;
+  return 3;
+}
+static const char *pmenu_main_label(int a) {
+  if (a == 0) return "CONTINUE";
+  if (a == 1) return "LOAD";
+  if (a == 2) return "SETTINGS";
+  return "QUIT";
+}
+static void pmenu_draw_main(void) {
+  int idx, row;
+  int n = pmenu_main_count();
+  menu_text(4, 13, "PAUSED");
+  row = 8;
+  for (idx = 0; idx < n; idx++) {
+    vram[row * 32 + 9] = (uint8_t)(idx == pmenu_cursor ? 1 : 0);
+    menu_text(row, 11, pmenu_main_label(pmenu_main_action(idx)));
+    row += 2;
+  }
+}
+// In-engine reset (QUIT TO TITLE): the bm_boot body, factored so the pause
+// menu can reset without the host. Preserves engine config (enhanced_mode,
+// saving_on, E4 settings, SRAM slots); establishes the fresh-process inits
+// bm_boot relies on (pending_warp/raw, oracle_align_done) explicitly.
+static void engine_reset_to_title(void) {
+  menu_boot_reset();
+  memset(ram, 0x00, sizeof ram);
+  memset(vram, 0, sizeof vram);
+  memset(pal, 0, sizeof pal);
+  memset(oam, 0, sizeof oam);
+  A = 0; X = 0; Y = 0; S = 0xFD; P = 0x24;
+  pad_bits = 0; pad_pos1 = 0; pad_pos2 = 0; strobe = 0; pad_latch1 = 0; pad_latch2 = 0;
+  cycles = 9; scx = 0; scy = 0; sc_latch = 0; ppu_addr = 0; ppu_latch = 0;
+  ppu_buf = 0; oam_addr = 0; reg2000 = 0; reg2001 = 0; ppu_openbus = 0; chr0 = 0; chr1 = 0;
+  mmc_shift = 0; mmc_count = 0; mmc_ctrl = 0x0C; swbank = prg[0];
+  nmi_next_edge = 27517; nmi_armed = 1; in_nmi = 0;
+  frame_no = 0; game_pad = 0;
+  pending_warp = -1; pending_warp_raw = -1; oracle_align_done = 0;
+  bm_trap_seen = 0; bm_trap_val = 0; bm_trap_name[0] = 0; apu_head = 0; apu_tail = 0;
+  pad_sample_fn = pad_fn;
+  nmi_fire_fn = nmi_frame;
+  b7_entry_F23B();
+}
 // ---- E2 main menu (engine-side, no shell dependence) ----
 // Opens on title/intro Start edge while enhanced_mode is on. Full-NT0
 // takeover drawn post-game-logic (menu_draw, from nmi_frame) so the menu
@@ -567,11 +685,11 @@ static const char *menu_main_label(int a) {
   if (a == 2) return "LOAD";
   return "SETTINGS";
 }
-static void menu_adjust(int dir) {
-  if (menu_cursor == 0) bm_setting_set(0, setting_volume + dir);
-  else if (menu_cursor == 1) bm_setting_set(1, setting_mute ? 0 : 1);
-  else if (menu_cursor == 2) { int v = setting_scale + dir; if (v < 0) v = 3; if (v > 3) v = 0; bm_setting_set(2, v); }
-  else if (menu_cursor == 3) bm_setting_set(3, setting_filter ? 0 : 1);
+static void menu_adjust_at(int cur, int dir) {
+  if (cur == 0) bm_setting_set(0, setting_volume + dir);
+  else if (cur == 1) bm_setting_set(1, setting_mute ? 0 : 1);
+  else if (cur == 2) { int v = setting_scale + dir; if (v < 0) v = 3; if (v > 3) v = 0; bm_setting_set(2, v); }
+  else if (cur == 3) bm_setting_set(3, setting_filter ? 0 : 1);
 }
 // F1: race-free open inside pad_fn. The game polls the pad in the main slice
 // BEFORE NMI entry, while menu_tick runs at NMI entry AFTER the host sets the
@@ -581,36 +699,148 @@ static void menu_adjust(int dir) {
 // returns 0 synchronously: the game never sees the opening press. The edge is
 // consumed (menu_prevpad = game_pad) so the held Start does not instantly
 // confirm START on the next tick. In-menu navigation stays in menu_tick.
+// E3 open rides the same race-free pad_fn path as E2: the first sighting of
+// the Select edge while Start-paused opens the menu and returns 0 synchronously,
+// so the game never sees the opening press (the dismiss-press tail is likewise
+// swallowed by pmenu_swallow_cd, so menu chrome input never reaches the game).
 static uint8_t pad_fn(uint64_t f) {
   (void)f;
-  if (!enhanced_mode) { menu_prevpad = game_pad; return game_pad; }
+  if (!enhanced_mode) { menu_prevpad = game_pad; pmenu_prevpad = game_pad; return game_pad; }
+  if (pmenu_inject > 0) {
+    uint8_t r;
+    r = (uint8_t)(game_pad | 8);
+    menu_prevpad = r;
+    pmenu_prevpad = r;
+    return r;
+  }
   if (!menu_phase && !menu_cooldown && ram[0xDD] == 0 && ram[0x37E] == 0) {
     if ((game_pad & 8) && !(menu_prevpad & 8)) {
       menu_phase = 1; menu_cursor = 0; menu_swallow = 1;
       menu_prevpad = game_pad;
+      pmenu_prevpad = game_pad;
       return 0;
     }
   }
-  if (menu_swallow) return 0;
+  if (!menu_phase && !pmenu_phase && !pmenu_cooldown && pmenu_gameplay() &&
+      presnap_ram[0xBE] == 0 && pmenu_cause == 1 && ((presnap_ram[0xB7] & ~4) == 0)) {
+    if ((game_pad & 4) && !(pmenu_prevpad & 4)) {
+      pmenu_snap_render();
+      pmenu_phase = 1; pmenu_cursor = 0; pmenu_swallow = 1;
+      menu_prevpad = game_pad;
+      pmenu_prevpad = game_pad;
+      return 0;
+    }
+  }
+  // E3 race-free CONTINUE confirm.
+  if (pmenu_phase == 1 && pmenu_cursor == 0) {
+    int ce = (game_pad ^ pmenu_prevpad) & game_pad;
+    if (ce & (8 | 1)) {
+      pmenu_restore_render();
+      uint8_t cr = (uint8_t)(game_pad | 8);
+      pmenu_phase = 0; pmenu_cursor = 0; pmenu_swallow = 0;
+      pmenu_cooldown = 1; pmenu_swallow_cd = 12; pmenu_inject = 8;
+      menu_prevpad = cr; pmenu_prevpad = cr;
+      return cr;
+    }
+  }
+  if (menu_swallow || pmenu_swallow || pmenu_swallow_cd > 0) return 0;
   return game_pad;
 }
 void menu_tick(void) {
   int gp = game_pad;
   int e = (gp ^ menu_prevpad) & gp;
   int pregame = (ram[0xDD] == 0 && ram[0x37E] == 0);
+  int gameplay = !pregame;
+  int be = presnap_ram[0xBE];
   if (!enhanced_mode) {
     menu_phase = 0; menu_cursor = 0; menu_cooldown = 0; menu_swallow = 0;
-    menu_prevpad = gp; return;
+    menu_prevpad = gp;
+    pmenu_phase = 0; pmenu_cursor = 0; pmenu_cooldown = 0; pmenu_swallow = 0;
+    pmenu_prevpad = gp; pmenu_inject = 0; pmenu_cause = 0; pmenu_prev_be = be; pmenu_pending_load = -1; pmenu_swallow_cd = 0;
+    return;
+  }
+  if (pmenu_swallow_cd > 0) pmenu_swallow_cd--;
+  if (pmenu_inject > 0) pmenu_inject--;  // frame-counted: one NMI tick per poll-visible frame, exactly like a stock 8f tap
+  pmenu_clock++;
+  if (e & 8) pmenu_last_start = pmenu_clock;
+  if (e & 4) pmenu_last_select = pmenu_clock;
+  if (pmenu_prev_be == 1 && be == 0) {
+    int ds = pmenu_clock - pmenu_last_start;
+    int dl = pmenu_clock - pmenu_last_select;
+    if (ds <= 100 && ds <= dl) pmenu_cause = 1;
+    else pmenu_cause = 2;
+  } else if (be == 1) {
+    pmenu_cause = 0;
+  }
+  pmenu_prev_be = be;
+  if (pmenu_pending_load >= 0 && be == 1 && gameplay) {
+    int psl = pmenu_pending_load;
+    pmenu_pending_load = -1;
+    if (psl >= 0 && psl < 8 && sram_occ[psl]) bm_sram_load(psl, sram_crc[psl]);
+    pmenu_cooldown = 1;
   }
   if (menu_phase && !pregame) {
     menu_phase = 0; menu_cursor = 0; menu_cooldown = 1; menu_swallow = 0;
-    menu_prevpad = gp; return;
+    menu_prevpad = gp; pmenu_prevpad = gp; return;
   }
   if (!menu_phase) {
     menu_swallow = 0;
     if (!menu_cooldown && pregame && (e & 8)) { menu_phase = 1; menu_cursor = 0; menu_swallow = 1; }
     else if (!pregame) menu_cooldown = 0;
-    menu_prevpad = gp; return;
+    if (!pmenu_phase) {
+      pmenu_swallow = 0;
+      if (!pmenu_cooldown && gameplay && be == 0 && pmenu_cause == 1 &&
+          ((presnap_ram[0xB7] & ~4) == 0) && (e & 4)) {
+        pmenu_snap_render();
+        pmenu_phase = 1; pmenu_cursor = 0; pmenu_swallow = 1;
+      } else if (be == 1) {
+        pmenu_cooldown = 0;
+      }
+    } else if (!gameplay || be == 1) {
+      pmenu_phase = 0; pmenu_cursor = 0; pmenu_swallow = 0;
+    } else {
+      pmenu_swallow = 1;
+      if (pmenu_phase == 1) {
+        int n = pmenu_main_count();
+        if (pmenu_cursor >= n) pmenu_cursor = n - 1;
+        if (e & 32) pmenu_cursor = (pmenu_cursor + 1) % n;
+        if (e & 16) pmenu_cursor = (pmenu_cursor + n - 1) % n;
+        if (e & (2 | 4)) { pmenu_restore_render(); pmenu_phase = 0; pmenu_cursor = 0; pmenu_swallow = 0; pmenu_swallow_cd = 12; }
+        else if (e & (8 | 1)) {
+          int a = pmenu_main_action(pmenu_cursor);
+          if (a == 0) { pmenu_restore_render(); pmenu_inject = 8; pmenu_phase = 0; pmenu_cursor = 0; pmenu_swallow = 0; pmenu_swallow_cd = 12; }
+          else if (a == 1) { pmenu_phase = 2; pmenu_cursor = 0; }
+          else if (a == 2) { pmenu_phase = 3; pmenu_cursor = 0; }
+          else { engine_reset_to_title(); }
+        }
+      } else if (pmenu_phase == 2) {
+        if (e & 32) pmenu_cursor = (pmenu_cursor + 1) % 9;
+        if (e & 16) pmenu_cursor = (pmenu_cursor + 8) % 9;
+        if (e & 2) { pmenu_phase = 1; pmenu_cursor = 0; }
+        else if (e & (8 | 1)) {
+          if (pmenu_cursor == 8) { pmenu_phase = 1; pmenu_cursor = 0; }
+          else if (pmenu_cursor >= 0 && pmenu_cursor < 8 && sram_occ[pmenu_cursor]) {
+            pmenu_pending_load = pmenu_cursor;
+            pmenu_phase = 0; pmenu_cursor = 0; pmenu_swallow = 0; pmenu_cooldown = 1;
+            if (be == 1 && gameplay) {
+              int psl2 = pmenu_pending_load; pmenu_pending_load = -1;
+              bm_sram_load(psl2, sram_crc[psl2]);
+            } else {
+              pmenu_inject = 8;
+              pmenu_swallow_cd = 12;
+            }
+          }
+        }
+      } else if (pmenu_phase == 3) {
+        if (e & 32) pmenu_cursor = (pmenu_cursor + 1) % 5;
+        if (e & 16) pmenu_cursor = (pmenu_cursor + 4) % 5;
+        if (e & 64) menu_adjust_at(pmenu_cursor, -1);
+        if (e & 128) menu_adjust_at(pmenu_cursor, 1);
+        if (e & 2) { pmenu_phase = 1; pmenu_cursor = 0; }
+        else if (e & (8 | 1)) { if (pmenu_cursor == 4) { pmenu_phase = 1; pmenu_cursor = 0; } }
+      }
+    }
+    menu_prevpad = gp; pmenu_prevpad = gp; return;
   }
   menu_swallow = 1;
   if (menu_phase == 1) {
@@ -639,12 +869,12 @@ void menu_tick(void) {
   } else if (menu_phase == 3) {
     if (e & 32) menu_cursor = (menu_cursor + 1) % 5;
     if (e & 16) menu_cursor = (menu_cursor + 4) % 5;
-    if (e & 64) menu_adjust(-1);
-    if (e & 128) menu_adjust(1);
+    if (e & 64) menu_adjust_at(menu_cursor, -1);
+    if (e & 128) menu_adjust_at(menu_cursor, 1);
     if (e & 2) { menu_phase = 1; menu_cursor = 0; }
     else if (e & (8 | 1)) { if (menu_cursor == 4) { menu_phase = 1; menu_cursor = 0; } }
   }
-  menu_prevpad = gp;
+  menu_prevpad = gp; pmenu_prevpad = gp;
 }
 static void menu_draw_main(void) {
   int idx, row;
@@ -657,40 +887,40 @@ static void menu_draw_main(void) {
     row += 2;
   }
 }
-static void menu_draw_load(void) {
+static void menu_draw_load_at(int cur) {
   int s, row;
   menu_text(4, 14, "LOAD");
   row = 7;
   for (s = 0; s < 8; s++) {
-    vram[row * 32 + 8] = (uint8_t)(s == menu_cursor ? 1 : 0);
+    vram[row * 32 + 8] = (uint8_t)(s == cur ? 1 : 0);
     menu_text(row, 10, "SLOT ");
     menu_num2(row, 15, s + 1);
     if (sram_occ[s]) { menu_text(row, 17, "AREA "); menu_num2(row, 22, sram_area[s]); }
     else menu_text(row, 17, "EMPTY");
     row++;
   }
-  vram[16 * 32 + 8] = (uint8_t)(menu_cursor == 8 ? 1 : 0);
+  vram[16 * 32 + 8] = (uint8_t)(cur == 8 ? 1 : 0);
   menu_text(16, 10, "BACK");
 }
-static void menu_draw_settings(void) {
+static void menu_draw_settings_at(int cur) {
   menu_text(4, 12, "SETTINGS");
-  vram[8 * 32 + 8] = (uint8_t)(menu_cursor == 0 ? 1 : 0);
+  vram[8 * 32 + 8] = (uint8_t)(cur == 0 ? 1 : 0);
   menu_text(8, 10, "VOLUME "); menu_num2(8, 17, setting_volume);
-  vram[10 * 32 + 8] = (uint8_t)(menu_cursor == 1 ? 1 : 0);
+  vram[10 * 32 + 8] = (uint8_t)(cur == 1 ? 1 : 0);
   menu_text(10, 10, "MUTE ");
   menu_text(10, 15, setting_mute ? "ON" : "OFF");
-  vram[12 * 32 + 8] = (uint8_t)(menu_cursor == 2 ? 1 : 0);
+  vram[12 * 32 + 8] = (uint8_t)(cur == 2 ? 1 : 0);
   menu_text(12, 10, "SCALE ");
   menu_text(12, 16, setting_scale == 0 ? "INTEGER" : (setting_scale == 1 ? "FIT" : (setting_scale == 2 ? "FILL" : "STRETCH")));
-  vram[14 * 32 + 8] = (uint8_t)(menu_cursor == 3 ? 1 : 0);
+  vram[14 * 32 + 8] = (uint8_t)(cur == 3 ? 1 : 0);
   menu_text(14, 10, "FILTER ");
   menu_text(14, 17, setting_filter ? "BILINEAR" : "NEAREST");
-  vram[16 * 32 + 8] = (uint8_t)(menu_cursor == 4 ? 1 : 0);
+  vram[16 * 32 + 8] = (uint8_t)(cur == 4 ? 1 : 0);
   menu_text(16, 10, "BACK");
 }
 void menu_draw(void) {
   int i;
-  if (!menu_phase) return;
+  if (!menu_phase && !pmenu_phase) return;
   for (i = 0; i < 1024; i++) vram[i] = 0;
   for (i = 0; i < 64; i++) vram[960 + i] = 0;
   pal[0] = 0x0F; pal[1] = 0x30; pal[2] = 0x30; pal[3] = 0x30;
@@ -700,8 +930,11 @@ void menu_draw(void) {
   for (i = 4; i <= 27; i++) { vram[2 * 32 + i] = 1; vram[27 * 32 + i] = 1; }
   for (i = 3; i <= 26; i++) { vram[i * 32 + 4] = 1; vram[i * 32 + 27] = 1; }
   if (menu_phase == 1) menu_draw_main();
-  else if (menu_phase == 2) menu_draw_load();
-  else menu_draw_settings();
+  else if (menu_phase == 2) menu_draw_load_at(menu_cursor);
+  else if (menu_phase == 3) menu_draw_settings_at(menu_cursor);
+  else if (pmenu_phase == 1) pmenu_draw_main();
+  else if (pmenu_phase == 2) menu_draw_load_at(pmenu_cursor);
+  else menu_draw_settings_at(pmenu_cursor);
 }
 
 
@@ -709,27 +942,17 @@ void menu_draw(void) {
 // Kept in shipped code: 2 lines, no secrets, lets future suites assert menu state.
 int bm_menu_dbg(void) { return (menu_phase & 255) | ((menu_cursor & 255) << 8) | ((menu_prevpad & 255) << 16) | ((menu_cooldown & 255) << 24); }
 int bm_menu_dbg2(void) { return ((int)game_pad & 255) | ((menu_swallow & 255) << 8); }
+int bm_pmenu_dbg(void) { return (pmenu_phase & 255) | ((pmenu_cursor & 255) << 8) | ((pmenu_prevpad & 255) << 16) | ((pmenu_cooldown & 255) << 24); }
+int bm_pmenu_dbg2(void) { return ((int)game_pad & 255) | ((pmenu_swallow & 255) << 8) | ((pmenu_cause & 255) << 16) | ((pmenu_inject & 255) << 24); }
 static void menu_boot_reset(void) {
   menu_phase = 0; menu_cursor = 0;
   menu_cooldown = 0; menu_swallow = 0; menu_prevpad = 0;
+  pmenu_phase = 0; pmenu_cursor = 0;
+  pmenu_cooldown = 0; pmenu_swallow = 0; pmenu_prevpad = 0;
+  pmenu_inject = 0; pmenu_cause = 0; pmenu_prev_be = 0; pmenu_pending_load = -1; pmenu_swallow_cd = 0;
 }
 void bm_boot(void) {
-  menu_boot_reset();
-  memset(ram, 0x00, sizeof ram); // Mesen parity: power-on RAM reads 0 (probe-proven over 120568f; 0xFF diverges at f=144)
-  memset(vram, 0, sizeof vram);
-  memset(pal, 0, sizeof pal);
-  memset(oam, 0, sizeof oam);
-  A = 0; X = 0; Y = 0; S = 0xFD; P = 0x24;
-  pad_bits = 0; pad_pos1 = 0; pad_pos2 = 0; strobe = 0; pad_latch1 = 0; pad_latch2 = 0;
-  cycles = 9; scx = 0; scy = 0; sc_latch = 0; ppu_addr = 0; ppu_latch = 0;
-  ppu_buf = 0; oam_addr = 0; reg2000 = 0; reg2001 = 0; ppu_openbus = 0; chr0 = 0; chr1 = 0;
-  mmc_shift = 0; mmc_count = 0; mmc_ctrl = 0x0C; swbank = prg[0];
-  nmi_next_edge = 27517; nmi_armed = 1; in_nmi = 0;
-  frame_no = 0; game_pad = 0;
-  bm_trap_seen = 0; bm_trap_val = 0; bm_trap_name[0] = 0; apu_head = 0; apu_tail = 0;
-  pad_sample_fn = pad_fn;
-  nmi_fire_fn = nmi_frame;
-  b7_entry_F23B();
+  engine_reset_to_title();
 }
 // 4160-byte tracer-layout snapshot: ram[2048] + vram[2048] + footer[64]
 // (footer[0:32]=palette, [32]=scx, [33]=scy, [34]=reg2000, [35]=chr0,

@@ -5,6 +5,7 @@
 import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/levels.js";
 import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
+import { SPR_PAL, SPR_CYCLE, spriteBanksFor, isPureSpriteBank } from "../pack/sprites.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
 import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR } from "../pack/enemies.js";
 export { diffRuns };
@@ -319,10 +320,11 @@ function fillChrBankSel() {
   if (!sel) return;
   if (sel.options.length === 32) { sel.value = S.chrBank; return; }
   sel.innerHTML = "";
+  const sprTags = spriteBanksFor(S.level);
   for (let b = 0; b < 32; b++) {
     const o = document.createElement("option");
     o.value = b;
-    o.textContent = "bank " + b + (BANK_USERS[b] ? " (L" + BANK_USERS[b].join(",L") + ")" : "");
+    o.textContent = "bank " + b + (BANK_USERS[b] ? " (L" + BANK_USERS[b].join(",L") + ")" : "") + (sprTags.indexOf(b) >= 0 ? " [spr L" + S.level + "]" : "");
     sel.appendChild(o);
   }
   sel.value = S.chrBank;
@@ -331,11 +333,14 @@ function renderChrTab(E) {
   const info = el("edChrInfo");
   if (info) {
     const n = S.chr[S.chrBank] ? Object.keys(S.chr[S.chrBank]).length : 0;
-    info.textContent = (BANK_USERS[S.chrBank] ? "bg for L" + BANK_USERS[S.chrBank].join(",L") : "no level bg use") +
+    info.textContent = (isPureSpriteBank(S.level, S.chrBank) ? "sprite bank for L" + S.level + " (sprite pal)" : (BANK_USERS[S.chrBank] ? "bg for L" + BANK_USERS[S.chrBank].join(",L") : "no level bg use")) +
       " | editing tile " + S.chrTile + (n ? " (" + n + " tile(s) edited in bank)" : "");
   }
+  const sprView = isPureSpriteBank(E.level, S.chrBank);
+  const sprPal = [0x0F, SPR_PAL[0], SPR_PAL[1], SPR_PAL[2], 0x0F, SPR_PAL[3], SPR_PAL[4], SPR_PAL[5], 0x0F, SPR_PAL[6], SPR_PAL[7], SPR_PAL[8], 0x00, SPR_CYCLE[0], SPR_CYCLE[0], SPR_CYCLE[0]];
+  const pal = sprView ? sprPal : E.pal;
   const sub = S.chrSub & 3;
-  const col = v => NES_PALETTE[E.pal[sub * 4 + (v & 3)] & 63];
+  const col = v => NES_PALETTE[pal[sub * 4 + (v & 3)] & 63];
   // tile grid (16x16 tiles @8px)
   const grid = el("edChrGrid");
   if (grid) {
@@ -385,7 +390,7 @@ function renderChrTab(E) {
       cv.style.cssText = "image-rendering:pixelated;width:48px;height:48px;vertical-align:middle;margin-right:8px";
       const ctx = cv.getContext("2d");
       for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
-        ctx.fillStyle = NES_PALETTE[E.pal[s2 * 4 + px[y * 8 + x]] & 63];
+        ctx.fillStyle = NES_PALETTE[pal[s2 * 4 + px[y * 8 + x]] & 63];
         ctx.fillRect(x, y, 1, 1);
       }
       prev.appendChild(cv);

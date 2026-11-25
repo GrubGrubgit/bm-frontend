@@ -1,13 +1,12 @@
-// src/ui/enhance.js -- Enhancements panel (P4 entrance saves).
-// Built dynamically by app.js L6 wiring (no index.html change), modeled
-// on tweaks.js. Saving is OPTIONAL (default off): with it enabled,
-// standing on a dungeon/area doorway and pressing Up captures an
-// exact-state snapshot and offers to file it in an entrance slot.
-// Down still enters doors exactly as before. No passwords, ever:
-// slots hold full frozen states (engine freeze/thaw proof in
-// tools/verify-pack-p4.mjs). Wasm engine only (Mesen has no exports).
-import { parseDoors, matchDoor } from '../pack/doors.js';
-import { UP_MASK, createDetector, stepDetector, resetDetector } from '../pack/entrance.js';
+// src/ui/enhance.js -- Enhancements panel (E5 engine-side entrance saves).
+// Shell is persistence + toggles only: the Up-at-doorway detector, capture,
+// prompt state machine and pause-while-prompt all live engine-side in
+// src/core/bm_api.c (E5 section). This panel pushes the two gate flags
+// (enhanced + saving), lists the 8 shared E1/E5 core slots from engine
+// exports, and shuttles blobs between core memory and the IDB entrance
+// store (per-pack namespace). No doorway matching here (the retired P4
+// shell detector module is kept on disk for cross-check only). Slot map:
+// shell 1..8 <-> engine 0..7. Wasm engine only.
 import { saveEntrance, loadEntrance } from '../pack/store.js';
 const LS_KEY = 'bm-enhance-v1';
 const MASTER_KEY = 'bm-enhance-master-v1';
@@ -25,6 +24,12 @@ function loadMaster() {
 }
 function storeMaster(v) {
   try { localStorage.setItem(MASTER_KEY, JSON.stringify({ master: !!v })); } catch (e) {}
+}
+function fnv1a32(s) {
+  let h = 2166136261;
+  s = String(s);
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777219); }
+  return h >>> 0;
 }
 function row(parent, cls) {
   const d = document.createElement('div');
@@ -49,20 +54,14 @@ function checkBox(parent, label, value, onSet) {
   parent.appendChild(lab);
   return inp;
 }
-function packIdOf(pack) {
-  try {
-    if (pack && pack.custom && pack.custom.id) return String(pack.custom.id);
-  } catch (e) {}
-  return 'stock';
-}
 export function buildEnhancePanel(env) {
   const log = env.log || (() => {});
   const anchor = document.getElementById('logEl');
   if (!anchor) { log('enhance: logEl missing'); return () => {}; }
   const st = {
-    enabled: loadFlag(), master: loadMaster(), pushedMaster: -1, enableInp: null, rows: null, packId: null,
-    det: createDetector(6), pending: null, lastFrame: -1,
-    atText: '', listEl: null, promptEl: null,
+    enabled: loadFlag(), master: loadMaster(),
+    pushedMaster: -1, pushedSaving: -1, enableInp: null,
+    listEl: null, packKey: null, refreshing: false,
   };
   const det = document.createElement('details');
   det.id = 'enhanceCtn';
@@ -70,83 +69,86 @@ export function buildEnhancePanel(env) {
   sum.textContent = 'Enhancements (entrance saves, wasm engine only)';
   sum.style.cssText = 'cursor:pointer;padding:8px;background:#223;font-size:16px';
   det.appendChild(sum);
-  let mr = row(det);
+  const mr = row(det);
   checkBox(mr, 'enhanced mode (master toggle for engine enhancements)', st.master, (v) => {
     st.master = v; storeMaster(v);
     log('enhance: enhanced mode ' + (v ? 'on' : 'off'));
     if (st.enableInp) st.enableInp.disabled = !v;
     try { const h = env.host(); if (h && h.inst) { const ex = h.inst.exports; if (ex.bm_enhanced_set) { ex.bm_enhanced_set(v ? 1 : 0); st.pushedMaster = v ? 1 : 0; } } } catch (e) {}
-    if (!v) { st.pending = null; resetDetector(st.det); renderPrompt(); }
   });
-  let r = row(det);
+  const r = row(det);
   st.enableInp = checkBox(r, 'enable entrance saves (Up at doorways)', st.enabled, (v) => {
     st.enabled = v; storeFlag(v);
     log('enhance: entrance saves ' + (v ? 'on' : 'off'));
-    if (!v) { st.pending = null; resetDetector(st.det); renderPrompt(); }
+    try { const h = env.host(); if (h && h.inst) { const ex = h.inst.exports; if (ex.bm_saving_set) { ex.bm_saving_set(v ? 1 : 0); st.pushedSaving = v ? 1 : 0; } } } catch (e) {}
   });
   if (!st.master && st.enableInp) st.enableInp.disabled = true;
-  r = row(det);
+  const wr = row(det);
   const wlab = document.createElement('span');
   wlab.textContent = 'widescreen mode (later): ';
-  r.appendChild(wlab);
+  wr.appendChild(wlab);
   const wchk = document.createElement('input');
   wchk.type = 'checkbox'; wchk.disabled = true; wchk.title = 'not yet implemented';
-  r.appendChild(wchk);
-  const atEl = document.createElement('div');
-  atEl.id = 'enhanceAt';
-  atEl.style.cssText = 'font-size:12px;color:#9c9';
-  atEl.textContent = 'door: —';
-  det.appendChild(atEl);
-  st.promptEl = row(det);
-  st.promptEl.id = 'enhancePrompt';
-  renderPrompt();
+  wr.appendChild(wchk);
+  const hint = document.createElement('div');
+  hint.style.cssText = 'font-size:12px;color:#888';
+  hint.textContent = 'in-game: stand on a doorway and press Up to file a save (A saves, Down enters, B leaves). slots below shuttle between memory and this browser.';
+  det.appendChild(hint);
   const listHead = document.createElement('div');
   listHead.style.cssText = 'font-size:12px;color:#9c9';
-  listHead.textContent = 'entrance slots (per pack):';
+  listHead.textContent = 'entrance slots (memory + this browser, per pack):';
   det.appendChild(listHead);
   st.listEl = document.createElement('div');
   st.listEl.id = 'enhanceSlots';
   det.appendChild(st.listEl);
   anchor.before(det);
-  function setAt(t) { if (t !== st.atText) { st.atText = t; atEl.textContent = t; } }
-  function renderPrompt() {
-    const el = st.promptEl;
-    while (el.firstChild) el.removeChild(el.firstChild);
-    const p = st.pending;
-    if (!p) {
-      const s = document.createElement('span');
-      s.style.cssText = 'font-size:12px;color:#888';
-      s.textContent = !st.master ? 'enable enhanced mode above to unlock entrance saves' : (st.enabled ? 'stand on a doorway and press Up to file a save' : 'enable entrance saves above, then stand on a doorway and press Up');
-      el.appendChild(s);
-      return;
-    }
-    const s = document.createElement('span');
-    s.textContent = 'Entrance: Area ' + p.area + ' (' + p.x + ',' + p.y + ') f=' + p.frame + ' ';
-    el.appendChild(s);
-    btn(el, 'Save to slot ' + p.slot, () => { doSave(p).catch((e) => log('enhance save err ' + String((e && e.message) || e).slice(0, 80))); });
-    btn(el, 'Discard', () => { st.pending = null; renderPrompt(); log('enhance: discarded entrance capture'); });
+  function exOf() {
+    try {
+      const h = env.host();
+      if (h && h.inst && h.inst.exports) return h.inst.exports;
+    } catch (e) {}
+    return null;
   }
-  async function doSave(p) {
-    const tag = env.packTag();
-    await saveEntrance(p.slot, {
+  function tagOf() {
+    try { return env.packTag(); } catch (e) { return { pack: 'stock', packCrc: 'unknown' }; }
+  }
+  function memSlot(ex, s) {
+    try {
+      if (!ex || !ex.bm_sram_info) return null;
+      if (ex.bm_sram_info(s, 0) !== 1) return null;
+      return { area: ex.bm_sram_info(s, 1), x: ex.bm_sram_info(s, 2), y: ex.bm_sram_info(s, 3), frame: ex.bm_sram_info(s, 4) };
+    } catch (e) { return null; }
+  }
+  async function doExport(n) {
+    const ex = exOf();
+    if (!ex) { log('enhance: start the game first (wasm)'); return; }
+    const s = n - 1;
+    let ptr = 0, len = 0;
+    try { ptr = ex.bm_sram_blob_ptr(s); len = ex.bm_sram_blob_len(s); } catch (e) { ptr = 0; }
+    if (!ptr || !len) { log('enhance: memory slot ' + n + ' empty'); return; }
+    if (len < 64 || len > 8192) { log('enhance: bad memory blob length'); return; }
+    const tag = tagOf();
+    const mem = new Uint8Array(ex.memory.buffer);
+    const bytes = Array.from(mem.slice(ptr, ptr + len));
+    const mg = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
+    if ((mg >>> 0) !== SAVE_MAGIC) { log('enhance: bad memory blob magic'); return; }
+    const m = memSlot(ex, s) || { area: 0, x: 0, y: 0, frame: 0 };
+    await saveEntrance(n, {
       v: 3, kind: 'entrance', engine: 'wasm',
       pack: tag.pack, packCrc: tag.packCrc,
-      frame: p.frame, hash: p.hash, area: p.area, x: p.x, y: p.y,
-      savedAt: new Date().toISOString(), bytes: Array.from(p.bytes),
+      frame: m.frame, hash: '', area: m.area, x: m.x, y: m.y,
+      savedAt: new Date().toISOString(), bytes,
     });
-    log('enhance: saved entrance slot ' + p.slot + ' (Area ' + p.area + ' ' + p.x + ',' + p.y + ')');
-    st.pending = null; renderPrompt(); refreshList().catch(() => {});
+    log('enhance: exported memory slot ' + n + ' to browser (Area ' + m.area + ' ' + m.x + ',' + m.y + ')');
+    refreshList().catch(() => {});
   }
-  async function doLoad(n) {
-    const h = env.host();
-    if (!h || !h.inst) { log('enhance: start the game first (wasm)'); return; }
-    if (env.engine() !== 'wasm') { log('enhance: loads need the wasm engine'); return; }
-    const ex = h.inst.exports;
-    if (!ex.bm_thaw_staging_ptr || !ex.bm_savestate_len) { log('enhance: engine too old for entrance loads'); return; }
-    const tag = env.packTag();
+  async function doImport(n) {
+    const ex = exOf();
+    if (!ex) { log('enhance: start the game first (wasm)'); return; }
+    if (!ex.bm_thaw_staging_ptr || !ex.bm_sram_store) { log('enhance: engine too old for slot import'); return; }
+    const tag = tagOf();
     const d = await loadEntrance(n, tag.pack);
-    if (!d || d.v !== 3 || d.kind !== 'entrance') { log('enhance: slot ' + n + ' empty'); return; }
-    if (d.engine && d.engine !== 'wasm') { log('enhance: slot engine ' + d.engine); return; }
+    if (!d || d.v !== 3 || d.kind !== 'entrance') { log('enhance: browser slot ' + n + ' empty'); return; }
     if (d.pack != null && d.pack !== 'unknown' && String(d.pack) !== tag.pack) { log('enhance: pack mismatch (save=' + d.pack + ' active=' + tag.pack + ')'); return; }
     if (d.packCrc && d.packCrc !== 'unknown' && String(d.packCrc) !== tag.packCrc) { log('enhance: pack rev mismatch'); return; }
     const bytes = Uint8Array.from(d.bytes || []);
@@ -159,81 +161,57 @@ export function buildEnhancePanel(env) {
     mem[tp + 8] = bytes.length & 255; mem[tp + 9] = (bytes.length >> 8) & 255;
     mem[tp + 10] = (bytes.length >> 16) & 255; mem[tp + 11] = (bytes.length >> 24) & 255;
     mem[tp] = 1;
-    st.pending = null; resetDetector(st.det); renderPrompt();
-    log('enhance: loading entrance slot ' + n + ' (Area ' + d.area + ' ' + d.x + ',' + d.y + ')...');
+    const crc = fnv1a32(tag.packCrc && tag.packCrc !== 'unknown' ? tag.packCrc : tag.pack);
+    const rc = ex.bm_sram_store(n - 1, crc);
+    if (rc !== 0) { log('enhance: slot import rejected (' + rc + ')'); return; }
+    log('enhance: imported browser slot ' + n + ' to memory (Area ' + d.area + ' ' + d.x + ',' + d.y + ')');
+    refreshList().catch(() => {});
+  }
+  async function doLoad(n) {
+    const ex = exOf();
+    if (!ex || !ex.bm_sram_load || !ex.bm_sram_info) { log('enhance: engine too old for slot loads'); return; }
+    let wasm = true;
+    try { wasm = env.engine() === 'wasm'; } catch (e) { wasm = true; }
+    if (!wasm) { log('enhance: loads need the wasm engine'); return; }
+    const s = n - 1;
+    if (ex.bm_sram_info(s, 0) !== 1) { log('enhance: memory slot ' + n + ' empty'); return; }
+    const rc = ex.bm_sram_load(s, ex.bm_sram_info(s, 5));
+    if (rc !== 1) { log('enhance: load rejected (' + rc + ')'); return; }
+    log('enhance: loading memory slot ' + n + '...');
   }
   async function refreshList() {
     const el = st.listEl;
-    if (!el) return;
-    while (el.firstChild) el.removeChild(el.firstChild);
-    let tag = { pack: 'stock', packCrc: 'unknown' };
-    try { tag = env.packTag(); } catch (e) {}
-    for (let n = 1; n <= 8; n++) {
-      const rr = row(el);
-      let d = null;
-      try { d = await loadEntrance(n, tag.pack); } catch (e) { d = null; }
-      const lab = document.createElement('span');
-      lab.style.cssText = 'font-size:12px';
-      if (d && d.v === 3) lab.textContent = 'slot ' + n + ': Area ' + d.area + ' (' + d.x + ',' + d.y + ') f=' + d.frame + ' ';
-      else lab.textContent = 'slot ' + n + ': empty ';
-      rr.appendChild(lab);
-      if (d && d.v === 3) {
-        const nn = n;
-        btn(rr, 'Load', () => { doLoad(nn).catch((e) => log('enhance load err ' + String((e && e.message) || e).slice(0, 80))); });
-      }
-    }
-  }
-  function ensureRows() {
-    let pack = null;
-    try { pack = env.pack(); } catch (e) { pack = null; }
-    const pid = pack ? packIdOf(pack) : null;
-    if (pid === st.packId) return;
-    st.packId = pid; st.pending = null; resetDetector(st.det); renderPrompt();
-    st.rows = null;
+    if (!el || st.refreshing) return;
+    st.refreshing = true;
     try {
-      if (pack && pack.prg && pack.prg[7]) {
-        const pd = parseDoors(pack.prg[7]);
-        if (pd.ok) st.rows = pd.rows;
+      while (el.firstChild) el.removeChild(el.firstChild);
+      const tag = tagOf();
+      const ex = exOf();
+      for (let n = 1; n <= 8; n++) {
+        const rr = row(el);
+        const m = ex ? memSlot(ex, n - 1) : null;
+        let d = null;
+        try { d = await loadEntrance(n, tag.pack); } catch (e) { d = null; }
+        if (d && d.v !== 3) d = null;
+        const lab = document.createElement('span');
+        lab.style.cssText = 'font-size:12px';
+        lab.textContent = 'slot ' + n + ': mem ' + (m ? ('Area ' + m.area + ' (' + m.x + ',' + m.y + ') f=' + m.frame) : 'empty') + ' / browser ' + (d ? ('Area ' + d.area + ' (' + d.x + ',' + d.y + ') f=' + d.frame) : 'empty') + ' ';
+        rr.appendChild(lab);
+        if (m) btn(rr, 'Load', () => { doLoad(n).catch((e) => log('enhance load err ' + String((e && e.message) || e).slice(0, 80))); });
+        if (m) btn(rr, 'Mem->browser', () => { doExport(n).catch((e) => log('enhance export err ' + String((e && e.message) || e).slice(0, 80))); });
+        if (d) btn(rr, 'Browser->mem', () => { doImport(n).catch((e) => log('enhance import err ' + String((e && e.message) || e).slice(0, 80))); });
       }
-    } catch (e) { st.rows = null; }
-    refreshList().catch(() => {});
+    } finally { st.refreshing = false; }
   }
   function apply(ex) {
     try {
-      let f = -1;
-      try { f = env.frame(); } catch (e) { f = -1; }
-      if (f >= 0 && f < st.lastFrame) {
-        st.pending = null; resetDetector(st.det); st.lastFrame = f; renderPrompt();
-      } else if (f >= 0) st.lastFrame = f;
-      ensureRows();
       try { if (ex.bm_enhanced_set && st.pushedMaster !== (st.master ? 1 : 0)) { ex.bm_enhanced_set(st.master ? 1 : 0); st.pushedMaster = st.master ? 1 : 0; } } catch (e) {}
-      if (!st.master) { setAt('door: — (enhanced mode off)'); return; }
-      if (!st.enabled || !st.rows) { setAt('door: —'); return; }
-      if (env.engine() !== 'wasm') { setAt('door: — (wasm only)'); return; }
-      if (!ex.bm_pre_ptr || !ex.bm_savestate_ptr || !ex.bm_savestate_len) { setAt('door: — (engine too old)'); return; }
-      const mem = new Uint8Array(ex.memory.buffer);
-      const pp = ex.bm_pre_ptr();
-      const area = mem[pp + 0x14] & 15, x = mem[pp + 0x49], y = mem[pp + 0x4B];
-      const m = matchDoor(st.rows, area, x, y);
-      let mask = 0;
-      try { mask = env.pad() & 255; } catch (e) { mask = 0; }
-      const up = (mask & UP_MASK) !== 0;
-      const r = stepDetector(st.det, !!m, area, x, y, up);
-      setAt(m ? ('door: Area ' + area + ' (' + x + ',' + y + ')' + (r.stable ? ' stable' : '')) : 'door: —');
-      if (!r.prompt || !m) return;
-      const sp = ex.bm_savestate_ptr(), sl = ex.bm_savestate_len();
-      if (sl < 64 || sl > 8192) { log('enhance: bad freeze length'); return; }
-      const snap = mem.slice(sp, sp + sl);
-      const mg = snap[0] | (snap[1] << 8) | (snap[2] << 16) | (snap[3] << 24);
-      if ((mg >>> 0) !== SAVE_MAGIC) { log('enhance: bad freeze magic'); return; }
-      let h = 0;
-      try { h = ex.bm_hash() >>> 0; } catch (e) { h = 0; }
-      st.pending = { bytes: snap, area, x, y, frame: f, hash: h.toString(16), slot: env.slot() };
-      renderPrompt();
-      log('enhance: entrance captured (Area ' + area + ' ' + x + ',' + y + ') - Save or Discard above');
-    } catch (e) { /* never break the frame */ }
+      try { if (ex.bm_saving_set && st.pushedSaving !== (st.enabled ? 1 : 0)) { ex.bm_saving_set(st.enabled ? 1 : 0); st.pushedSaving = st.enabled ? 1 : 0; } } catch (e) {}
+      let key = 'stock::unknown';
+      try { const t = env.packTag(); key = String(t.pack) + '::' + String(t.packCrc); } catch (e) {}
+      if (key !== st.packKey) { st.packKey = key; refreshList().catch(() => {}); }
+    } catch (e) {}
   }
   refreshList().catch(() => {});
   return apply;
 }
-

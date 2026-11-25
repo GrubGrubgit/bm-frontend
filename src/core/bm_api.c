@@ -576,6 +576,93 @@ static void pmenu_restore_render(void) {
   reg2000 = (uint8_t)pmenu_r2000; reg2001 = (uint8_t)pmenu_r2001;
   chr0 = (uint8_t)pmenu_chr0; chr1 = (uint8_t)pmenu_chr1; mmc_ctrl = (uint8_t)pmenu_mmc;
 }
+// ---- E5 entrance-save prompt (engine-side, supersedes P4 shell detector) ----
+// Up at a doorway files an exact-state save. Door table is fixed-bank PRG
+// bank 7 [$DD7E areas/$DDEA xhi/$DE56 yhi, 108 rows, EOR-1 pairs]; the b7
+// scan teleports on EXACT ($14,$49,$4B) match.
+// Detector (menu_tick, engine-side presnap like the P4 shell used): the
+// 6-frame stability run on the table predicate filters post-frame $49/$4B
+// flicker, and presnap $B7 bit0 (set at landing, clear during warp-init)
+// tells door stands apart from area-load transients. $B7 stays 1 forever
+// after the first transit, and there is no BE gate: running flicker
+// stands, transition stands and stock-paused stands all qualify uniformly.
+// A fresh Up edge OR held-Up (walk-in parity) with a new side key opens
+// the prompt once per side. Pause-while-prompt rides a LEVEL Start inject
+// (refreshed while prompt-open and BE==1, capped 240f): transition opens
+// engage pause on the BE 0->1 edge, running opens pause at once.
+// SAVE captures via bm_sram_save into the shared E1 slots (crc 0 = no
+// pack claim; the shell pack-gates its IDB layer as P4 did; E2 LOAD
+// browses/loads these slots via self-crc).
+// Choices are race-free in pad_fn (E3-F lesson: game-visible edges must
+// ride the live pad): A/Start = save + stock resume, B/Select = leave +
+// resume, Down = leave + resume + injected Down (fires on BE==1 or
+// transit-B7, mirrors the resume-then-thaw pattern), Left/Right = slot
+// cursor. Modal swallows all other input. Interlocks: E3 gate requires
+// ev5_phase==0 and vice versa.
+#define EV5_NEED 6
+static int ev5_phase = 0;
+static int ev5_run = 0;
+static int ev5_lastkey = -1;
+static int ev5_cursor = 0;
+static int ev5_cool = 0;
+static int ev5_curside = -1;
+static int ev5_pending_save = -1;
+static int ev5_pending_down = 0;
+static int ev5_wait = 0;
+static int ev5_snap_taken = 0;
+static int ev5_saw_one = 0;
+static int ev5_be0run = 0;
+static int ev5_down_inj = 0;
+static uint8_t ev5_vram[1024], ev5_pal[32], ev5_oam[256];
+static int ev5_scx, ev5_scy, ev5_r2000, ev5_r2001, ev5_chr0, ev5_chr1, ev5_mmc;
+static int ev5_door_side(int area, int x, int y) {
+  int i;
+  for (i = 0; i < 108; i++) {
+    int a = prg[7][0x1D7E + i];
+    if (a >= 16) continue;
+    if ((a & 15) == area && prg[7][0x1D7E + 108 + i] == x && prg[7][0x1D7E + 216 + i] == y) return i;
+  }
+  return -1;
+}
+static int ev5_first_free(void) { int q; for (q = 0; q < 8; q++) if (!sram_occ[q]) return q; return 0; }
+static void ev5_snap_render(void) {
+  int i;
+  for (i = 0; i < 1024; i++) ev5_vram[i] = vram[i];
+  for (i = 0; i < 32; i++) ev5_pal[i] = pal[i];
+  for (i = 0; i < 256; i++) ev5_oam[i] = oam[i];
+  ev5_scx = scx; ev5_scy = scy; ev5_r2000 = reg2000; ev5_r2001 = reg2001;
+  ev5_chr0 = chr0; ev5_chr1 = chr1; ev5_mmc = mmc_ctrl;
+}
+static void ev5_restore_render(void) {
+  int i;
+  for (i = 0; i < 1024; i++) vram[i] = ev5_vram[i];
+  for (i = 0; i < 32; i++) pal[i] = ev5_pal[i];
+  for (i = 0; i < 256; i++) oam[i] = ev5_oam[i];
+  scx = (uint8_t)ev5_scx; scy = (uint8_t)ev5_scy;
+  reg2000 = (uint8_t)ev5_r2000; reg2001 = (uint8_t)ev5_r2001;
+  chr0 = (uint8_t)ev5_chr0; chr1 = (uint8_t)ev5_chr1; mmc_ctrl = (uint8_t)ev5_mmc;
+}
+static void ev5_open(int key) {
+  ev5_lastkey = key;
+  ev5_phase = 1; ev5_cursor = ev5_first_free(); ev5_wait = 240;
+  ev5_snap_taken = 0; ev5_saw_one = 0; ev5_be0run = 0;
+}
+static void ev5_close_resume(void) {
+  if (!ev5_snap_taken) ev5_snap_render();
+  ev5_restore_render();
+  ev5_phase = 0; ev5_run = 0; ev5_cool = 1;
+  pmenu_inject = 8; pmenu_swallow_cd = 12;
+}
+static void ev5_draw_main(void) {
+  menu_text(4, 11, "SAVE HERE");
+  vram[8 * 32 + 8] = 1;
+  menu_text(8, 10, "SLOT "); menu_num2(8, 15, ev5_cursor + 1);
+  if (sram_occ[ev5_cursor]) { menu_text(10, 10, "AREA "); menu_num2(10, 15, sram_area[ev5_cursor]); }
+  else menu_text(10, 10, "EMPTY");
+  menu_text(12, 9, "A SAVE B LEAVE");
+  menu_text(14, 9, "DOWN ENTER");
+}
+
 // main-list actions: 0=CONTINUE 1=LOAD 2=SETTINGS 3=QUIT
 static int pmenu_main_count(void) {
   int n = 3;
@@ -706,9 +793,10 @@ static void menu_adjust_at(int cur, int dir) {
 static uint8_t pad_fn(uint64_t f) {
   (void)f;
   if (!enhanced_mode) { menu_prevpad = game_pad; pmenu_prevpad = game_pad; return game_pad; }
-  if (pmenu_inject > 0) {
-    uint8_t r;
-    r = (uint8_t)(game_pad | 8);
+  if (pmenu_inject > 0 || ev5_down_inj > 0) {
+    uint8_t r = game_pad;
+    if (pmenu_inject > 0) r = (uint8_t)(r | 8);
+    if (ev5_down_inj > 0) r = (uint8_t)(r | 32);
     menu_prevpad = r;
     pmenu_prevpad = r;
     return r;
@@ -721,13 +809,24 @@ static uint8_t pad_fn(uint64_t f) {
       return 0;
     }
   }
-  if (!menu_phase && !pmenu_phase && !pmenu_cooldown && pmenu_gameplay() &&
+  if (!menu_phase && !pmenu_phase && !pmenu_cooldown && ev5_phase == 0 && pmenu_gameplay() &&
       presnap_ram[0xBE] == 0 && pmenu_cause == 1 && ((presnap_ram[0xB7] & ~4) == 0)) {
     if ((game_pad & 4) && !(pmenu_prevpad & 4)) {
       pmenu_snap_render();
       pmenu_phase = 1; pmenu_cursor = 0; pmenu_swallow = 1;
       menu_prevpad = game_pad;
       pmenu_prevpad = game_pad;
+      return 0;
+    }
+  }
+  // E5 race-free open: first sighting of the Up edge on a stable doorway opens
+  // the prompt and swallows the press (game-visible silence: the opening tap
+  // must not perturb the transition/game, E5-F lesson). Pause engages via the
+  // tick-side level inject (transition opens engage on the BE 0->1 edge).
+  if (!menu_phase && !pmenu_phase && !pmenu_cooldown && ev5_phase == 0 && !ev5_cool && enhanced_mode && saving_on && pmenu_gameplay() && ((ram[0xB7] & 1) == 1) && ev5_run >= 6 && ev5_curside >= 0 && ev5_curside != ev5_lastkey) {
+    if ((game_pad & 16) && !(pmenu_prevpad & 16)) {
+      ev5_open(ev5_curside);
+      menu_prevpad = game_pad; pmenu_prevpad = game_pad;
       return 0;
     }
   }
@@ -743,6 +842,16 @@ static uint8_t pad_fn(uint64_t f) {
       return cr;
     }
   }
+  if (ev5_phase != 0) {
+    int ce = (game_pad ^ pmenu_prevpad) & game_pad;
+    uint8_t cr = (uint8_t)(game_pad | 8);
+    if (ce & (8 | 1)) { ev5_pending_save = ev5_cursor; ev5_close_resume(); menu_prevpad = cr; pmenu_prevpad = cr; return cr; }
+    if (ce & (2 | 4)) { ev5_close_resume(); menu_prevpad = cr; pmenu_prevpad = cr; return cr; }
+    if (ce & 32) { ev5_pending_down = 1; ev5_close_resume(); menu_prevpad = cr; pmenu_prevpad = cr; return cr; }
+    if (ce & 64) { ev5_cursor = (ev5_cursor + 7) % 8; menu_prevpad = game_pad; pmenu_prevpad = game_pad; return 0; }
+    if (ce & 128) { ev5_cursor = (ev5_cursor + 1) % 8; menu_prevpad = game_pad; pmenu_prevpad = game_pad; return 0; }
+    return 0;
+  }
   if (menu_swallow || pmenu_swallow || pmenu_swallow_cd > 0) return 0;
   return game_pad;
 }
@@ -757,10 +866,12 @@ void menu_tick(void) {
     menu_prevpad = gp;
     pmenu_phase = 0; pmenu_cursor = 0; pmenu_cooldown = 0; pmenu_swallow = 0;
     pmenu_prevpad = gp; pmenu_inject = 0; pmenu_cause = 0; pmenu_prev_be = be; pmenu_pending_load = -1; pmenu_swallow_cd = 0;
+    ev5_phase = 0; ev5_run = 0; ev5_lastkey = -1; ev5_cursor = 0; ev5_cool = 0; ev5_pending_save = -1; ev5_pending_down = 0; ev5_down_inj = 0; ev5_snap_taken = 0; ev5_saw_one = 0; ev5_be0run = 0; ev5_curside = -1; ev5_curside = -1;
     return;
   }
   if (pmenu_swallow_cd > 0) pmenu_swallow_cd--;
-  if (pmenu_inject > 0) pmenu_inject--;  // frame-counted: one NMI tick per poll-visible frame, exactly like a stock 8f tap
+  if (pmenu_inject > 0) pmenu_inject--;
+  if (ev5_down_inj > 0) ev5_down_inj--;  // frame-counted: one NMI tick per poll-visible frame, exactly like a stock 8f tap
   pmenu_clock++;
   if (e & 8) pmenu_last_start = pmenu_clock;
   if (e & 4) pmenu_last_select = pmenu_clock;
@@ -789,7 +900,7 @@ void menu_tick(void) {
     else if (!pregame) menu_cooldown = 0;
     if (!pmenu_phase) {
       pmenu_swallow = 0;
-      if (!pmenu_cooldown && gameplay && be == 0 && pmenu_cause == 1 &&
+      if (!pmenu_cooldown && gameplay && be == 0 && pmenu_cause == 1 && ev5_phase == 0 &&
           ((presnap_ram[0xB7] & ~4) == 0) && (e & 4)) {
         pmenu_snap_render();
         pmenu_phase = 1; pmenu_cursor = 0; pmenu_swallow = 1;
@@ -839,6 +950,22 @@ void menu_tick(void) {
         if (e & 2) { pmenu_phase = 1; pmenu_cursor = 0; }
         else if (e & (8 | 1)) { if (pmenu_cursor == 4) { pmenu_phase = 1; pmenu_cursor = 0; } }
       }
+    }
+    if (!pmenu_phase && saving_on) {
+      if (ev5_pending_save >= 0) { bm_sram_save(ev5_pending_save, 0); ev5_pending_save = -1; }
+      if (ev5_pending_down && gameplay && (be == 1 || ((presnap_ram[0xB7] & 1) == 1))) { ev5_pending_down = 0; ev5_down_inj = 8; }
+      if (be == 1) ev5_cool = 0;
+      if (ev5_phase == 1 && !ev5_snap_taken) { if (be == 1) { ev5_saw_one = 1; ev5_be0run = 0; } else if (ev5_saw_one || ((presnap_ram[0xB7] & 4) == 4) || ++ev5_be0run >= 240) { ev5_snap_render(); ev5_snap_taken = 1; } }
+      if (ev5_phase == 1 && be == 1) { pmenu_inject = 8; if (--ev5_wait <= 0) { if (!ev5_snap_taken) ev5_snap_render(); ev5_restore_render(); ev5_phase = 0; ev5_run = 0; } }
+      if (ev5_phase == 0 && !ev5_cool && ((presnap_ram[0xB7] & 1) == 1)) {
+        int ea = presnap_ram[0x14] & 15, exx = presnap_ram[0x49], eyy = presnap_ram[0x4B];
+        int evside = ev5_door_side(ea, exx, eyy);
+        if (evside < 0) { ev5_run = 0; ev5_curside = -1; }
+        else { ev5_curside = evside; ev5_run++; if (ev5_run >= EV5_NEED && evside != ev5_lastkey && ((e & 16) || (gp & 16))) ev5_open(evside); }
+      }
+    } else if (!pmenu_phase) {
+      if (ev5_phase != 0) { if (!ev5_snap_taken) ev5_snap_render(); ev5_restore_render(); ev5_phase = 0; }
+      ev5_run = 0; ev5_pending_save = -1; ev5_pending_down = 0;
     }
     menu_prevpad = gp; pmenu_prevpad = gp; return;
   }
@@ -920,7 +1047,7 @@ static void menu_draw_settings_at(int cur) {
 }
 void menu_draw(void) {
   int i;
-  if (!menu_phase && !pmenu_phase) return;
+  if (!menu_phase && !pmenu_phase && !(ev5_phase && ev5_snap_taken)) return;
   for (i = 0; i < 1024; i++) vram[i] = 0;
   for (i = 0; i < 64; i++) vram[960 + i] = 0;
   pal[0] = 0x0F; pal[1] = 0x30; pal[2] = 0x30; pal[3] = 0x30;
@@ -934,7 +1061,8 @@ void menu_draw(void) {
   else if (menu_phase == 3) menu_draw_settings_at(menu_cursor);
   else if (pmenu_phase == 1) pmenu_draw_main();
   else if (pmenu_phase == 2) menu_draw_load_at(pmenu_cursor);
-  else menu_draw_settings_at(pmenu_cursor);
+  else if (pmenu_phase) menu_draw_settings_at(pmenu_cursor);
+  else if (ev5_snap_taken) ev5_draw_main();
 }
 
 
@@ -944,12 +1072,15 @@ int bm_menu_dbg(void) { return (menu_phase & 255) | ((menu_cursor & 255) << 8) |
 int bm_menu_dbg2(void) { return ((int)game_pad & 255) | ((menu_swallow & 255) << 8); }
 int bm_pmenu_dbg(void) { return (pmenu_phase & 255) | ((pmenu_cursor & 255) << 8) | ((pmenu_prevpad & 255) << 16) | ((pmenu_cooldown & 255) << 24); }
 int bm_pmenu_dbg2(void) { return ((int)game_pad & 255) | ((pmenu_swallow & 255) << 8) | ((pmenu_cause & 255) << 16) | ((pmenu_inject & 255) << 24); }
+int bm_ev5_dbg(void) { return (ev5_phase & 255) | ((ev5_cursor & 255) << 8) | ((ev5_run & 255) << 16) | ((ev5_cool & 255) << 24); }
+void bm_ev5_testreset(void) { ev5_run = 0; ev5_lastkey = -1; ev5_cool = 0; ev5_wait = 0; ev5_snap_taken = 0; ev5_saw_one = 0; ev5_be0run = 0; ev5_curside = -1; }
 static void menu_boot_reset(void) {
   menu_phase = 0; menu_cursor = 0;
   menu_cooldown = 0; menu_swallow = 0; menu_prevpad = 0;
   pmenu_phase = 0; pmenu_cursor = 0;
   pmenu_cooldown = 0; pmenu_swallow = 0; pmenu_prevpad = 0;
   pmenu_inject = 0; pmenu_cause = 0; pmenu_prev_be = 0; pmenu_pending_load = -1; pmenu_swallow_cd = 0;
+  ev5_phase = 0; ev5_run = 0; ev5_lastkey = -1; ev5_cursor = 0; ev5_cool = 0; ev5_pending_save = -1; ev5_pending_down = 0; ev5_down_inj = 0; ev5_snap_taken = 0; ev5_saw_one = 0; ev5_be0run = 0;
 }
 void bm_boot(void) {
   engine_reset_to_title();

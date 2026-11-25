@@ -73,11 +73,11 @@ const ENHS = (ex) => { ex.bm_enhanced_set(1); ex.bm_saving_set(1); };
 // ---- Run A: open, nav wrap, settings adjust, back, toggle-close ----
 {
   const blobs = {};
-  const want = new Set([850, 1340, 1440, 1490, 1540, 1640, 1690, 1760]);
+  const want = new Set([850, 1340, 1440, 1490, 1540, 1570, 1640, 1690, 1760]);
   const R = await drive({ span: 1900, rec: true,
     taps: [{ at: 61, pad: 8 }, { at: 1200, pad: 8 }, { at: 1300, pad: 4 },
-      { at: 1400, pad: 16 }, { at: 1450, pad: 32 }, { at: 1500, pad: 32 }, { at: 1550, pad: 1 },
-      { at: 1600, pad: 128 }, { at: 1650, pad: 2 }, { at: 1700, pad: 4 }],
+      { at: 1400, pad: 16 }, { at: 1450, pad: 32 }, { at: 1500, pad: 32 }, { at: 1560, pad: 32 }, { at: 1590, pad: 1 },
+      { at: 1630, pad: 128 }, { at: 1680, pad: 2 }, { at: 1730, pad: 4 }],
     onFrame: (ex, f) => {
       if (f === 700) ENH(ex);
       if (want.has(f)) blobs[f] = blobOf(ex);
@@ -87,8 +87,8 @@ const ENHS = (ex) => { ex.bm_enhanced_set(1); ex.bm_saving_set(1); };
   ok('A gameplay runs unpaused pre-pause (no menu, DD2 BE1)', !R.trap && findRow(blobs[850], 'PAUSED') < 0 && R.rec[850].dd === 2 && R.rec[850].be === 1, R.trap);
   ok('A soak pre-pause running', !R.trap && R.rec[1150].be === 1, R.trap);
   const b = blobs[1340];
-  ok('Select while Start-paused opens menu (PAUSED+3 items, no LOAD)', !R.trap && findRow(b, 'PAUSED') === 4 && findRow(b, 'CONTINUE') === 8 && findRow(b, 'SETTINGS') === 10 && findRow(b, 'QUIT') === 12 && findRow(b, 'LOAD') < 0 && b[2428 + 8 * 32 + 9] === 1, R.trap);
-  ok('nav Up-wrap 0->2 + Down-wrap 2->0 + step to SETTINGS', !R.trap && blobs[1440][2428 + 12 * 32 + 9] === 1 && blobs[1490][2428 + 8 * 32 + 9] === 1 && blobs[1540][2428 + 10 * 32 + 9] === 1, R.trap);
+  ok('Select while Start-paused opens menu (PAUSED+4 items, no LOAD)', !R.trap && findRow(b, 'PAUSED') === 4 && findRow(b, 'CONTINUE') === 8 && findRow(b, 'MAP') === 10 && findRow(b, 'SETTINGS') === 12 && findRow(b, 'QUIT') === 14 && findRow(b, 'LOAD') < 0 && b[2428 + 8 * 32 + 9] === 1, R.trap);
+  ok('nav Up-wrap 0->3 + Down 3->0 + Down to MAP + Down to SETTINGS', !R.trap && blobs[1440][2428 + 14 * 32 + 9] === 1 && blobs[1490][2428 + 8 * 32 + 9] === 1 && blobs[1540][2428 + 10 * 32 + 9] === 1 && blobs[1570][2428 + 12 * 32 + 9] === 1, R.trap);
   ok('SETTINGS submenu adjusts volume 8->9', !R.trap && findRow(blobs[1640], 'SETTINGS') === 4 && R.ex.bm_setting_get(0) === 9, R.trap || ('vol=' + R.ex.bm_setting_get(0)));
   ok('BACK returns to pause main', !R.trap && findRow(blobs[1690], 'PAUSED') === 4, R.trap);
   const tail = R.rec.filter((r) => r.f >= 1750);
@@ -229,13 +229,13 @@ const ENHS = (ex) => { ex.bm_enhanced_set(1); ex.bm_saving_set(1); };
 {
   const blobs = {};
   const R = await drive({ span: 1850, rec: true,
-    taps: [{ at: 61, pad: 8 }, { at: 1200, pad: 8 }, { at: 1300, pad: 4 }, { at: 1400, pad: 32 }, { at: 1460, pad: 1 }, { at: 1560, pad: 1 }],
+    taps: [{ at: 61, pad: 8 }, { at: 1200, pad: 8 }, { at: 1300, pad: 4 }, { at: 1400, pad: 32 }, { at: 1430, pad: 32 }, { at: 1460, pad: 1 }, { at: 1560, pad: 1 }],
     onFrame: (ex, f) => {
       if (f === 700) ENHS(ex);
       if (f === 1100) ex.bm_sram_save(0, CRC);
       if (f === 1340 || f === 1500 || f === 1700) blobs[f] = blobOf(ex);
     } });
-  ok('H2 menu shows LOAD when saving on', !R.trap && findRow(blobs[1340], 'PAUSED') === 4 && findRow(blobs[1340], 'LOAD') >= 0, R.trap);
+  ok('H2 menu shows MAP 10 + LOAD 12 when saving on', !R.trap && findRow(blobs[1340], 'PAUSED') === 4 && findRow(blobs[1340], 'MAP') === 10 && findRow(blobs[1340], 'LOAD') === 12, R.trap);
   ok('H2 load submenu lists SLOT 1 AREA 8', !R.trap && findRow(blobs[1500], 'SLOT') >= 0 && findRow(blobs[1500], 'AREA') >= 0, R.trap);
   const mv = new Set(R.rec.filter((r) => r.f >= 1720 && r.f <= 1800).map((r) => r.pf));
   ok('H2 LOAD slot0 running area-8 (resume-then-thaw)', !R.trap && R.rec[1750].be === 1 && R.rec[1750].dd === 2 && R.rec[1750].area === 8 && mv.size > 3 && R.ex.bm_thaw_result() === 1, R.trap || ('be=' + R.rec[1750].be + ' tres=' + R.ex.bm_thaw_result()));
@@ -245,7 +245,7 @@ const ENHS = (ex) => { ex.bm_enhanced_set(1); ex.bm_saving_set(1); };
 {
   const blobs = {};
   const R = await drive({ span: 1850, rec: true,
-    taps: [{ at: 61, pad: 8 }, { at: 1200, pad: 8 }, { at: 1300, pad: 4 }, { at: 1400, pad: 32 }, { at: 1450, pad: 32 }, { at: 1500, pad: 1 }, { at: 1700, pad: 8 }],
+    taps: [{ at: 61, pad: 8 }, { at: 1200, pad: 8 }, { at: 1300, pad: 4 }, { at: 1400, pad: 32 }, { at: 1450, pad: 32 }, { at: 1475, pad: 32 }, { at: 1500, pad: 1 }, { at: 1700, pad: 8 }],
     onFrame: (ex, f) => {
       if (f === 700) ENH(ex);
       if (f === 1600 || f === 1760) blobs[f] = blobOf(ex);

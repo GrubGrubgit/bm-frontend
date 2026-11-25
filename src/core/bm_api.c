@@ -70,6 +70,7 @@ static int setting_filter = 0; // 0 NEAREST 1 BILINEAR
 void menu_tick(void);
 void menu_draw(void);
 static void map_blit(void);
+static void map_blit_full(void);
 
 #include "combined_off.c"
 __attribute__((import_module("env"))) __attribute__((import_name("host_frame"))) void host_frame(int frame);
@@ -218,6 +219,7 @@ static void nmi_frame(void) {
   menu_draw();
   render();
   map_blit();
+  map_blit_full();
   host_frame(frame_no++);
   if (pending_warp >= 0) {
     int w = pending_warp;
@@ -545,8 +547,9 @@ int bm_sram_blob_len(int slot) {
 static void menu_text(int row, int col, const char *s);
 static void menu_num2(int row, int col, int v);
 static void menu_boot_reset(void);
-static int pmenu_phase = 0;    // 0=off 1=main 2=load 3=settings
+static int pmenu_phase = 0;    // 0=off 1=main 2=load 3=settings 4=map
 static int pmenu_cursor = 0;
+static int pmenu_map_lv = 1;   // E8-M4 full-map viewed level (1-16; set to current on open)
 static int pmenu_cooldown = 0; // set on LOAD/QUIT dismiss; clears when unpaused
 static int pmenu_swallow = 0;  // pad filter: game sees 0 while menu is modal
 static int pmenu_prevpad = 0;
@@ -677,6 +680,8 @@ static uint8_t map_valid[16];
 static uint8_t map_door_n[16];
 static uint8_t map_door_bx[16][28];
 static uint8_t map_door_by[16][28];
+static uint8_t map_brk[16][128];      // E8-M4 breakable-block bits (tank lv<=8, attr bit7+bit6)
+static uint8_t map_door_ent[16][28];  // E8-M4 cross-area entrance flags per door slot
 static const uint8_t map_chrbank[17] = { 0, 8, 9, 10, 11, 12, 13, 14, 15, 17, 19, 18, 20, 18, 19, 20, 17 };
 static const uint8_t map_banklv[3][6] = { { 1, 2, 3, 4, 5 }, { 6, 7, 8, 9, 11 }, { 13, 10, 14, 16, 12, 15 } };
 static const uint8_t map_bankn[3] = { 5, 5, 6 };
@@ -737,10 +742,12 @@ static int map_build(int lv) {
   if (mapP + mapLen > map_span_end(starts, nst, b, mapP)) return 0;
   rows = mapLen / 32;
   map_rows[lv - 1] = (uint8_t)rows;
+  for (i = 0; i < 128; i++) map_brk[lv - 1][i] = 0;
   for (i = 0; i < 16; i++) P16[i] = B[palP + i];
   cb = map_chrbank[lv];
   for (i = 0; i < rows * 32; i++) {
     int bx = i % 32;
+    int brk = 0;
     int q, bi = i;
     int blk = B[mapP + bi];
     if (blk < 0 || blk * 4 + 3 >= blockLen) blk = 0;
@@ -750,6 +757,7 @@ static int map_build(int lv) {
       int ar, ag, ab;
       for (k2 = 0; k2 < 4; k2++) {
         int ci = B[structP + si * 4 + k2];
+        if (lv <= 8 && ((B[attrP + ci] & 0xC0) == 0xC0)) brk = 1;
         int sub = B[attrP + ci] & 3;
         for (p2 = 0; p2 < 4; p2++) {
           int ti = B[comboP + ci * 4 + p2];
@@ -768,6 +776,7 @@ static int map_build(int lv) {
       }
       map_px[lv - 1][(((i / 32) * 2 + (q >> 1)) * 64) + (bx * 2 + (q & 1))] = (uint8_t)best;
     }
+    if (brk) map_brk[lv - 1][i >> 3] |= (uint8_t)(1 << (i & 7));
   }
   n = 0;
   for (i = 0; i < 108; i++) {
@@ -782,6 +791,8 @@ static int map_build(int lv) {
     if (dx < 0 || dx >= 32 || dy < 0 || dy >= rows || n >= 28) continue;
     map_door_bx[lv - 1][n] = (uint8_t)dx;
     map_door_by[lv - 1][n] = (uint8_t)dy;
+    { int jj = i ^ 1; int aj = prg[7][0x1D7E + jj] & 15; int alvj = aj < 8 ? aj + 9 : aj - 7;
+      map_door_ent[lv - 1][n] = (uint8_t)(((alv <= 8) != (alvj <= 8)) ? 1 : 0); }
     n++;
   }
   map_door_n[lv - 1] = (uint8_t)n;
@@ -838,6 +849,66 @@ static void map_blit(void) {
     for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) map_put(cx + dx, cy + dy, 252, 252, 252);
   }
 }
+static void map_blit_full(void) {
+  int X0 = 64, Y0 = 8, W = 128, H, lv, rows, tx, ty, i;
+  int area, clv, sx, sy, maxsy;
+  if (!enhanced_mode) return;
+  if (pmenu_phase != 4) return;
+  if (!pmenu_gameplay()) return;
+  lv = pmenu_map_lv;
+  if (lv < 1 || lv > 16) return;
+  if (!map_valid[lv - 1] && !map_build(lv)) return;
+  rows = map_rows[lv - 1];
+  H = rows * 4;
+  for (tx = X0 - 1; tx <= X0 + W; tx++) {
+    map_put(tx, Y0 - 1, 117, 117, 117);
+    map_put(tx, Y0 + H, 117, 117, 117);
+  }
+  for (ty = Y0 - 1; ty <= Y0 + H; ty++) {
+    map_put(X0 - 1, ty, 117, 117, 117);
+    map_put(X0 + W, ty, 117, 117, 117);
+  }
+  for (ty = 0; ty < rows * 2; ty++) for (tx = 0; tx < 64; tx++) {
+    int sxx = tx >> 3, syy = ty >> 3;
+    int bit = (visit_bits[lv - 1][((syy * 8 + sxx) >> 3)] >> ((syy * 8 + sxx) & 7)) & 1;
+    uint8_t idx = map_px[lv - 1][ty * 64 + tx];
+    uint8_t rr = NESPAL[idx][0], gg = NESPAL[idx][1], bb = NESPAL[idx][2];
+    int px = X0 + tx * 2, py = Y0 + ty * 2;
+    if (!bit) { rr >>= 2; gg >>= 2; bb >>= 2; }
+    map_put(px, py, rr, gg, bb); map_put(px + 1, py, rr, gg, bb);
+    map_put(px, py + 1, rr, gg, bb); map_put(px + 1, py + 1, rr, gg, bb);
+  }
+  for (i = 0; i < map_door_n[lv - 1]; i++) {
+    int dx = X0 + map_door_bx[lv - 1][i] * 4, dy = Y0 + map_door_by[lv - 1][i] * 4;
+    int exf = map_door_ent[lv - 1][i];
+    int qx, qy;
+    for (qy = 0; qy < 4; qy++) for (qx = 0; qx < 4; qx++) {
+      if (exf) map_put(dx + qx, dy + qy, 252, 252, 252);
+      else map_put(dx + qx, dy + qy, 248, 184, 0);
+    }
+  }
+  for (i = 0; i < rows * 32; i++) {
+    if ((map_brk[lv - 1][i >> 3] >> (i & 7)) & 1) {
+      int dx = X0 + (i % 32) * 4, dy = Y0 + (i / 32) * 4;
+      int kk;
+      for (kk = 0; kk < 4; kk++) {
+        map_put(dx + kk, dy, 0, 232, 216); map_put(dx + kk, dy + 3, 0, 232, 216);
+        map_put(dx, dy + kk, 0, 232, 216); map_put(dx + 3, dy + kk, 0, 232, 216);
+      }
+    }
+  }
+  area = ram[0x14] & 15;
+  clv = area < 8 ? area + 9 : area - 7;
+  if (clv == lv) {
+    int cx, cy, dx, dy;
+    sx = (scx + 128) >> 8; if (sx < 0) sx = 0; if (sx > 7) sx = 7;
+    sy = (scy + 120) >> 8; if (sy < 0) sy = 0;
+    maxsy = (rows + 3) >> 2; if (sy >= maxsy) sy = maxsy - 1;
+    cx = X0 + sx * 16 + 8; cy = Y0 + sy * 16 + 8;
+    for (dy = -2; dy <= 2; dy++) for (dx = -2; dx <= 2; dx++) map_put(cx + dx, cy + dy, 167, 0, 0);
+    for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) map_put(cx + dx, cy + dy, 252, 252, 252);
+  }
+}
 void bm_map_invalidate(void) { int i; for (i = 0; i < 16; i++) map_valid[i] = 0; }
 int bm_map_thumb_hash(int lv) {
   uint32_t h = 2166136261u;
@@ -861,6 +932,31 @@ int bm_map_doors(int lv) {
   }
   return n;
 }
+int bm_map_brkcnt(int lv) {
+  int i, n = 0;
+  uint8_t v;
+  if (lv < 1 || lv > 16) return -1;
+  if (!map_valid[lv - 1] && !map_build(lv)) return -1;
+  for (i = 0; i < 128; i++) { v = map_brk[lv - 1][i]; while (v) { n += v & 1; v >>= 1; } }
+  return n;
+}
+int bm_map_brkhash(int lv) {
+  uint32_t h = 2166136261u;
+  int i;
+  if (lv < 1 || lv > 16) return -1;
+  if (!map_valid[lv - 1] && !map_build(lv)) return -1;
+  for (i = 0; i < 128; i++) { h ^= map_brk[lv - 1][i]; h *= 16777219u; }
+  h ^= map_rows[lv - 1]; h *= 16777219u;
+  return (int)(h & 0x7FFFFFFF);
+}
+int bm_map_entcnt(int lv) {
+  int i, n = 0;
+  if (lv < 1 || lv > 16) return -1;
+  if (!map_valid[lv - 1] && !map_build(lv)) return -1;
+  for (i = 0; i < map_door_n[lv - 1]; i++) n += map_door_ent[lv - 1][i] ? 1 : 0;
+  return n;
+}
+int bm_map_mylv(void) { return pmenu_map_lv; }
 int bm_map_visible(void) { return map_gate(); }
 static int ev5_door_side(int area, int x, int y) {
   int i;
@@ -910,26 +1006,28 @@ static void ev5_draw_main(void) {
   menu_text(14, 9, "DOWN ENTER");
 }
 
-// main-list actions: 0=CONTINUE 1=LOAD 2=SETTINGS 3=QUIT
+// main-list actions: 0=CONTINUE 1=LOAD 2=SETTINGS 3=QUIT 4=MAP
 static int pmenu_main_count(void) {
-  int n = 3;
+  int n = 4;
   if (saving_on) n++;
   return n;
 }
 static int pmenu_main_action(int idx) {
   if (idx == 0) return 0;
+  if (idx == 1) return 4;
   if (saving_on) {
-    if (idx == 1) return 1;
-    if (idx == 2) return 2;
+    if (idx == 2) return 1;
+    if (idx == 3) return 2;
     return 3;
   }
-  if (idx == 1) return 2;
+  if (idx == 2) return 2;
   return 3;
 }
 static const char *pmenu_main_label(int a) {
   if (a == 0) return "CONTINUE";
   if (a == 1) return "LOAD";
   if (a == 2) return "SETTINGS";
+  if (a == 4) return "MAP";
   return "QUIT";
 }
 static void pmenu_draw_main(void) {
@@ -942,6 +1040,22 @@ static void pmenu_draw_main(void) {
     menu_text(row, 11, pmenu_main_label(pmenu_main_action(idx)));
     row += 2;
   }
+}
+// E8-M4 full-map legend (vram text under the framebuf map; proven glyphs only).
+static void pmenu_draw_map(void) {
+  int lv = pmenu_map_lv;
+  if (lv < 1) lv = 1;
+  if (lv > 16) lv = 16;
+  menu_text(18, 8, "MAP L");
+  menu_num2(18, 13, lv);
+  menu_text(18, 16, lv <= 8 ? "DUNGEON" : "OVERHEAD");
+  menu_text(19, 8, "GOLD DOOR");
+  menu_text(20, 8, "WHITE ENTRANCE");
+  menu_text(21, 8, "CYAN BREAKABLE");
+  menu_text(22, 8, "DARK UNSEEN");
+  menu_text(23, 8, "DOT YOU");
+  menu_text(24, 8, "LEFT RIGHT LEVEL");
+  menu_text(25, 8, "B BACK");
 }
 // In-engine reset (QUIT TO TITLE): the bm_boot body, factored so the pause
 // menu can reset without the host. Preserves engine config (enhanced_mode,
@@ -1114,7 +1228,7 @@ void menu_tick(void) {
     menu_phase = 0; menu_cursor = 0; menu_cooldown = 0; menu_swallow = 0;
     menu_prevpad = gp;
     pmenu_phase = 0; pmenu_cursor = 0; pmenu_cooldown = 0; pmenu_swallow = 0;
-    pmenu_prevpad = gp; pmenu_inject = 0; pmenu_cause = 0; pmenu_prev_be = be; pmenu_pending_load = -1; pmenu_swallow_cd = 0;
+    pmenu_prevpad = gp; pmenu_inject = 0; pmenu_cause = 0; pmenu_prev_be = be; pmenu_pending_load = -1; pmenu_swallow_cd = 0; pmenu_map_lv = 1;
     ev5_phase = 0; ev5_run = 0; ev5_lastkey = -1; ev5_cursor = 0; ev5_cool = 0; ev5_pending_save = -1; ev5_pending_down = 0; ev5_down_inj = 0; ev5_snap_taken = 0; ev5_saw_one = 0; ev5_be0run = 0; ev5_curside = -1; ev5_curside = -1;
     return;
   }
@@ -1170,6 +1284,7 @@ void menu_tick(void) {
         else if (e & (8 | 1)) {
           int a = pmenu_main_action(pmenu_cursor);
           if (a == 0) { pmenu_restore_render(); pmenu_inject = 8; pmenu_phase = 0; pmenu_cursor = 0; pmenu_swallow = 0; pmenu_swallow_cd = 12; }
+          else if (a == 4) { int ea2 = ram[0x14] & 15; pmenu_map_lv = ea2 < 8 ? ea2 + 9 : ea2 - 7; if (pmenu_map_lv < 1) pmenu_map_lv = 1; if (pmenu_map_lv > 16) pmenu_map_lv = 16; pmenu_phase = 4; pmenu_cursor = 0; }
           else if (a == 1) { pmenu_phase = 2; pmenu_cursor = 0; }
           else if (a == 2) { pmenu_phase = 3; pmenu_cursor = 0; }
           else { engine_reset_to_title(); }
@@ -1199,6 +1314,11 @@ void menu_tick(void) {
         if (e & 128) menu_adjust_at(pmenu_cursor, 1);
         if (e & 2) { pmenu_phase = 1; pmenu_cursor = 0; }
         else if (e & (8 | 1)) { if (pmenu_cursor == 4) { pmenu_phase = 1; pmenu_cursor = 0; } }
+      } else if (pmenu_phase == 4) {
+        if (e & (64 | 16)) { pmenu_map_lv--; if (pmenu_map_lv < 1) pmenu_map_lv = 16; }
+        if (e & (128 | 32)) { pmenu_map_lv++; if (pmenu_map_lv > 16) pmenu_map_lv = 1; }
+        if (e & 2) { pmenu_phase = 1; pmenu_cursor = 1; }
+        else if (e & (8 | 1)) { pmenu_phase = 1; pmenu_cursor = 1; }
       }
     }
     if (!pmenu_phase && saving_on) {
@@ -1311,7 +1431,8 @@ void menu_draw(void) {
   else if (menu_phase == 3) menu_draw_settings_at(menu_cursor);
   else if (pmenu_phase == 1) pmenu_draw_main();
   else if (pmenu_phase == 2) menu_draw_load_at(pmenu_cursor);
-  else if (pmenu_phase) menu_draw_settings_at(pmenu_cursor);
+  else if (pmenu_phase == 3) menu_draw_settings_at(pmenu_cursor);
+  else if (pmenu_phase == 4) pmenu_draw_map();
   else if (ev5_snap_taken) ev5_draw_main();
 }
 
@@ -1328,6 +1449,7 @@ static void menu_boot_reset(void) {
   menu_phase = 0; menu_cursor = 0;
   menu_cooldown = 0; menu_swallow = 0; menu_prevpad = 0;
   pmenu_phase = 0; pmenu_cursor = 0;
+  pmenu_map_lv = 1;
   pmenu_cooldown = 0; pmenu_swallow = 0; pmenu_prevpad = 0;
   pmenu_inject = 0; pmenu_cause = 0; pmenu_prev_be = 0; pmenu_pending_load = -1; pmenu_swallow_cd = 0;
   ev5_phase = 0; ev5_run = 0; ev5_lastkey = -1; ev5_cursor = 0; ev5_cool = 0; ev5_pending_save = -1; ev5_pending_down = 0; ev5_down_inj = 0; ev5_snap_taken = 0; ev5_saw_one = 0; ev5_be0run = 0;

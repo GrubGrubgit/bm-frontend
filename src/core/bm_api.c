@@ -69,6 +69,7 @@ static int setting_scale = 0;  // 0 INTEGER 1 FIT 2 FILL 3 STRETCH
 static int setting_filter = 0; // 0 NEAREST 1 BILINEAR
 void menu_tick(void);
 void menu_draw(void);
+static void map_blit(void);
 
 #include "combined_off.c"
 __attribute__((import_module("env"))) __attribute__((import_name("host_frame"))) void host_frame(int frame);
@@ -216,6 +217,7 @@ static void nmi_frame(void) {
   b7_entry_EB7E();
   menu_draw();
   render();
+  map_blit();
   host_frame(frame_no++);
   if (pending_warp >= 0) {
     int w = pending_warp;
@@ -653,6 +655,213 @@ static int ev5_be0run = 0;
 static int ev5_down_inj = 0;
 static uint8_t ev5_vram[1024], ev5_pal[32], ev5_oam[256];
 static int ev5_scx, ev5_scy, ev5_r2000, ev5_r2001, ev5_chr0, ev5_chr1, ev5_mmc;
+// ---- E8-M3 engine-side HUD minimap (in-canvas, framebuf post-process) ----
+// All enhancements live in the engine: this blits into framebuf AFTER
+// render() in nmi_frame (never vram/ram/pal: the game picture, PPU state
+// and freeze/thaw blobs are untouched). Contents: 2px/block level
+// thumbnails parsed from the prg level tables in C (same layout as
+// src/pack/levels.js), fog-of-war from visit_bits (unvisited screens
+// dimmed to 1/4, sub-map rows void black), gold door ticks at block
+// precision, white/red player dot at the current screen center, 1px
+// border. Gate: enhanced_mode && gameplay && no modal menu (E2/E3/E5).
+// Thumbnails cache per level, built lazily on first display; cleared on
+// engine_reset_to_title (fresh boot + quit-to-title) and on demand via
+// bm_map_invalidate (shell pack switches). Pure function of prg/chr +
+// visit state: fully deterministic, included in video hashes on both
+// sides of every comparison, so all golden reconvergence proofs hold.
+#define MAP_X0 188
+#define MAP_Y0 4
+static uint8_t map_px[16][4096];
+static uint8_t map_rows[16];
+static uint8_t map_valid[16];
+static uint8_t map_door_n[16];
+static uint8_t map_door_bx[16][28];
+static uint8_t map_door_by[16][28];
+static const uint8_t map_chrbank[17] = { 0, 8, 9, 10, 11, 12, 13, 14, 15, 17, 19, 18, 20, 18, 19, 20, 17 };
+static const uint8_t map_banklv[3][6] = { { 1, 2, 3, 4, 5 }, { 6, 7, 8, 9, 11 }, { 13, 10, 14, 16, 12, 15 } };
+static const uint8_t map_bankn[3] = { 5, 5, 6 };
+static const int map_free[3] = { 0x3D8C, 0x382B, 0x3A63 };
+static int map_bank_of(int lv) {
+  if (lv >= 1 && lv <= 5) return 0;
+  if (lv == 6 || lv == 7 || lv == 8 || lv == 9 || lv == 11) return 1;
+  return 2;
+}
+static int map_span_end(int *starts, int nst, int b, int off) {
+  int i, end = -1;
+  for (i = 0; i < nst; i++) if (starts[i] > off && (end < 0 || starts[i] < end)) end = starts[i];
+  if (end < 0) end = off < map_free[b] ? map_free[b] : 16384;
+  return end;
+}
+static int map_build(int lv) {
+  int b, s, ns, s0 = -1, i, n;
+  uint8_t *B;
+  int tableRel[6], scrollRel[6], P[6][6];
+  int starts[48], nst = 0;
+  int palP, attrP, comboP, structP, blockP, mapP;
+  int attrLen, structLen, blockLen, mapLen, rows;
+  int cb;
+  uint8_t P16[16];
+  if (lv < 1 || lv > 16) return 0;
+  if (map_valid[lv - 1]) return 1;
+  b = map_bank_of(lv);
+  B = prg[b];
+  ns = map_bankn[b];
+  for (s = 0; s < ns; s++) {
+    int lvl = map_banklv[b][s];
+    int ho = s * 4;
+    int tr = (B[ho] | (B[ho + 1] << 8)) - 0x8000;
+    int sr = (B[ho + 2] | (B[ho + 3] << 8)) - 0x8000;
+    if (lvl == lv) s0 = s;
+    if (tr < ns * 4 || tr + 12 > 16384) return 0;
+    if (sr < 0 || sr + 16 > 16384) return 0;
+    tableRel[s] = tr; scrollRel[s] = sr;
+    for (i = 0; i < 6; i++) {
+      int rel = (B[tr + i * 2] | (B[tr + i * 2 + 1] << 8)) - 0x8000;
+      if (rel < ns * 4 || rel > 16384) return 0;
+      P[s][i] = rel;
+    }
+  }
+  if (s0 < 0) return 0;
+  for (s = 0; s < ns; s++) {
+    starts[nst++] = tableRel[s]; starts[nst++] = P[s][0]; starts[nst++] = P[s][5]; starts[nst++] = scrollRel[s];
+    starts[nst++] = P[s][2]; starts[nst++] = P[s][3]; starts[nst++] = P[s][4]; starts[nst++] = P[s][1];
+  }
+  palP = P[s0][0]; attrP = P[s0][1]; comboP = P[s0][2]; structP = P[s0][3]; blockP = P[s0][4]; mapP = P[s0][5];
+  attrLen = map_span_end(starts, nst, b, attrP) - attrP;
+  structLen = map_span_end(starts, nst, b, structP) - structP;
+  blockLen = map_span_end(starts, nst, b, blockP) - blockP;
+  mapLen = lv == 9 ? 800 : (lv == 13 ? 928 : 1024);
+  if (attrLen <= 0 || attrLen * 4 > map_span_end(starts, nst, b, comboP) - comboP) return 0;
+  if (structLen <= 0 || (structLen & 3)) return 0;
+  if (blockLen <= 0 || (blockLen & 3)) return 0;
+  if (mapP + mapLen > map_span_end(starts, nst, b, mapP)) return 0;
+  rows = mapLen / 32;
+  map_rows[lv - 1] = (uint8_t)rows;
+  for (i = 0; i < 16; i++) P16[i] = B[palP + i];
+  cb = map_chrbank[lv];
+  for (i = 0; i < rows * 32; i++) {
+    int bx = i % 32;
+    int q, bi = i;
+    int blk = B[mapP + bi];
+    if (blk < 0 || blk * 4 + 3 >= blockLen) blk = 0;
+    for (q = 0; q < 4; q++) {
+      int si = B[blockP + blk * 4 + q];
+      int sr = 0, sg = 0, sb2 = 0, k2, p2, c, best = 0, bestd = 1 << 30;
+      int ar, ag, ab;
+      for (k2 = 0; k2 < 4; k2++) {
+        int ci = B[structP + si * 4 + k2];
+        int sub = B[attrP + ci] & 3;
+        for (p2 = 0; p2 < 4; p2++) {
+          int ti = B[comboP + ci * 4 + p2];
+          int off = cb * 0x1000 + ti * 16;
+          int lo = chr[off], hi = chr[off + 8];
+          int v = ((lo >> 7) & 1) | (((hi >> 7) & 1) << 1);
+          int pi = (v == 0 ? P16[0] : P16[sub * 4 + v]) & 63;
+          sr += NESPAL[pi][0]; sg += NESPAL[pi][1]; sb2 += NESPAL[pi][2];
+        }
+      }
+      ar = sr / 16; ag = sg / 16; ab = sb2 / 16;
+      for (c = 0; c < 64; c++) {
+        int dr = ar - NESPAL[c][0], dg = ag - NESPAL[c][1], db = ab - NESPAL[c][2];
+        int d = dr * dr + dg * dg + db * db;
+        if (d < bestd) { bestd = d; best = c; }
+      }
+      map_px[lv - 1][(((i / 32) * 2 + (q >> 1)) * 64) + (bx * 2 + (q & 1))] = (uint8_t)best;
+    }
+  }
+  n = 0;
+  for (i = 0; i < 108; i++) {
+    int a = prg[7][0x1D7E + i];
+    int alv, dx, dy;
+    if (a >= 16) continue;
+    a &= 15;
+    alv = a < 8 ? a + 9 : a - 7;
+    if (alv != lv) continue;
+    dx = prg[7][0x1D7E + 108 + i] >> 2;
+    dy = prg[7][0x1D7E + 216 + i] >> 2;
+    if (dx < 0 || dx >= 32 || dy < 0 || dy >= rows || n >= 28) continue;
+    map_door_bx[lv - 1][n] = (uint8_t)dx;
+    map_door_by[lv - 1][n] = (uint8_t)dy;
+    n++;
+  }
+  map_door_n[lv - 1] = (uint8_t)n;
+  map_valid[lv - 1] = 1;
+  return 1;
+}
+static int map_gate(void) {
+  if (!enhanced_mode) return 0;
+  if (ram[0xDD] == 0 && ram[0x37E] == 0) return 0;
+  if (menu_phase || pmenu_phase || ev5_phase) return 0;
+  return 1;
+}
+static void map_put(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+  uint8_t *px;
+  if (x < 0 || x > 255 || y < 0 || y > 239) return;
+  px = &framebuf[(y * 256 + x) * 4];
+  px[0] = r; px[1] = g; px[2] = b; px[3] = 255;
+}
+static void map_blit(void) {
+  int area, lv, sx, sy, maxsy, rows, x, y, i;
+  if (!map_gate()) return;
+  area = ram[0x14] & 15;
+  lv = area < 8 ? area + 9 : area - 7;
+  if (lv < 1 || lv > 16) return;
+  if (!map_valid[lv - 1] && !map_build(lv)) return;
+  rows = map_rows[lv - 1];
+  sx = (scx + 128) >> 8; if (sx < 0) sx = 0; if (sx > 7) sx = 7;
+  sy = (scy + 120) >> 8; if (sy < 0) sy = 0;
+  maxsy = (rows + 3) >> 2; if (sy >= maxsy) sy = maxsy - 1;
+  for (x = MAP_X0 - 1; x <= MAP_X0 + 64; x++) {
+    map_put(x, MAP_Y0 - 1, 117, 117, 117);
+    map_put(x, MAP_Y0 + rows * 2, 117, 117, 117);
+  }
+  for (y = MAP_Y0 - 1; y <= MAP_Y0 + rows * 2; y++) {
+    map_put(MAP_X0 - 1, y, 117, 117, 117);
+    map_put(MAP_X0 + 64, y, 117, 117, 117);
+  }
+  for (y = 0; y < rows * 2; y++) for (x = 0; x < 64; x++) {
+    int sxx = x >> 3, syy = y >> 3;
+    int bit = (visit_bits[lv - 1][((syy * 8 + sxx) >> 3)] >> ((syy * 8 + sxx) & 7)) & 1;
+    uint8_t idx = map_px[lv - 1][y * 64 + x];
+    if (bit) map_put(MAP_X0 + x, MAP_Y0 + y, NESPAL[idx][0], NESPAL[idx][1], NESPAL[idx][2]);
+    else map_put(MAP_X0 + x, MAP_Y0 + y, (uint8_t)(NESPAL[idx][0] >> 2), (uint8_t)(NESPAL[idx][1] >> 2), (uint8_t)(NESPAL[idx][2] >> 2));
+  }
+  for (i = 0; i < map_door_n[lv - 1]; i++) {
+    int dx = MAP_X0 + map_door_bx[lv - 1][i] * 2;
+    int dy = MAP_Y0 + map_door_by[lv - 1][i] * 2;
+    map_put(dx, dy, 248, 184, 0); map_put(dx + 1, dy, 248, 184, 0);
+    map_put(dx, dy + 1, 248, 184, 0); map_put(dx + 1, dy + 1, 248, 184, 0);
+  }
+  {
+    int cx = MAP_X0 + sx * 8 + 4, cy = MAP_Y0 + sy * 8 + 4, dx, dy;
+    for (dy = -2; dy <= 2; dy++) for (dx = -2; dx <= 2; dx++) map_put(cx + dx, cy + dy, 167, 0, 0);
+    for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) map_put(cx + dx, cy + dy, 252, 252, 252);
+  }
+}
+void bm_map_invalidate(void) { int i; for (i = 0; i < 16; i++) map_valid[i] = 0; }
+int bm_map_thumb_hash(int lv) {
+  uint32_t h = 2166136261u;
+  int i;
+  if (lv < 1 || lv > 16) return -1;
+  if (!map_valid[lv - 1] && !map_build(lv)) return -1;
+  for (i = 0; i < 4096; i++) { h ^= map_px[lv - 1][i]; h *= 16777219u; }
+  h ^= map_rows[lv - 1]; h *= 16777219u;
+  return (int)(h & 0x7FFFFFFF);
+}
+int bm_map_doors(int lv) {
+  int i, n = 0;
+  if (lv < 1 || lv > 16) return -1;
+  for (i = 0; i < 108; i++) {
+    int a = prg[7][0x1D7E + i];
+    int alv;
+    if (a >= 16) continue;
+    a &= 15;
+    alv = a < 8 ? a + 9 : a - 7;
+    if (alv == lv) n++;
+  }
+  return n;
+}
+int bm_map_visible(void) { return map_gate(); }
 static int ev5_door_side(int area, int x, int y) {
   int i;
   for (i = 0; i < 108; i++) {
@@ -754,6 +963,7 @@ static void engine_reset_to_title(void) {
   pending_warp = -1; pending_warp_raw = -1; oracle_align_done = 0;
   bm_trap_seen = 0; bm_trap_val = 0; bm_trap_name[0] = 0; apu_head = 0; apu_tail = 0;
   memset(visit_bits, 0, sizeof visit_bits);
+  memset(map_valid, 0, sizeof map_valid);
   pad_sample_fn = pad_fn;
   nmi_fire_fn = nmi_frame;
   b7_entry_F23B();

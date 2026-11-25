@@ -8,9 +8,7 @@
 // shell detector module is kept on disk for cross-check only). Slot map:
 // shell 1..8 <-> engine 0..7. Wasm engine only.
 import { saveEntrance, loadEntrance, saveVisits, loadVisits } from '../pack/store.js';
-import { parseBank } from '../pack/levels.js';
-import { BG_CHR_BANK, chrBankBytes, paintMap } from '../pack/tiles.js';
-import { buildMinimap, decodeCur, fogCells, visitsHash } from '../pack/minimap.js';
+import { visitsHash } from '../pack/minimap.js';
 const LS_KEY = 'bm-enhance-v1';
 const MASTER_KEY = 'bm-enhance-master-v1';
 const SAVE_MAGIC = 0x424D5356;
@@ -65,8 +63,7 @@ export function buildEnhancePanel(env) {
     enabled: loadFlag(), master: loadMaster(),
     pushedMaster: -1, pushedSaving: -1, enableInp: null,
     listEl: null, packKey: null, refreshing: false,
-    visitCache: null, visitCur: -1, visitTimer: 240, visitDirty: false, wasPregame: null,
-    mapCv: null, mapCtx: null, mapCache: null, mapModel: null, mapModelKey: null, mapLast: null, mapCur: -2, visitHash: null, mapTick: 0, syncSeq: 0,
+    visitCache: null, visitCur: -2, visitTimer: 240, visitDirty: false, wasPregame: null, visitHash: null, syncSeq: 0,
   };
   const det = document.createElement('details');
   det.id = 'enhanceCtn';
@@ -172,25 +169,6 @@ export function buildEnhancePanel(env) {
     log('enhance: imported browser slot ' + n + ' to memory (Area ' + d.area + ' ' + d.x + ',' + d.y + ')');
     refreshList().catch(() => {});
   }
-  function playCtnEl() { try { return document.getElementById('playCtn'); } catch (eP) { return null; } }
-  function ensureMap() {
-    if (st.mapCv) return true;
-    var ctn = playCtnEl();
-    if (!ctn) return false;
-    try {
-      if (ctn.style.position !== 'relative' && ctn.style.position !== 'absolute') ctn.style.position = 'relative';
-      var cv = document.createElement('canvas');
-      cv.id = 'mapHud';
-      cv.width = 128; cv.height = 128;
-      cv.style.cssText = 'position:absolute;top:8px;right:8px;width:128px;height:128px;z-index:5;pointer-events:none;opacity:0.92;border:1px solid #888;background:#000';
-      cv.hidden = true;
-      ctn.appendChild(cv);
-      st.mapCv = cv;
-      st.mapCtx = cv.getContext('2d');
-      st.mapCache = new Map();
-      return true;
-    } catch (eM) { return false; }
-  }
   function readVisitBytes(ex) {
     try {
       if (!ex || !ex.bm_visit_ptr || !ex.memory) return null;
@@ -239,84 +217,6 @@ export function buildEnhancePanel(env) {
       st.visitDirty = false;
     } catch (eG) {}
   }
-  function ensureModel(pack, tag) {
-    var key = String(tag.pack) + '::' + String(tag.packCrc);
-    if (st.mapModel && st.mapModelKey === key) return st.mapModel;
-    try {
-      var mm = buildMinimap(pack);
-      if (!mm.ok) return null;
-      var ps = [parseBank(pack.prg[0], 0), parseBank(pack.prg[1], 1), parseBank(pack.prg[2], 2)];
-      if (!ps[0].ok || !ps[1].ok || !ps[2].ok) return null;
-      var L = {};
-      for (var q = 0; q < 3; q++) {
-        var ls = ps[q].levels;
-        for (var j = 0; j < ls.length; j++) L[ls[j].level] = ls[j];
-      }
-      st.mapModel = { key: key, info: mm.levels, L: L, chr: pack.chr };
-      st.mapModelKey = key;
-      st.mapCache = new Map();
-      st.mapLast = null;
-      return st.mapModel;
-    } catch (eB) { return null; }
-  }
-  function thumbFor(model, lv) {
-    var key = model.key + '::L' + lv;
-    if (st.mapCache.has(key)) return st.mapCache.get(key);
-    try {
-      var L = model.L[lv];
-      if (!L) return null;
-      var bg = chrBankBytes(model.chr, BG_CHR_BANK[lv]);
-      if (!bg) return null;
-      var cv = document.createElement('canvas');
-      paintMap(cv, L, bg, L.pal, { pxPerBlock: 4 });
-      st.mapCache.set(key, cv);
-      return cv;
-    } catch (eT) { return null; }
-  }
-  function drawMap(ex, cur, bytes) {
-    if (!st.master) { if (st.mapCv) st.mapCv.hidden = true; return; }
-    var d = decodeCur(cur);
-    if (!d) { if (st.mapCv) st.mapCv.hidden = true; return; }
-    if (!ensureMap()) return;
-    var pack = null;
-    try { pack = env.pack(); } catch (eP2) { pack = null; }
-    if (!pack) { st.mapCv.hidden = true; return; }
-    var model = ensureModel(pack, tagOf());
-    if (!model) { st.mapCv.hidden = true; return; }
-    var h = visitsHash(bytes);
-    var lkey = model.key + '::L' + d.lv + '::' + h;
-    if (st.mapLast === lkey) { st.mapCv.hidden = false; return; }
-    st.mapLast = lkey;
-    var thumb = thumbFor(model, d.lv);
-    var ctx = st.mapCtx;
-    if (!ctx) return;
-    ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, 128, 128);
-    if (thumb) ctx.drawImage(thumb, 0, 0);
-    var info = model.info[d.lv];
-    var cells = fogCells(bytes, info);
-    for (var i = 0; i < cells.length; i++) {
-      var c = cells[i];
-      if (!c.void && c.visited) continue;
-      ctx.fillStyle = c.void ? '#000' : 'rgba(0,0,0,0.78)';
-      ctx.fillRect(c.sx * 16, c.sy * 16, 16, 16);
-    }
-    ctx.fillStyle = '#fc0';
-    for (var t = 0; t < info.ticks.length; t++) {
-      var tk = info.ticks[t];
-      if (tk.py < info.rows * 4) ctx.fillRect(tk.px - 1, tk.py - 1, 3, 3);
-    }
-    var px = d.sx * 16 + 8, py = d.sy * 16 + 8;
-    ctx.fillStyle = '#f00';
-    ctx.beginPath(); ctx.arc(px, py, 5, 0, 6.2832); ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(px, py, 2.5, 0, 6.2832); ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 10px monospace';
-    ctx.fillText('L' + d.lv, 3, 11);
-    st.mapCv.hidden = false;
-  }
   async function doLoad(n) {
     const ex = exOf();
     if (!ex || !ex.bm_sram_load || !ex.bm_sram_info) { log('enhance: engine too old for slot loads'); return; }
@@ -359,7 +259,7 @@ export function buildEnhancePanel(env) {
       try { if (ex.bm_saving_set && st.pushedSaving !== (st.enabled ? 1 : 0)) { ex.bm_saving_set(st.enabled ? 1 : 0); st.pushedSaving = st.enabled ? 1 : 0; } } catch (e) {}
       let key = 'stock::unknown';
       try { const t = env.packTag(); key = String(t.pack) + '::' + String(t.packCrc); } catch (e) {}
-      if (key !== st.packKey) { st.packKey = key; st.mapLast = null; refreshList().catch(() => {}); syncVisits('pack'); }
+      if (key !== st.packKey) { st.packKey = key; refreshList().catch(() => {}); syncVisits('pack'); try { if (ex && ex.bm_map_invalidate) ex.bm_map_invalidate(); } catch (eI) {} }
       try {
         if (ex && ex.bm_visit_cur && ex.bm_ram_rd) {
           var dd = 0, ce = 0;
@@ -367,24 +267,18 @@ export function buildEnhancePanel(env) {
           var pregame = (dd === 0 && ce === 0);
           if (st.wasPregame === true && !pregame) syncVisits('edge');
           st.wasPregame = pregame;
-          var cur = -1;
-          try { cur = ex.bm_visit_cur(); } catch (eC2) { cur = -1; }
-          if (cur >= 0) {
+          if (pregame) st.visitTimer = 240;
+          else {
             st.visitTimer--;
-            var need = (cur !== st.mapCur);
-            st.mapCur = cur;
-            var bytes = null;
-            st.mapTick++;
-            if (need || st.mapTick % 30 === 0) {
-              bytes = readVisitBytes(ex);
-              if (bytes) {
-                var hh = visitsHash(bytes);
-                if (hh !== st.visitHash) { st.visitHash = hh; st.visitCache = bytes; st.visitDirty = true; need = true; }
+            if (st.visitTimer <= 0) {
+              st.visitTimer = 240;
+              var bb = readVisitBytes(ex);
+              if (bb) {
+                var hh = visitsHash(bb);
+                if (hh !== st.visitHash) { st.visitHash = hh; st.visitCache = bb; syncVisits('timer'); }
               }
-            } else if (st.visitCache) bytes = st.visitCache;
-            if (bytes) drawMap(ex, cur, bytes);
-            if (st.visitTimer <= 0) { st.visitTimer = 240; if (st.visitDirty) syncVisits('timer'); }
-          } else if (st.mapCv) st.mapCv.hidden = true;
+            }
+          }
         }
       } catch (eV) {}
     } catch (e) {}

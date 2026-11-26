@@ -1937,7 +1937,6 @@ if (editorBtn) editorBtn.addEventListener("click", async () => {
   } catch (e) { await openEditorView(); }
 });
 window.addEventListener("hashchange", editorRoute);
-try { if (location.hash === "#/editor") editorRoute(); } catch (e) {}
 // ---- P0 custom packs: selector + import/export/delete ----
 const packSel = document.getElementById("packSel");
 const packInput = document.getElementById("packInput");
@@ -2453,3 +2452,5 @@ async function shellManualReport() {
 }
 window.BM.reportBug = shellManualReport;
 reportBtn.addEventListener("click", () => { shellManualReport().catch((e) => { shellLog("report err " + e.message); }); });
+// Deep-link boot (runs after all shell panels exist so the editor view hides everything).
+try { if (location.hash === "#/editor") editorRoute(); } catch (e) {}

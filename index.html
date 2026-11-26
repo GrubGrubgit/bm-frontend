@@ -12,6 +12,21 @@
 button,select,input[type=range]{min-height:44px;font-size:16px}
 input[type=checkbox]{min-height:44px;width:44px}
 button{padding:10px 14px;margin:2px}
+:root{color-scheme:dark}
+button{background:#243;color:#eee;border:1px solid #6c6;border-radius:4px;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}
+button:hover:not(:disabled){background:#2e5a38}
+select,input[type=text],input[type=number],input[type=file],textarea{background:#111;color:#eee;border:1px solid #888;border-radius:4px}
+select{padding:8px 10px}
+option{background:#111;color:#eee}
+input[type=checkbox],input[type=radio]{accent-color:#6c6}
+input[type=range]{accent-color:#6c6}
+input::placeholder{color:#999}
+label,td,th,summary{color:#eee}
+details{background:#181818;border:1px solid #444;border-radius:4px;margin:6px 0;padding:4px 8px}
+summary{cursor:pointer;padding:8px;background:#223;font-size:16px;border-radius:4px}
+a{color:#8cf}
+:focus-visible{outline:2px solid #8f8;outline-offset:1px}
 #shellGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
 #shellGrid button{width:100%}
 .shellRow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;margin:6px 0}

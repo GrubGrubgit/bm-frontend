@@ -10,6 +10,7 @@ import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
 import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
 import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine } from "../pack/gaps.js";
 import { getAreaSongs, serializeAreaSongs, AREA_TABLE } from "../pack/sound.js";
+import { parseSong, songLine } from "../pack/songs.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
@@ -97,6 +98,7 @@ function repaint() {
   renderRENotes();
   renderSoundNotes();
   renderAreaSongs();
+  renderSongBrowser();
   renderPalStrip(E);
   fillChrBankSel();
   renderChrTab(E);
@@ -594,6 +596,31 @@ function commitAreaSong(i, value) {
   S.edAreaSongs[i] = value;
   log("editor: areaSongs a" + i + " -> " + value + " (GLOBAL per area&7)");
   repaint();
+}
+
+function renderSongBrowser() {
+  const inp = el("edSongSel"), out = el("edSongOut");
+  if (!inp && !out) return;
+  const show = function (raw) {
+    if (!out) return;
+    try {
+      const base = S.resolved ? S.resolved.prg[5] : null;
+      if (!base) { out.textContent = 'song: n/a'; return; }
+      let s = String(raw == null ? '' : raw).trim().toLowerCase();
+      if (s.charAt(0) === '$') s = s.slice(1);
+      const id = parseInt(s, 16);
+      const r = parseSong(base, id);
+      if (!r.ok) { out.textContent = 'song $' + s + ': ' + r.errors.join(' '); return; }
+      out.textContent = songLine(r);
+    } catch (err) { out.textContent = 'song: n/a'; }
+  };
+  if (inp) {
+    if (!inp.dataset.wired) {
+      inp.dataset.wired = '1';
+      inp.addEventListener('change', function () { show(inp.value); });
+    }
+    show(inp.value);
+  }
 }
 function renderAreaSongs() {
   const info = el("edAreaSongInfo"), tbl = el("edAreaSongTbl");

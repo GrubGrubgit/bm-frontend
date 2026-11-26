@@ -8,7 +8,7 @@ import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack
 import { SPR_PAL, SPR_CYCLE, spriteBanksFor, isPureSpriteBank } from "../pack/sprites.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
 import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
-import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText } from "../pack/gaps.js";
+import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine } from "../pack/gaps.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
@@ -94,6 +94,7 @@ function repaint() {
   renderEnemies();
   renderStatTbl();
   renderRENotes();
+  renderSoundNotes();
   renderPalStrip(E);
   fillChrBankSel();
   renderChrTab(E);
@@ -572,6 +573,23 @@ function renderRENotes() {
       else if (!d.sides.length) dz.textContent = 'no door sides in area $' + d.area.toString(16);
       else dz.textContent = 'area $' + d.area.toString(16) + ': ' + d.sides.map(function (s) { return 'r' + s.row + '($' + s.x.toString(16) + ',$' + s.y.toString(16) + ')->a$' + s.toArea.toString(16) + '($' + s.toX.toString(16) + ',$' + s.toY.toString(16) + ')'; }).join(' ');
     } catch (err) { dz.textContent = 'doors: n/a'; }
+  }
+}
+
+function renderSoundNotes() {
+  const nz = el("edSoundNotes"), inp = el("edSoundId"), out = el("edSoundOut");
+  if (!nz && !out) return;
+  try {
+    if (nz) nz.textContent = areaSongText(S.level) + ' || ' + soundText();
+  } catch (err) { if (nz) nz.textContent = "sound: n/a"; }
+  if (inp && out) {
+    if (!inp.dataset.wired) {
+      inp.dataset.wired = "1";
+      inp.addEventListener("change", function () {
+        try { out.textContent = soundSitesLine(inp.value); } catch (err) { out.textContent = 'sound: n/a'; }
+      });
+    }
+    try { out.textContent = soundSitesLine(inp.value); } catch (err) { out.textContent = 'sound: n/a'; }
   }
 }
 function renderEnemies() {

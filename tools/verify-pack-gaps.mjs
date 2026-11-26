@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
 import { buildPack } from "../src/pack/builder.js";
 import { TANK_TYPE_ACTOR, TYPE_ACTOR, TANK_TRAP_TYPES, INVALID_TYPES, TANK_DORMANT_TYPES, tankEmptyType, powerupSubtype, spawnTypeAllowed } from "../src/pack/enemies.js";
 import { DUN_TABLE, TANK_TABLE } from "../src/pack/behavior.js";
-import { behaviorFor, behaviorText, doorsForLevel, levelArea, physicsText, slotText } from "../src/pack/gaps.js";
+import { behaviorFor, behaviorText, doorsForLevel, levelArea, physicsText, slotText, areaSongText, soundText, soundSitesLine } from "../src/pack/gaps.js";
 import { parseDoors, pairOf } from "../src/pack/doors.js";
 const PROJ = "/data/data/com.termux/files/home/storage/AiAgent/def7cmrvqe";
 let pass = 0, fail = 0;
@@ -64,6 +64,20 @@ const stock = buildPack(rom, "ref.nes").pack;
   ok("doors 108+involution", inv);
   ok("doors known pair", pd.rows[0].area === 8 && pd.rows[1].area === 9, JSON.stringify(pd.rows[0]) + JSON.stringify(pd.rows[1]));
 }
+
+// ---- sound notes (6.4e v2 model, read-only) ----
+{
+  const a1 = areaSongText(1);
+  ok("area song L1", a1.indexOf("area $8") >= 0 && a1.indexOf("song $6") >= 0 && a1.indexOf("$2d") >= 0);
+  const a9 = areaSongText(9);
+  ok("area song L9", a9.indexOf("area $0") >= 0 && a9.indexOf("$1e") >= 0 && a9.indexOf("$51") >= 0);
+  const st = soundText();
+  ok("sound text", st.indexOf("50") >= 0 && st.indexOf("43") >= 0 && st.indexOf("15") >= 0 && st.indexOf("110") >= 0 && st.indexOf("$34") >= 0);
+  ok("sites 2d", soundSitesLine("2d").indexOf("b6@9499") >= 0 && soundSitesLine("2d").indexOf("byte10==2") >= 0);
+  ok("sites dollar+upper", soundSitesLine("$2D").indexOf("b6@9499") >= 0);
+  ok("sites invalid", soundSitesLine("zz").indexOf("invalid") >= 0 && soundSitesLine("99").indexOf("invalid") >= 0 && soundSitesLine("").indexOf("invalid") >= 0);
+  ok("sites unpinned", soundSitesLine("05").indexOf("no pinned") >= 0);
+}
 // ---- editor wiring statics ----
 {
   const ed = readFileSync(PROJ + "/frontend/src/ui/editor.js", "utf8");
@@ -72,6 +86,8 @@ const stock = buildPack(rom, "ref.nes").pack;
   ok("ed trap checks", ed.split("spawnTypeAllowed(key[0]").length - 1 === 2);
   ok("ed AI column", ed.includes(behaviorText.name || "behaviorText") && ed.includes("behaviorFor(key[0]"));
   ok("ed notes call", ed.includes("renderRENotes();") && ed.includes("doorsForLevel(S.resolved"));
+  ok("ed sound call", ed.includes("renderSoundNotes();") && ed.includes("areaSongText(S.level"));
+  ok("html sound divs", hx.includes("edSoundNotes") && hx.includes("edSoundId") && hx.includes("edSoundOut"));
   ok("html notes divs", hx.includes("edRENotes") && hx.includes("edDoorList"));
 }
 console.log("---- gaps: " + pass + " pass / " + fail + " fail ----");

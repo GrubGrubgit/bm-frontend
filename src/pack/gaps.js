@@ -1,10 +1,11 @@
 // Editor-gap batch: read-only RE summaries for the editor (pure, no DOM).
-// Wires 6.4f physics + 6.4g behavior + P4 doors into the enemies tab and a
-// notes panel. All facts proven headless elsewhere (see PLAN 6.1/6.4f/6.4g).
+// Wires 6.4f physics + 6.4g behavior + P4 doors + 6.4e sound into the enemies tab and a
+// notes panel. All facts proven headless elsewhere (see PLAN 6.1/6.4f/6.4g/6.4e).
 import { TANK_TYPE_ACTOR, TYPE_ACTOR, TANK_TRAP_TYPES, INVALID_TYPES, TANK_DORMANT_TYPES, tankEmptyType, powerupSubtype, BOSS_TYPE } from "./enemies.js";
 import { DUN_TABLE, TANK_TABLE, SLOT_BASE, SLOT_STRIDE, SLOT_N, DUN_TABLE_BASE, TANK_TABLE_BASE } from "./behavior.js";
 import { JASON_RUN, JASON_JUMP, TANK } from "./physics.js";
 import { parseDoors, pairOf } from "./doors.js";
+import { songForArea, isSongId, sitesFor, siteCount, REQ_PATHS, MUSIC } from "./sound.js";
 const NOTES = { 85: "dungeon walker: falls to floor, patrols X +-15/f", 89: "converter output (camera-approach)", 69: "tank flyer: slow +X drift, rising Y", 35: "powerup loiter (static, countdown)", 91: "boss egg: b11 C0-set countdown", 99: "boss: dormant post-morph, then active" };
 export function behaviorFor(isTank, type) {
   const t = type | 0;
@@ -46,4 +47,28 @@ export function physicsText() {
 }
 export function slotText() {
   return "slots " + SLOT_N + "x14B @ $" + SLOT_BASE.toString(16) + " stride $" + SLOT_STRIDE.toString(16) + " | dungeon ($7A)=$" + DUN_TABLE_BASE.toString(16) + " word[actor] tank ($7A)=$" + TANK_TABLE_BASE.toString(16) + " word[type-1]";
+}
+
+export function areaSongText(level) {
+  const area = levelArea(level);
+  const song = songForArea(area);
+  const hex = function (n) { return "$" + n.toString(16); };
+  if (level > 8) return "L" + level + " area " + hex(area) + " entry song " + hex(song) + " | tank hits " + hex(MUSIC.HIT_TANK) + " fire-and-forget, destruction " + hex(MUSIC.EXPLOSION) + " -> area-0 reload";
+  return "L" + level + " area " + hex(area) + " entry song " + hex(song) + " | dungeon BGM " + hex(MUSIC.BGM_DUNGEON) + ", hit " + hex(MUSIC.HIT_DUNGEON) + " -> restore, Up fanfare " + hex(MUSIC.DOOR_FANFARE);
+}
+export function soundText() {
+  return "sound: bank6 " + REQ_PATHS.BANK6 + " + bank4 " + REQ_PATHS.BANK4 + " + bank7 " + REQ_PATHS.BANK7 + " request sites, " + siteCount() + " pinned song-site rows; song table 85 ids (0/6 alias); $34/$52 triggers unobserved";
+}
+export function soundSitesLine(raw) {
+  let s = String(raw == null ? "" : raw).trim().toLowerCase();
+  if (s.charAt(0) === "$") s = s.slice(1);
+  if (s.charAt(0) === "0" && s.charAt(1) === "x") s = s.slice(2);
+  let hexok = s.length >= 1 && s.length <= 2;
+  for (let i = 0; i < s.length && hexok; i++) hexok = "0123456789abcdef".indexOf(s.charAt(i)) >= 0;
+  const id = hexok ? parseInt(s, 16) : -1;
+  if (!hexok || !isSongId(id)) return "invalid song id (00-54 hex)";
+  const rows = sitesFor(id);
+  const tag = "$" + (s.length === 1 ? "0" + s : s);
+  if (!rows.length) return "song " + tag + ": no pinned request sites";
+  return "song " + tag + ": " + rows.map(function (r) { return "b" + r.b + "@" + r.cpu.toString(16) + " " + r.n; }).join(" | ");
 }

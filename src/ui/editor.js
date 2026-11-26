@@ -27,6 +27,7 @@ for (const [lvl, b] of Object.entries(BG_CHR_BANK)) {
 }
 for (const k of Object.keys(BANK_USERS)) BANK_USERS[k].sort((a, b) => a - b);
 function el(id) { return document.getElementById(id); }
+function log(m) { try { api.log(m); } catch (e) {} }
 const ED_LEVEL_KEY = "bm-editor-level";
 function loadPersistedLevel() {
   try {

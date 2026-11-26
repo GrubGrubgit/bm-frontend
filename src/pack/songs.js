@@ -211,3 +211,30 @@ export function serializeSites(banks, edited) {
   if (errors.length) return { ok: false, errors };
   return { ok: true, errors: [], bytes: out, banks: Array.from(touched).sort() };
 }
+
+// ---- S6: per-site override plumbing ----
+// Hook-7 coverage is build-synthesized; these 6 SITES rows have no lifted
+// LDA in the current lift (real ROM LDA+JSR, never lifted, never observed;
+// reaching them would trap, so no override could take effect). The editor
+// renders them read-only and refuses commits; verify-sound-s6.mjs pins this
+// list. If a future lift covers them, hook 7 picks them up automatically and
+// this list + the suite get updated together.
+export const SITE_HOOK7_UNHOOKED = ['6:a33b', '6:b66c', '6:9f56', '4:ac80', '4:b879', '4:aec1'];
+export function sitesMapOf(edited) {
+  const errors = []; const map = {};
+  const keys = Object.keys(edited || {});
+  for (let i = 0; i < keys.length; i++) {
+    const raw = String(keys[i]);
+    const parts = raw.split(':');
+    if (parts.length !== 2) { errors.push(raw + ':bad-key'); continue; }
+    const bank = +parts[0], cpu = parseInt(parts[1], 16);
+    const v = edited[keys[i]];
+    if (!(bank === 4 || bank === 6 || bank === 7) || !(cpu >= 0 && cpu <= 0xFFFF && (cpu | 0) === cpu)) { errors.push(raw + ':bad-key'); continue; }
+    if (bank === 4 && cpu === 0xA120) { errors.push(raw + ':t-is-data'); continue; }
+    if (SITE_HOOK7_UNHOOKED.indexOf(bank + ':' + cpu.toString(16)) >= 0) { errors.push(raw + ':unhooked'); continue; }
+    if (!Number.isInteger(v) || v < 0 || v > 84) { errors.push(raw + ':range'); continue; }
+    map[bank + ':' + cpu.toString(16)] = v;
+  }
+  if (errors.length) return { ok: false, errors: errors, map: null };
+  return { ok: true, errors: [], map: map };
+}

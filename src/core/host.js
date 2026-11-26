@@ -104,6 +104,16 @@ GameHost.prototype.spawn = async function (pack, wasmUrl) {
   var mem = new Uint8Array(ex.memory.buffer);
   mem.set(new Uint8Array(prg), ex.bm_stage_ptr());
   ex.bm_load_prg();
+  try {
+    if (ex.bm_siteovr_reset) {
+      ex.bm_siteovr_reset();
+      var s6sm = (pack && pack.custom && pack.custom.sites) || null;
+      if (s6sm) for (var s6sk in s6sm) {
+        var s6sp = String(s6sk).split(':');
+        ex.bm_siteovr_set(+s6sp[0], parseInt(s6sp[1], 16), s6sm[s6sk] | 0);
+      }
+    }
+  } catch (eSite) {}
   mem.set(new Uint8Array(chr), ex.bm_stage_ptr());
   ex.bm_load_chr();
   var bootP = WebAssembly.promising(ex.bm_boot)();

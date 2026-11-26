@@ -43,6 +43,27 @@ function checkPatch(p, i, errors) {
   if (p.offset + raw.length > sz) { errors.push("patch:" + i + ":overflow"); return null; }
   return { area: p.area, bank: p.bank, offset: p.offset, bytes: raw };
 }
+// S6 per-site song overrides: optional sites map {siteKey: songId} on a
+// custom pack (siteKey = bank + ":" + lowercase hex cpu, e.g. "6:9757").
+// Format-validated here; the editor only writes known SITES keys. Unknown
+// but well-formed keys are inert (no hooked LDA consults them). Applied to
+// the wasm engine at spawn (host.js); mesen ignores them (ROM bytes govern).
+const SITES_KEY_RE = /^[467]:[0-9a-f]{1,4}$/;
+const SITES_MAX = 110;
+function checkSites(sites, errors) {
+  if (sites === undefined) return undefined;
+  if (!sites || typeof sites !== "object" || Array.isArray(sites)) { errors.push("sites:not-object"); return null; }
+  const keys = Object.keys(sites);
+  if (keys.length > SITES_MAX) { errors.push("sites:too-many"); return null; }
+  const n0 = errors.length;
+  const out = {};
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i], v = sites[k];
+    if (!SITES_KEY_RE.test(k) || !Number.isInteger(v) || v < 0 || v > 84) errors.push("sites:" + k);
+    else out[k] = v;
+  }
+  return errors.length === n0 ? out : null;
+}
 export function validateCustomPack(p) {
   const errors = [];
   if (!p || typeof p !== "object") return { ok: false, errors: ["not-object"] };
@@ -53,15 +74,17 @@ export function validateCustomPack(p) {
   if (!Array.isArray(p.patches)) errors.push("bad-patches");
   else if (p.patches.length > MAX_PATCHES) errors.push("too-many-patches");
   const clean = [];
+  let sites = undefined;
   if (errors.length === 0) {
     for (let i = 0; i < p.patches.length; i++) {
       const c = checkPatch(p.patches[i], i, errors);
       if (c) clean.push(c);
       if (errors.length > 8) { errors.push("..."); break; }
     }
+    if (p.sites !== undefined) sites = checkSites(p.sites, errors);
   }
   if (errors.length) return { ok: false, errors: errors };
-  return { ok: true, errors: [], clean: clean };
+  return { ok: true, errors: [], clean: clean, sites: sites };
 }
 // Byte-run diff with small-gap coalescing (<16B equal gaps fold into the
 // surrounding run to keep patch counts low). Pure; used by the editor save
@@ -114,7 +137,7 @@ export function applyOverlay(stockPack, customPack) {
     pack: {
       meta: Object.assign({}, stockPack.meta),
       prg: prg, chr: chr,
-      custom: { id: customPack.id, name: customPack.name, crc: crc }
+      custom: { id: customPack.id, name: customPack.name, crc: crc, sites: cv.sites }
     }
   };
 }

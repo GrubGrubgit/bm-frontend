@@ -10,14 +10,14 @@ import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
 import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
 import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine } from "../pack/gaps.js";
 import { getAreaSongs, serializeAreaSongs, AREA_TABLE } from "../pack/sound.js";
-import { parseSong, songLine, remapSongs, ptrOf, allSiteInfos, getTankSongs, serializeTankSongs } from '../pack/songs.js';
+import { parseSong, songLine, remapSongs, ptrOf, allSiteInfos, getTankSongs, serializeTankSongs, sitesMapOf, SITE_HOOK7_UNHOOKED } from '../pack/songs.js';
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
   brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
-  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {}, edSongPtr: {}, edSiteFilter: '', edTankSongs: {},
+  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {}, edSongPtr: {}, edSiteFilter: '', edTankSongs: {}, edSites: {},
   chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
 };
 // 4KB CHR bank -> levels using it as bg bank (labels for the bank picker).
@@ -663,7 +663,7 @@ function renderSites() {
     rows.push(r);
   }
   const hr = document.createElement('tr');
-  const heads = ['site', 'song', 'note'];
+  const heads = ['site', 'song', 'ovr', 'note'];
   for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }
   tbl.appendChild(hr);
   for (let i = 0; i < rows.length; i++) {
@@ -671,10 +671,43 @@ function renderSites() {
     const tr = document.createElement('tr');
     const td0 = document.createElement('td'); td0.textContent = r.key + ' ' + r.shape; tr.appendChild(td0);
     const td1 = document.createElement('td'); td1.textContent = '$' + r.id.toString(16) + ' (' + r.cur + ')'; tr.appendChild(td1);
+    const td2 = document.createElement('td');
+    if (SITE_HOOK7_UNHOOKED.indexOf(r.key) >= 0) { td2.textContent = 'unlifted'; td2.title = 'no lifted LDA in this build: override has no effect (see songs.js SITE_HOOK7_UNHOOKED)'; }
+    else {
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.min = 0; inp.max = 84; inp.value = effSite(r.key, r.cur);
+      inp.style.width = '56px'; inp.dataset.key = r.key;
+      inp.addEventListener('change', function () { commitSite(this.dataset.key, this.value | 0); });
+      td2.appendChild(inp);
+      const lv = siteLiveMap()[r.key];
+      if (lv !== undefined) { const sp = document.createElement('span'); sp.textContent = ' pack:$' + lv.toString(16); sp.title = 'active pack override (engine-live)'; td2.appendChild(sp); }
+    }
+    tr.appendChild(td2);
     const td3 = document.createElement('td'); td3.textContent = r.note; tr.appendChild(td3);
     tbl.appendChild(tr);
   }
-  if (info) info.textContent = rows.length + ' sites read-only (code immediates are compiled into the engine; tank table below is data)';
+  if (info) info.textContent = rows.length + ' I/L sites, hook-7 live overrides (blank = stock)' + ' | unlifted rows read-only | tank table below is data';
+}
+function siteLiveMap() {
+  try {
+    const c = S.resolved && S.resolved.custom;
+    if (c && c.sites && typeof c.sites === 'object') return c.sites;
+  } catch (err) {}
+  return {};
+}
+function effSite(key, cur) {
+  const e = S.edSites[key];
+  return (e === undefined) ? cur : e;
+}
+function commitSite(key, value) {
+  if (SITE_HOOK7_UNHOOKED.indexOf(key) >= 0 || !Number.isInteger(value) || value < 0 || value > 84) {
+    log('editor: sites refusing out-of-range/unlifted ' + key + '=' + value);
+    repaint();
+    return;
+  }
+  S.edSites[key] = value;
+  log('editor: sites ' + key + ' -> $' + value.toString(16));
+  repaint();
 }
 function effTankSong(i) {
   const base = S.resolved ? S.resolved.prg[4] : null;
@@ -1041,6 +1074,20 @@ async function saveAsPack() {
         patches.push(makePatch('prg', 4, run.off, run.bytes));
       }
     }
+    let sitesDoc = undefined;
+    if (Object.keys(S.edSites).length) {
+      const sm = sitesMapOf(S.edSites);
+      if (!sm.ok) throw new Error('serialize sites: ' + sm.errors.join(' '));
+      const sz = serializeSites(S.resolved.prg, S.edSites);
+      if (!sz.ok) throw new Error('serialize sites: ' + sz.errors.join(' '));
+      for (let bi = 0; bi < sz.banks.length; bi++) {
+        const b = sz.banks[bi];
+        for (const run of diffRuns(S.stock.prg[b], sz.bytes[b])) {
+          patches.push(makePatch('prg', b, run.off, run.bytes));
+        }
+      }
+      sitesDoc = sm.map;
+    }
     if (Object.keys(S.edEnemies).length) {
       let structural = false;
       for (const k of Object.keys(S.edEnemies)) {
@@ -1058,6 +1105,7 @@ async function saveAsPack() {
     if (!patches.length) { say("no changes to save"); return; }
     const id = newCustomId();
     const doc = { customVersion: 1, id, name, baseCrc: S.stock.meta.crc32, patches, editorVersion: "p3", builtAt: new Date().toISOString() };
+    if (sitesDoc) doc.sites = sitesDoc;
     await saveCustomPack(doc);
     S.edited = {};
     S.chr = {};
@@ -1067,6 +1115,7 @@ async function saveAsPack() {
     S.edAreaSongs = {};
     S.edSongPtr = {};
     S.edTankSongs = {};
+    S.edSites = {};
     repaint();
     try { await api.refreshPacks(); } catch (e) {}
     try { if (api.setPack) api.setPack(id); } catch (e2) {}
@@ -1092,6 +1141,7 @@ async function loadAll() {
   S.edStats = {};
   S.edTankStats = {};
   S.edTankSongs = {};
+  S.edSites = {};
   const pe = parseSpawns(active.prg[SPAWN_BANK]);
   if (!pe.ok) throw new Error("parse enemies: " + pe.errors.join(" "));
   S.enemies = pe;

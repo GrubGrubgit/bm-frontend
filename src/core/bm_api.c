@@ -53,6 +53,49 @@ static void save_stage_freeze(void);
 // BEFORE the engine include so the vendored lives-gate (hook 6) can see it.
 // Sticky across bm_boot, excluded from freeze/thaw blobs (like enhanced_mode).
 static int saving_on = 0;
+// ---- S6 per-site song override (engine+recomp hook; hook 7 in tools/patch_hook7.py) ----
+// The static recomp bakes LDA-immediate song ids into wasm, so staged prg
+// patches cannot change code request sites. Hook 7 rewrites each lifted site
+// LDA into A = song_site_ovr(bank, cpu, stock): a pack-driven sparse table
+// with stock fallback, so stock behavior is bit-identical with no overrides.
+// Sticky config (like saving_on/enhanced_mode): re-applied at spawn from the
+// pack sites map, excluded from freeze/thaw blobs.
+#define SITEOVR_MAX 128
+static uint8_t siteovr_bank[SITEOVR_MAX];
+static uint16_t siteovr_cpu[SITEOVR_MAX];
+static uint8_t siteovr_id[SITEOVR_MAX];
+static int siteovr_n = 0;
+static uint8_t song_site_ovr(int bank, int cpu, uint8_t stock) {
+  int i;
+  for (i = 0; i < siteovr_n; i++) {
+    if (siteovr_bank[i] == bank && siteovr_cpu[i] == cpu) return siteovr_id[i];
+  }
+  return stock;
+}
+void bm_siteovr_reset(void) { siteovr_n = 0; }
+void bm_siteovr_set(int bank, int cpu, int id) {
+  int i;
+  if (bank != 4 && bank != 6 && bank != 7) return;
+  if (cpu < 0 || cpu > 0xFFFF) return;
+  for (i = 0; i < siteovr_n; i++) {
+    if (siteovr_bank[i] == bank && siteovr_cpu[i] == cpu) {
+      if (id < 0 || id > 84) {
+        siteovr_n = siteovr_n - 1;
+        siteovr_bank[i] = siteovr_bank[siteovr_n];
+        siteovr_cpu[i] = siteovr_cpu[siteovr_n];
+        siteovr_id[i] = siteovr_id[siteovr_n];
+      } else {
+        siteovr_id[i] = (uint8_t)id;
+      }
+      return;
+    }
+  }
+  if (id < 0 || id > 84 || siteovr_n >= SITEOVR_MAX) return;
+  siteovr_bank[siteovr_n] = (uint8_t)bank;
+  siteovr_cpu[siteovr_n] = (uint16_t)cpu;
+  siteovr_id[siteovr_n] = (uint8_t)id;
+  siteovr_n = siteovr_n + 1;
+}
 // ---- E2 main menu session state (early: pad_fn + forward decls) ----
 // Menu lives in the engine (no shell dependence). Opens on the title-screen
 // Start edge and the intro skip button while enhanced (stock path untouched
@@ -1454,6 +1497,8 @@ static void menu_boot_reset(void) {
   pmenu_inject = 0; pmenu_cause = 0; pmenu_prev_be = 0; pmenu_pending_load = -1; pmenu_swallow_cd = 0;
   ev5_phase = 0; ev5_run = 0; ev5_lastkey = -1; ev5_cursor = 0; ev5_cool = 0; ev5_pending_save = -1; ev5_pending_down = 0; ev5_down_inj = 0; ev5_snap_taken = 0; ev5_saw_one = 0; ev5_be0run = 0;
 }
+// S6 hook-7 report: high 16 = hooked sites, low 16 = rewritten LDA copies.
+int bm_siteovr_info(void) { return (HOOK7_SITES << 16) | HOOK7_REWRITES; }
 void bm_boot(void) {
   engine_reset_to_title();
 }

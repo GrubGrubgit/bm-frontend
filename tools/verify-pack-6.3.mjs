@@ -120,6 +120,17 @@ for (const j of eggJobs) {
   ok('kill FB=01+6a x2', hasActor(R1, 1800, '6a') && ev(R1, 1800) === ev(R2, 1800) && ev(R1, 1800).indexOf('fb=01008000') >= 0, ev(R1, 1800));
   ok('kill stable+FC=00', ev(R1, 1900) === ev(R1, 1800), ev(R1, 1900));
 }
+// ---- item 4: L9FE6 +1 mechanism (actor-62 behavior A571 inc, sole user) ----
+{
+  const tbase = 0x8006 - 0x8000;
+  ok('tank behavior table base 8006', (b4[0x00] | (b4[0x01] << 8)) === 0x8006, hx(b4, 0, 2));
+  const e62 = b4[tbase + 97 * 2] | (b4[tbase + 97 * 2 + 1] << 8);
+  ok('actor-62 behavior is A571', e62 === 0xA571, e62.toString(16));
+  const users = [];
+  for (let i = 0; i < 140; i++) { const w = b4[tbase + i * 2] | (b4[tbase + i * 2 + 1] << 8); if (w === 0xA571) users.push(i); }
+  ok('A571 sole user is index 97', users.length === 1 && users[0] === 97, JSON.stringify(users));
+  ok('A571 init plus inc46+rts', hx(b4, 0x2571, 16) === 'eaeaeaa9808553a90085508551a90085' && hx(b4, 0x2586, 3) === 'e64660', hx(b4, 0x2571, 8));
+}
 console.log('----');
 console.log((fail === 0 ? '6.3 ALL ' + pass + ' CHECKS GREEN' : '6.3 FAILURES: ' + fail));
 process.exit(fail === 0 ? 0 : 1);

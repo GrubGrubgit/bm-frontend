@@ -132,5 +132,32 @@ function sig(snaps) { return snaps.map(s => Array.from(s.ram).join(',') + '|' + 
   const d = wd(R.snaps.map(s => s.ram[ADDR.Y_LO_TANK]));
   ok('T-Yup-tap instant -24 x5, instant stop (no -8)', d.slice(5, 10).every(v => v === -24) && d.slice(10, 20).every(v => v === 0), JSON.stringify(d.slice(3, 18)));
 }
+{
+  const R = await trace(8, (n) => n === 61 ? 8 : ((n >= 960 && n < 975) ? 129 : 0), [950, 1030]);
+  ok('V16 window hp flat', R.trap === null && flat(R.snaps, 0, R.snaps.length - 1));
+  const S = R.snaps;
+  const V = (s) => { const u = (s.ram[ADDR.Y_HI_TANK] << 8) | s.ram[ADDR.Y_LO_TANK]; return (u >= 0x8000 ? u - 0x10000 : u) - JASON_JUMP.VREST; };
+  const tk = S.findIndex((s, i) => i + 1 < S.length && s.ram[ADDR.Y_LO_TANK] === 128 && s.ram[ADDR.Y_HI_TANK] === 59 && S[i + 1].ram[ADDR.Y_LO_TANK] !== 128);
+  ok('V16 takeoff found', tk > 0, 'tk=' + tk);
+  const Vs = S.map(V);
+  const ds = [];
+  for (let i = tk; i < S.length - 1; i++) ds.push(Vs[i + 1] - Vs[i]);
+  const exp = [];
+  for (let v = -64; v <= -36; v += 2) exp.push(v);
+  exp.push(0);
+  for (let v = 2; v <= 52; v += 2) exp.push(v);
+  exp.push(48);
+  const flight = ds.slice(0, exp.length);
+  ok('V16 exact 43-frame flight series', flight.length === exp.length && flight.every((v, i) => v === exp[i]), flight.slice(0, 6).join(',') + '...');
+  ok('V16 rest zeros after landing', ds.slice(exp.length).every(v => v === 0));
+  ok('7D = Y0 + floor(V/16) all frames', S.every(s => s.ram[ADDR.JASON_Y] === JASON_JUMP.Y0 + Math.floor(V(s) / 16)));
+  ok('405 rest 59 both ends', S[0].ram[ADDR.Y_HI_TANK] === 59 && S[S.length - 1].ram[ADDR.Y_HI_TANK] === 59);
+  const R2 = await trace(8, (n) => n === 61 ? 8 : ((n >= 960 && n < 975) ? 129 : 0), [950, 1030]);
+  ok('V16 determinism x2', sig(R.snaps) === sig(R2.snaps));
+}
+{
+  const R = await trace(0, (n) => n === 61 ? 8 : 0, [858, 866]);
+  ok('tank rest pair (22,128)', R.trap === null && R.snaps.every(s => s.ram[ADDR.Y_LO_TANK] === 128 && s.ram[ADDR.Y_HI_TANK] === 22));
+}
 console.log('---- 6.4f: ' + pass + ' pass / ' + fail + ' ----');
 process.exit(fail ? 1 : 0);

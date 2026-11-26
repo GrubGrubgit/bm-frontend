@@ -3,7 +3,7 @@
 // custom pack (never mutates stock). Overhead combo attrs editable per
 // research 6.2 (bit meanings PROVEN headless, see levels.js).
 import { parseBank, serializeBank, LEVEL_MODE, bankFreeBytes } from "../pack/levels.js";
-import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
+import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, renderBlockImage, NES_PALETTE, MAP_COLS } from "../pack/tiles.js";
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
 import { SPR_PAL, SPR_CYCLE, spriteBanksFor, isPureSpriteBank } from "../pack/sprites.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
@@ -19,6 +19,7 @@ const S = {
   brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
   chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {}, edSongPtr: {}, edSiteFilter: '', edTankSongs: {}, edSites: {},
   chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
+  undo: [], redo: [], painting: false, strokeOpen: false, chrPainting: false, keysWired: false,
 };
 // 4KB CHR bank -> levels using it as bg bank (labels for the bank picker).
 const BANK_USERS = {};
@@ -156,19 +157,24 @@ function buildZoomRow() {
   if (!cv || !cv.parentNode) return;
   const row = document.createElement("div");
   row.id = "edZoomRow";
-  row.style.cssText = "display:flex;gap:8px;align-items:center;margin:4px 0;";
+  row.style.cssText = "display:flex;gap:8px;align-items:center;margin:8px 0;";
   const lab0 = document.createElement("span");
-  lab0.textContent = "zoom";
+  lab0.textContent = "Map zoom:";
+  lab0.style.cssText = "font-weight:bold;";
   const out = document.createElement("button");
   out.id = "edZoomOut";
   out.textContent = "-";
-  out.title = "zoom out";
+  out.title = "zoom out (smaller blocks, see more of the map)";
+  out.setAttribute("aria-label", "zoom out");
+  out.style.cssText = "min-width:48px;min-height:44px;font-size:20px;";
   const lab = document.createElement("span");
   lab.id = "edZoomLabel";
   const inp = document.createElement("button");
   inp.id = "edZoomIn";
   inp.textContent = "+";
-  inp.title = "zoom in";
+  inp.title = "zoom in (bigger blocks, paint precisely)";
+  inp.setAttribute("aria-label", "zoom in");
+  inp.style.cssText = "min-width:48px;min-height:44px;font-size:20px;";
   out.addEventListener("click", () => stepZoom(-1));
   inp.addEventListener("click", () => stepZoom(1));
   row.appendChild(lab0);
@@ -190,12 +196,249 @@ function stepZoom(d) {
   updateZoomLabel();
   repaint();
 }
+// ---- Map-editor usability: theme, previews, undo, touch ----
+function ensureEditorTheme() {
+  if (document.getElementById("edTheme")) return;
+  const rules = [
+    "#editorCtn { color-scheme: dark; color: #eee; }",
+    "#editorCtn button { background: #243; color: #eee; border: 1px solid #6c6; }",
+    "#editorCtn button:disabled { opacity: 0.45; }",
+    "#editorCtn input, #editorCtn select, #editorCtn textarea { background: #111; color: #eee; border: 1px solid #666; }",
+    "#editorCtn label, #editorCtn span { color: #eee; }",
+    "#editorCtn table td { color: #eee; }",
+    "#editorCtn canvas { touch-action: none; }",
+    "#editorCtn .edHelp { background: #1a2a1a; border: 1px solid #6c6; color: #eee; padding: 8px; margin: 6px 0; text-align: left; font-size: 13px; white-space: normal; }",
+    "#editorCtn .edPrev { image-rendering: pixelated; vertical-align: middle; border: 1px solid #666; }",
+  ];
+  const st = document.createElement("style");
+  st.id = "edTheme";
+  st.textContent = rules.join("\n");
+  document.head.appendChild(st);
+}
+function snapEdits() {
+  return { edited: structuredClone(S.edited), chr: structuredClone(S.chr) };
+}
+function pushHistory(label) {
+  try {
+    S.undo.push({ label, snap: snapEdits() });
+    if (S.undo.length > 60) S.undo.shift();
+    S.redo.length = 0;
+  } catch (e) {}
+  updateUndoBtns();
+}
+function doUndo() {
+  if (!S.undo || !S.undo.length) return;
+  try {
+    S.redo.push(snapEdits());
+    const h = S.undo.pop();
+    S.edited = h.snap.edited; S.chr = h.snap.chr;
+    log("editor: undo " + h.label);
+  } catch (e) { log("editor: undo failed"); }
+  updateUndoBtns(); repaint();
+}
+function doRedo() {
+  if (!S.redo || !S.redo.length) return;
+  try {
+    S.undo.push({ label: "redo", snap: snapEdits() });
+    const h = S.redo.pop();
+    S.edited = h.edited; S.chr = h.chr;
+    log("editor: redo");
+  } catch (e) { log("editor: redo failed"); }
+  updateUndoBtns(); repaint();
+}
+function updateUndoBtns() {
+  const u = el("edUndoBtn"), r = el("edRedoBtn"), info = el("edUndoInfo");
+  if (u) u.disabled = !S.undo.length;
+  if (r) r.disabled = !S.redo.length;
+  if (info) info.textContent = S.undo.length ? "will undo: " + S.undo[S.undo.length - 1].label : "nothing to undo yet";
+}
+function buildUndoRow() {
+  if (el("edUndoRow")) return;
+  const sv = el("edSaveBtn");
+  if (!sv || !sv.parentNode || !sv.parentNode.parentNode) return;
+  const row = document.createElement("div");
+  row.id = "edUndoRow";
+  row.className = "shellRow";
+  const u = document.createElement("button");
+  u.id = "edUndoBtn";
+  u.textContent = "Undo";
+  u.title = "undo last map/palette/scroll/CHR edit (Ctrl+Z)";
+  u.style.cssText = "min-height:44px;";
+  const r = document.createElement("button");
+  r.id = "edRedoBtn";
+  r.textContent = "Redo";
+  r.title = "redo (Ctrl+Shift+Z / Ctrl+Y)";
+  r.style.cssText = "min-height:44px;";
+  const info = document.createElement("span");
+  info.id = "edUndoInfo";
+  u.addEventListener("click", doUndo);
+  r.addEventListener("click", doRedo);
+  row.appendChild(u); row.appendChild(r); row.appendChild(info);
+  sv.parentNode.parentNode.insertBefore(row, sv.parentNode);
+  updateUndoBtns();
+}
+function wireUndoKeys() {
+  if (S.keysWired) return; S.keysWired = true;
+  document.addEventListener("keydown", (ev) => {
+    if (!S.open) return;
+    const tag = (ev.target && ev.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    const mod = ev.ctrlKey || ev.metaKey;
+    if (!mod) return;
+    const k = (ev.key || "").toLowerCase();
+    if (k === "z" && !ev.shiftKey) { ev.preventDefault(); doUndo(); }
+    else if ((k === "z" && ev.shiftKey) || k === "y") { ev.preventDefault(); doRedo(); }
+  });
+}
+function buildBrushPreview() {
+  if (el("edBrushPrev")) return;
+  const br = el("edBrush");
+  if (!br || !br.parentNode) return;
+  br.title = "block index stamped by paint mode (preview on the right)";
+  const cap = document.createElement("span");
+  cap.textContent = " brush preview:";
+  const cv = document.createElement("canvas");
+  cv.id = "edBrushPrev";
+  cv.title = "what the brush block looks like (64x64px = 2x2 structs)";
+  br.parentNode.appendChild(cap);
+  br.parentNode.appendChild(cv);
+}
+function paintPreviewInto(cv, img, size) {
+  if (!cv) return;
+  cv.width = 64; cv.height = 64;
+  cv.className = "edPrev";
+  cv.style.width = size + "px"; cv.style.height = size + "px";
+  const ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, 64, 64);
+  ctx.drawImage(img, 0, 0);
+}
+function renderComboPreview(E, ci, cv) {
+  if (!cv) return;
+  const bytes = bgBank();
+  if (!bytes) return;
+  cv.width = 16; cv.height = 16;
+  cv.className = "edPrev";
+  cv.style.width = "64px"; cv.style.height = "64px";
+  const ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  const sub = E.attrs[ci] & 3;
+  for (let i = 0; i < 4; i++) {
+    const px = decodeTile(bytes, E.combos[ci * 4 + i] * 16);
+    const tx = (i % 2) * 8, ty = Math.floor(i / 2) * 8;
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      ctx.fillStyle = NES_PALETTE[E.pal[sub * 4 + px[y * 8 + x]] & 63];
+      ctx.fillRect(tx + x, ty + y, 1, 1);
+    }
+  }
+}
+function buildScrollHelp() {
+  if (el("edScrollHelp")) return;
+  const v = el("edScrollV");
+  if (!v || !v.parentNode) return;
+  const d = document.createElement("div");
+  d.id = "edScrollHelp";
+  d.className = "edHelp";
+  d.textContent = "Scroll planes: the level map is an 8x8 grid of screens (each screen = 4x4 blocks). V marks screens the camera can scroll into VERTICALLY, H marks HORIZONTAL scrolling (click a cell to include or exclude it). H column 6 is special: it shifts that row's camera origin +32px X. On the map (turn on 'scroll overlay' above it): cyan = V, magenta = H, yellow = both.";
+  v.parentNode.insertBefore(d, v);
+}
+function mapCellFromEvent(ev) {
+  const L = cur();
+  if (!L) return -1;
+  const E = effLevel(L);
+  const cv = el("edMap");
+  if (!cv) return -1;
+  const r = cv.getBoundingClientRect();
+  if (!r.width || !r.height) return -1;
+  const bx = Math.floor((ev.clientX - r.left) / r.width * MAP_COLS);
+  const by = Math.floor((ev.clientY - r.top) / r.height * (E.map.length / MAP_COLS));
+  if (bx < 0 || by < 0 || bx >= MAP_COLS || by >= E.map.length / MAP_COLS) return -1;
+  return by * MAP_COLS + bx;
+}
+function applyMapCell(cell, startStroke) {
+  const L = cur();
+  if (!L || cell < 0) return;
+  const E = effLevel(L);
+  if (S.mode === "paint") {
+    if (startStroke) { pushHistory("paint block"); S.strokeOpen = true; }
+    const m = ((S.edited[E.level] && S.edited[E.level].map) || E.map).slice();
+    m[cell] = S.brush;
+    editsFor(E.level).map = m;
+    S.selCell = cell;
+    repaint();
+  } else {
+    S.selCell = cell;
+    repaint();
+  }
+}
+function onMapPointerDown(ev) {
+  if (ev.cancelable) ev.preventDefault();
+  S.painting = true; S.strokeOpen = false;
+  try { el("edMap").setPointerCapture(ev.pointerId); } catch (e) {}
+  applyMapCell(mapCellFromEvent(ev), true);
+}
+function onMapPointerMove(ev) {
+  if (!S.painting) return;
+  if (ev.pointerType === "mouse" && (ev.buttons & 1) === 0) { S.painting = false; return; }
+  if (ev.cancelable) ev.preventDefault();
+  applyMapCell(mapCellFromEvent(ev), !S.strokeOpen);
+}
+function onMapPointerUp(ev) { S.painting = false; S.strokeOpen = false; }
+function chrGridPick(ev) {
+  const grid = el("edChrGrid");
+  if (!grid) return;
+  const r = grid.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const tx = Math.floor((ev.clientX - r.left) / r.width * 16);
+  const ty = Math.floor((ev.clientY - r.top) / r.height * 16);
+  if (tx < 0 || ty < 0 || tx > 15 || ty > 15) return;
+  S.chrTile = ty * 16 + tx;
+  log("editor: chr bank " + S.chrBank + " tile " + S.chrTile);
+  repaint();
+}
+function onChrGridPointerDown(ev) {
+  if (ev.cancelable) ev.preventDefault();
+  chrGridPick(ev);
+}
+function chrTilePaint(ev, startStroke) {
+  const big = el("edChrTile");
+  if (!big) return;
+  const r = big.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const px = Math.floor((ev.clientX - r.left) / r.width * 8);
+  const py = Math.floor((ev.clientY - r.top) / r.height * 8);
+  if (px < 0 || py < 0 || px > 7 || py > 7) return;
+  if (startStroke) pushHistory("chr pixel");
+  const cur = chrTilePx(S.chrBank, S.chrTile).slice();
+  cur[py * 8 + px] = S.chrInk;
+  setChrPx(S.chrBank, S.chrTile, cur);
+  log("editor: chr bank " + S.chrBank + " tile " + S.chrTile + " (" + px + "," + py + ") -> " + S.chrInk);
+  repaint();
+}
+function onChrTilePointerDown(ev) {
+  if (ev.cancelable) ev.preventDefault();
+  S.chrPainting = true;
+  try { el("edChrTile").setPointerCapture(ev.pointerId); } catch (e) {}
+  chrTilePaint(ev, true);
+}
+function onChrTilePointerMove(ev) {
+  if (!S.chrPainting) return;
+  if (ev.pointerType === "mouse" && (ev.buttons & 1) === 0) { S.chrPainting = false; return; }
+  if (ev.cancelable) ev.preventDefault();
+  chrTilePaint(ev, false);
+}
+function onChrTilePointerUp(ev) { S.chrPainting = false; }
 function buildEditorChrome() {
+  ensureEditorTheme();
+  wireUndoKeys();
   if (!S.tabsBuilt) {
     if (!S.zoom) S.zoom = loadZoom();
     buildEditorTabs();
     buildZoomRow();
+    buildBrushPreview();
+    buildUndoRow();
     updateZoomLabel();
+    updateUndoBtns();
     S.tabsBuilt = true;
   }
   setEditorTab(S.tab || loadPersistedTab() || "map");
@@ -239,6 +482,11 @@ function repaint() {
   const L = cur();
   if (!L) return;
   const E = effLevel(L);
+  const bpv0 = el("edBrushPrev");
+  if (bpv0) {
+    const nBlk = E.blocks.length / 4;
+    paintPreviewInto(bpv0, renderBlockImage(E, bgBank(), E.pal, Math.max(0, Math.min(nBlk - 1, S.brush | 0))), 56);
+  }
   const br0 = el("edBrush");
   if (br0) br0.max = E.blocks.length / 4 - 1;
   const cv = el("edMap");
@@ -298,7 +546,7 @@ function renderPalStrip(E) {
       b.textContent = i;
       b.title = "slot " + i + " = $" + E.pal[i].toString(16).padStart(2, "0");
       b.style.cssText = "width:30px;height:24px;margin:1px;background:" + NES_PALETTE[E.pal[i] & 63] + ";color:#fff;border:" + (i === S.palSlot ? "2px solid #fff" : "1px solid #666");
-      b.addEventListener("click", () => { S.palSlot = i; repaint(); });
+      b.addEventListener("click", () => { pushHistory("palette slot"); S.palSlot = i; repaint(); });
       slots.appendChild(b);
     }
   }
@@ -313,6 +561,7 @@ function renderPalStrip(E) {
       b.title = "$" + c.toString(16).padStart(2, "0");
       b.style.cssText = "width:28px;height:20px;margin:1px;background:" + NES_PALETTE[c] + ";border:" + (E.pal[S.palSlot] === c ? "2px solid #fff" : "1px solid #333");
       b.addEventListener("click", () => {
+        pushHistory("palette");
         const arr = ((S.edited[E.level] && S.edited[E.level].pal) || E.pal).slice();
         arr[S.palSlot] = c;
         editsFor(E.level).pal = arr;
@@ -330,10 +579,21 @@ function renderInspector(E) {
   if (!box) return;
   box.innerHTML = "";
   const add = (tag, text) => { const d = document.createElement(tag); d.textContent = text; box.appendChild(d); return d; };
+  const helpTop = document.createElement("div");
+  helpTop.className = "edHelp";
+  helpTop.textContent = "Map cells hold blocks: 1 block = 64px (2x2 structs); 1 struct = 32px (2x2 combos); 1 combo = 16px (2x2 tiles + 1 attr byte). Paint mode stamps the brush block (preview next to the brush box, above the map); inspect mode selects a cell to show its block/struct/combo chain below. Undo/redo buttons sit by the save row (Ctrl+Z / Ctrl+Shift+Z).";
+  box.appendChild(helpTop);
   if (S.selCell >= 0) {
     const bi = E.map[S.selCell];
     const cx = S.selCell % MAP_COLS, cy = Math.floor(S.selCell / MAP_COLS);
     add("div", "cell (" + cx + "," + cy + ") block " + bi);
+    const bpvRow = document.createElement("div");
+    const bpvLab = document.createElement("span");
+    bpvLab.textContent = "block preview: ";
+    const bpv = document.createElement("canvas");
+    paintPreviewInto(bpv, renderBlockImage(E, bgBank(), E.pal, bi), 96);
+    bpv.title = "block " + bi + " = 2x2 structs [" + st.join(",") + "]";
+    bpvRow.appendChild(bpvLab); bpvRow.appendChild(bpv); box.appendChild(bpvRow);
     const setRow = document.createElement("div");
     setRow.textContent = "set block: ";
     const inp = document.createElement("input");
@@ -342,6 +602,7 @@ function renderInspector(E) {
     const btn = document.createElement("button");
     btn.textContent = "paint";
     btn.addEventListener("click", () => {
+      pushHistory("set block");
       const v = Math.max(0, Math.min(E.blocks.length / 4 - 1, inp.value | 0));
       const m = (S.edited[E.level] && S.edited[E.level].map) ? S.edited[E.level].map.slice() : E.map.slice();
       m[S.selCell] = v;
@@ -386,6 +647,13 @@ function renderInspector(E) {
   const cInfo = document.createElement("span");
   cInfo.textContent = " patterns [" + cp.join(",") + "] attr $" + E.attrs[ci].toString(16);
   cRow.appendChild(cInfo); box.appendChild(cRow);
+  const cpRow = document.createElement("div");
+  const cpLab = document.createElement("span");
+  cpLab.textContent = "combo preview: ";
+  const cpv = document.createElement("canvas");
+  renderComboPreview(E, ci, cpv);
+  cpv.title = "combo " + ci + " = 2x2 tiles [" + cp.join(",") + "] attr $" + E.attrs[ci].toString(16);
+  cpRow.appendChild(cpLab); cpRow.appendChild(cpv); box.appendChild(cpRow);
   // pattern index editors
   const pRow = document.createElement("div");
   pRow.textContent = "patterns: ";
@@ -394,7 +662,9 @@ function renderInspector(E) {
     inp.type = "number"; inp.min = 0; inp.max = 255; inp.value = cp[i];
     inp.style.width = "70px";
     inp.dataset.pi = i;
+    inp.title = "tile index (8x8 pattern) into this level's bg CHR bank";
     inp.addEventListener("change", () => {
+      pushHistory("combo pattern");
       const v = Math.max(0, Math.min(255, inp.value | 0));
       const arr = ((S.edited[E.level] && S.edited[E.level].combos) || E.combos).slice();
       arr[ci * 4 + (inp.dataset.pi | 0)] = v;
@@ -417,6 +687,7 @@ function renderInspector(E) {
       cb.type = "checkbox"; cb.checked = !!((E.attrs[ci] >> b) & 1);
       cb.dataset.bit = b;
       cb.addEventListener("change", () => {
+        pushHistory("combo attr");
         const arr = ((S.edited[E.level] && S.edited[E.level].attrs) || E.attrs).slice();
         const bit = cb.dataset.bit | 0;
         arr[ci] = cb.checked ? (arr[ci] | (1 << bit)) : (arr[ci] & ~(1 << bit));
@@ -594,33 +865,17 @@ function renderChrTab(E) {
   }
 }
 function onChrGridClick(ev) {
-  const grid = el("edChrGrid");
-  if (!grid) return;
-  const r = grid.getBoundingClientRect();
-  const tx = Math.floor((ev.clientX - r.left) / r.width * 16);
-  const ty = Math.floor((ev.clientY - r.top) / r.height * 16);
-  if (tx < 0 || ty < 0 || tx > 15 || ty > 15) return;
-  S.chrTile = ty * 16 + tx;
-  log("editor: chr bank " + S.chrBank + " tile " + S.chrTile);
-  repaint();
+  chrGridPick(ev);
 }
 function onChrTileClick(ev) {
-  const big = el("edChrTile");
-  if (!big) return;
-  const r = big.getBoundingClientRect();
-  const px = Math.floor((ev.clientX - r.left) / r.width * 8);
-  const py = Math.floor((ev.clientY - r.top) / r.height * 8);
-  if (px < 0 || py < 0 || px > 7 || py > 7) return;
-  const cur = chrTilePx(S.chrBank, S.chrTile).slice();
-  cur[py * 8 + px] = S.chrInk;
-  setChrPx(S.chrBank, S.chrTile, cur);
-  log("editor: chr bank " + S.chrBank + " tile " + S.chrTile + " (" + px + "," + py + ") -> " + S.chrInk);
-  repaint();
+  chrTilePaint(ev, true);
 }
 function renderScrollGrids(E) {
   const v = el("edScrollV"), h = el("edScrollH");
   if (!v || !h) return;
+  buildScrollHelp();
   const toggle = (plane, r, c) => {
+    pushHistory("scroll plane");
     const arr = ((S.edited[E.level] && S.edited[E.level].scroll) || E.scroll).slice();
     const i = plane === "V" ? r : 8 + r;
     arr[i] ^= (1 << c);
@@ -633,25 +888,7 @@ function renderScrollGrids(E) {
   scrollHint(E);
 }
 function onMapClick(ev) {
-  const L = cur();
-  if (!L) return;
-  const E = effLevel(L);
-  const cv = el("edMap");
-  const r = cv.getBoundingClientRect();
-  const bx = Math.floor((ev.clientX - r.left) / r.width * MAP_COLS);
-  const by = Math.floor((ev.clientY - r.top) / r.height * (E.map.length / MAP_COLS));
-  if (bx < 0 || by < 0 || bx >= MAP_COLS || by >= E.map.length / MAP_COLS) return;
-  const cell = by * MAP_COLS + bx;
-  if (S.mode === "paint") {
-    const m = ((S.edited[E.level] && S.edited[E.level].map) || E.map).slice();
-    m[cell] = S.brush;
-    editsFor(E.level).map = m;
-    S.selCell = cell;
-    repaint();
-  } else {
-    S.selCell = cell;
-    repaint();
-  }
+  applyMapCell(mapCellFromEvent(ev), true);
 }
 function enemyKeyForLevel(level) { return keyForLevel(level); } // single source: enemies.js (palette-proven mapping)
 function effEnemyList(key) {
@@ -1310,6 +1547,8 @@ async function loadAll() {
   }
   S.edited = {};
   S.chr = {};
+  S.undo = []; S.redo = []; S.painting = false; S.strokeOpen = false;
+  updateUndoBtns();
   S.edEnemies = {};
   S.edStats = {};
   S.edTankStats = {};
@@ -1384,7 +1623,12 @@ export async function openEditor(a, opts) {
   const sel = el("edLevelSel");
   if (sel) sel.onchange = () => selectLevel(sel.value | 0);
   const cv = el("edMap");
-  if (cv) cv.onclick = onMapClick;
+  if (cv) {
+    cv.onpointerdown = onMapPointerDown;
+    cv.onpointermove = onMapPointerMove;
+    cv.onpointerup = onMapPointerUp;
+    cv.style.touchAction = "none";
+  }
   document.querySelectorAll('input[name="edMode"]').forEach(r => {
     r.checked = r.value === S.mode;
     r.onchange = () => { S.mode = r.value; };
@@ -1398,9 +1642,9 @@ export async function openEditor(a, opts) {
   const eAdd = el('edEnemyAddBtn');
   if (eAdd) eAdd.onclick = () => addEnemyRec(enemyKeyForLevel(S.level));
   const grid = el("edChrGrid");
-  if (grid) grid.onclick = onChrGridClick;
+  if (grid) { grid.onpointerdown = onChrGridPointerDown; grid.style.touchAction = "none"; }
   const big = el("edChrTile");
-  if (big) big.onclick = onChrTileClick;
+  if (big) { big.onpointerdown = onChrTilePointerDown; big.onpointermove = onChrTilePointerMove; big.onpointerup = onChrTilePointerUp; big.style.touchAction = "none"; }
   const cbs = el("edChrBank");
   if (cbs) cbs.onchange = () => { S.chrBank = cbs.value | 0; S.chrTile = 0; repaint(); };
   const sbs = el("edChrSub");

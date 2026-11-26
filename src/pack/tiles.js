@@ -147,7 +147,7 @@ export function bitGrid(el, bytes, plane, onToggle) {
       const td = document.createElement("td");
       const on = (bytes[r] >> c) & 1;
       td.textContent = on ? "1" : "0";
-      td.style.cssText = "border:1px solid #666;min-width:44px;min-height:44px;text-align:center;cursor:pointer;background:" + (on ? "#246" : "#111");
+      td.style.cssText = "border:1px solid #666;min-width:44px;min-height:44px;text-align:center;color:#eee;cursor:pointer;background:" + (on ? "#246" : "#111");
       td.addEventListener("click", () => onToggle(plane, r, c));
       tr.appendChild(td);
     }

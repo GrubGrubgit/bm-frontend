@@ -1853,7 +1853,7 @@ function ensureEditorHeader() {
   return h;
 }
 function eachPlayEl(fn) {
-  const ids = ["shellGrid", "playCtn", "touchCtn", "gameCanvas", "pickBtn", "romInput", "dropEl", "wipeBtn", "metaEl", "logEl", "shellStatus", "probeEl"];
+  const ids = ["shellGrid", "playCtn", "touchCtn", "gameCanvas", "pickBtn", "romInput", "dropEl", "wipeBtn", "metaEl", "logEl", "shellStatus", "probeEl", "tweaksCtn", "enhanceCtn"];
   for (const id of ids) {
     const e = document.getElementById(id);
     if (e && !e.closest("#editorCtn") && !e.closest("#editorHeader")) fn(e);
@@ -1869,6 +1869,11 @@ function eachPlayEl(fn) {
     if (e.closest("#editorCtn")) return;
     if (/movie records automatically/i.test(e.textContent || "")) fn(e);
   });
+  document.querySelectorAll("details").forEach((e) => {
+    if (!e.closest("#editorCtn")) fn(e);
+  });
+  const wb = document.getElementById("wipeBtn");
+  if (wb && wb.parentNode && !wb.parentNode.closest("#editorCtn")) fn(wb.parentNode);
 }
 function setEditorView(on) {
   const header = ensureEditorHeader();

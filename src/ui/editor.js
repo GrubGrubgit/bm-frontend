@@ -55,7 +55,151 @@ function hideNoRomNotice() {
   const n = el("edNoRom");
   if (n) n.hidden = true;
 }
-function log(m) { try { api.log(m); } catch (e) {} }
+// ---- Editor tabs + map zoom (one section visible at a time) ----
+const ED_TAB_KEY = "bm-editor-tab";
+const ED_ZOOM_KEY = "bm-editor-zoom";
+const ED_ZOOMS = [4, 8, 12, 16, 24, 32];
+const ED_TABS = [
+  { id: "map", label: "Map", anchors: ["edLevelSel", "edModeBadge", "edMap", "edBrush", "edCellInfo", "edInspector", "edScrollV", "edScrollH", "edScrollHint"] },
+  { id: "pal", label: "Palette", anchors: ["edPal", "edPalSlots", "edPalInfo", "edPalPick"] },
+  { id: "chr", label: "CHR", anchors: ["edChrBank", "edChrInfo", "edChrGrid", "edChrTile", "edChrPrev", "edChrInk", "edChrSub"] },
+  { id: "enemies", label: "Enemies", anchors: ["edEnemyInfo", "edEnemyWarn", "edEnemyTbl", "edEnemyType", "edEnemyX", "edEnemyY", "edEnemyAddBtn", "edEnemyBudget"] },
+  { id: "stats", label: "Stats", anchors: ["edStatInfo", "edStatTbl"] },
+  { id: "sound", label: "Sound", anchors: ["edSoundNotes", "edAreaSongInfo", "edAreaSongTbl", "edSoundId", "edSoundOut", "edSongSel", "edSongOut", "edPtrId", "edPtrTarget", "edPtrOut", "edSiteInfo", "edSiteFilter", "edSiteTbl", "edTankInfo", "edTankTbl"] },
+  { id: "notes", label: "Notes", anchors: ["edRENotes", "edDoorList"] },
+];
+function loadPersistedTab() {
+  try {
+    const v = localStorage.getItem(ED_TAB_KEY);
+    if (ED_TABS.some((t) => t.id === v)) return v;
+  } catch (e) {}
+  return null;
+}
+function loadZoom() {
+  try {
+    const v = parseInt(localStorage.getItem(ED_ZOOM_KEY), 10);
+    if (ED_ZOOMS.indexOf(v) >= 0) return v;
+  } catch (e) {}
+  return 16;
+}
+function editorTabOf(child) {
+  for (const t of ED_TABS) {
+    for (const a of t.anchors) {
+      if (child.id === a) return t.id;
+      try {
+        if (child.querySelector && child.querySelector("#" + a)) return t.id;
+      } catch (e) {}
+    }
+  }
+  return null;
+}
+function buildEditorTabs() {
+  const ctn = el("editorCtn");
+  if (!ctn || el("edTabBar")) return;
+  const bar = document.createElement("div");
+  bar.id = "edTabBar";
+  bar.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;margin:6px 0;";
+  const h3 = ctn.querySelector("h3");
+  if (h3 && h3.nextSibling) ctn.insertBefore(bar, h3.nextSibling);
+  else ctn.insertBefore(bar, ctn.firstChild);
+  for (const t of ED_TABS) {
+    const b = document.createElement("button");
+    b.textContent = t.label;
+    b.dataset.edTabBtn = t.id;
+    b.addEventListener("click", () => setEditorTab(t.id));
+    bar.appendChild(b);
+  }
+  for (const child of Array.from(ctn.children)) {
+    if (child.id === "edTabBar" || child.id === "edNoRom") continue;
+    const tag = (child.tagName || "").toUpperCase();
+    if (tag === "H3" || tag === "HR") continue;
+    try {
+      if (child.querySelector && (child.querySelector("#edSaveBtn") || child.querySelector("#edPackName"))) continue;
+    } catch (e) {}
+    const tab = editorTabOf(child);
+    child.dataset.edTab = tab || "map";
+  }
+  const counts = {};
+  for (const child of Array.from(ctn.children)) {
+    if (child.dataset && child.dataset.edTab) counts[child.dataset.edTab] = (counts[child.dataset.edTab] || 0) + 1;
+  }
+  for (const t of ED_TABS) {
+    if (!counts[t.id]) {
+      const b = bar.querySelector('[data-ed-tab-btn="' + t.id + '"]');
+      if (b) b.hidden = true;
+    }
+  }
+}
+function setEditorTab(id) {
+  if (!ED_TABS.some((t) => t.id === id)) id = "map";
+  S.tab = id;
+  try { localStorage.setItem(ED_TAB_KEY, id); } catch (e) {}
+  const ctn = el("editorCtn");
+  if (ctn) {
+    for (const child of Array.from(ctn.children)) {
+      if (child.dataset && child.dataset.edTab) child.hidden = child.dataset.edTab !== id;
+    }
+  }
+  const bar = el("edTabBar");
+  if (bar) {
+    for (const b of Array.from(bar.querySelectorAll("[data-ed-tab-btn]"))) {
+      const on = b.dataset.edTabBtn === id;
+      b.style.fontWeight = on ? "bold" : "";
+      b.style.background = on ? "#246" : "";
+    }
+  }
+}
+function buildZoomRow() {
+  if (el("edZoomRow")) return;
+  const cv = el("edMap");
+  if (!cv || !cv.parentNode) return;
+  const row = document.createElement("div");
+  row.id = "edZoomRow";
+  row.style.cssText = "display:flex;gap:8px;align-items:center;margin:4px 0;";
+  const lab0 = document.createElement("span");
+  lab0.textContent = "zoom";
+  const out = document.createElement("button");
+  out.id = "edZoomOut";
+  out.textContent = "-";
+  out.title = "zoom out";
+  const lab = document.createElement("span");
+  lab.id = "edZoomLabel";
+  const inp = document.createElement("button");
+  inp.id = "edZoomIn";
+  inp.textContent = "+";
+  inp.title = "zoom in";
+  out.addEventListener("click", () => stepZoom(-1));
+  inp.addEventListener("click", () => stepZoom(1));
+  row.appendChild(lab0);
+  row.appendChild(out); row.appendChild(lab); row.appendChild(inp);
+  cv.parentNode.insertBefore(row, cv);
+  updateZoomLabel();
+}
+function updateZoomLabel() {
+  const lab = el("edZoomLabel");
+  if (lab) lab.textContent = (S.zoom || 16) + " px/block";
+}
+function stepZoom(d) {
+  const z = S.zoom || 16;
+  let i = ED_ZOOMS.indexOf(z);
+  if (i < 0) i = ED_ZOOMS.indexOf(16);
+  i = Math.max(0, Math.min(ED_ZOOMS.length - 1, i + d));
+  S.zoom = ED_ZOOMS[i];
+  try { localStorage.setItem(ED_ZOOM_KEY, String(S.zoom)); } catch (e) {}
+  updateZoomLabel();
+  repaint();
+}
+function buildEditorChrome() {
+  if (!S.tabsBuilt) {
+    if (!S.zoom) S.zoom = loadZoom();
+    buildEditorTabs();
+    buildZoomRow();
+    updateZoomLabel();
+    S.tabsBuilt = true;
+  }
+  setEditorTab(S.tab || loadPersistedTab() || "map");
+}
+
 function cur() { return S.parsed[S.level] ? S.parsed[S.level].L : null; }
 function bankOfLevel(level) { for (const b of [0, 1, 2]) { const p = S.parsed["b" + b]; if (p && p.levels.some(L => L.level === level)) return b; } return -1; }
 function editsFor(level) { if (!S.edited[level]) S.edited[level] = {}; return S.edited[level]; }
@@ -115,7 +259,7 @@ function repaint() {
 
   const scroll = E.scroll;
   paintMap(cv, E, bgBank(), E.pal, {
-    pxPerBlock: 16, showScroll: S.showScroll,
+    pxPerBlock: S.zoom || 16, showScroll: S.showScroll,
     scrollV: scroll.subarray(0, 8), scrollH: scroll.subarray(8, 16),
     doorBlocks: doorCells,
   });
@@ -1261,6 +1405,7 @@ export async function openEditor(a, opts) {
   const sbs = el("edChrSub");
   if (sbs) sbs.onchange = () => { S.chrSub = sbs.value | 0; repaint(); };
   await selectLevel(S.level);
+  buildEditorChrome();
   log("editor: open (level " + S.level + ", " + Object.keys(S.parsed).filter(k => k[0] === "b").length + " banks)");
   return true;
 }

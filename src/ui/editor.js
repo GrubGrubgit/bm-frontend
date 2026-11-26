@@ -10,14 +10,14 @@ import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
 import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
 import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine } from "../pack/gaps.js";
 import { getAreaSongs, serializeAreaSongs, AREA_TABLE } from "../pack/sound.js";
-import { parseSong, songLine, remapSongs, ptrOf } from "../pack/songs.js";
+import { parseSong, songLine, remapSongs, ptrOf, allSiteInfos, getTankSongs } from '../pack/songs.js';
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
   brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
-  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {}, edSongPtr: {},
+  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {}, edSongPtr: {}, edSiteFilter: '',
   chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
 };
 // 4KB CHR bank -> levels using it as bg bank (labels for the bank picker).
@@ -100,6 +100,8 @@ function repaint() {
   renderAreaSongs();
   renderSongBrowser();
   renderSongPtr();
+  renderSites();
+  renderTankSongs();
   renderPalStrip(E);
   fillChrBankSel();
   renderChrTab(E);
@@ -637,6 +639,62 @@ function renderSongPtr() {
     }
     upd();
   }
+}
+function renderSites() {
+  const info = el('edSiteInfo'), tbl = el('edSiteTbl'), filt = el('edSiteFilter');
+  if (!tbl) return;
+  if (filt && !filt.dataset.wired) {
+    filt.dataset.wired = '1';
+    filt.addEventListener('change', function () { S.edSiteFilter = String(filt.value || '').toLowerCase(); renderSites(); });
+  }
+  if (filt && document.activeElement !== filt) filt.value = S.edSiteFilter || '';
+  const B = S.resolved ? S.resolved.prg : null;
+  tbl.innerHTML = '';
+  if (!B) { if (info) info.textContent = 'sites: n/a'; return; }
+  let infos = [];
+  try { infos = allSiteInfos(B); } catch (err) { if (info) info.textContent = 'sites: n/a'; return; }
+  const q = S.edSiteFilter || '';
+  const rows = [];
+  for (let i = 0; i < infos.length; i++) {
+    const r = infos[i];
+    if (r.shape !== 'I' && r.shape !== 'L') continue;
+    const hay = (r.key + ' ' + r.song + ' ' + r.note).toLowerCase();
+    if (q && hay.indexOf(q) < 0) continue;
+    rows.push(r);
+  }
+  const hr = document.createElement('tr');
+  const heads = ['site', 'song', 'note'];
+  for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }
+  tbl.appendChild(hr);
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td'); td0.textContent = r.key + ' ' + r.shape; tr.appendChild(td0);
+    const td1 = document.createElement('td'); td1.textContent = '$' + r.id.toString(16) + ' (' + r.cur + ')'; tr.appendChild(td1);
+    const td3 = document.createElement('td'); td3.textContent = r.note; tr.appendChild(td3);
+    tbl.appendChild(tr);
+  }
+  if (info) info.textContent = rows.length + ' sites read-only (code immediates are compiled into the engine; tank table below is data)';
+}
+function renderTankSongs() {
+  const info = el('edTankInfo'), tbl = el('edTankTbl');
+  if (!tbl) return;
+  tbl.innerHTML = '';
+  const base = S.resolved ? S.resolved.prg[4] : null;
+  let songs = null;
+  try { songs = getTankSongs(base); } catch (err) { songs = null; }
+  if (!songs) songs = [42, 9, 9, 42, 9, 9, 42, 9];
+  const hr = document.createElement('tr');
+  const heads = ['slot', 'song'];
+  for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }
+  tbl.appendChild(hr);
+  for (let i = 0; i < 8; i++) {
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td'); td0.textContent = 't' + i; tr.appendChild(td0);
+    const td1 = document.createElement('td'); td1.textContent = '$' + songs[i].toString(16) + ' (' + songs[i] + ')'; tr.appendChild(td1);
+    tbl.appendChild(tr);
+  }
+  if (info) info.textContent = 'LA124 table bank4 (read-only until S5b driver; edits need end-to-end proof)';
 }
 function renderSongBrowser() {
   const inp = el("edSongSel"), out = el("edSongOut");

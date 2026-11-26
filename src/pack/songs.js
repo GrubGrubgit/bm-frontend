@@ -123,3 +123,91 @@ export function remapSongs(base5, edited) {
   return { ok: true, errors: [], bytes: out };
 }
 export function ptrOf(bank5, id) { const p = songPtr(bank5, id); return p < 0 ? null : p; }
+
+// ---- S5: request-site editing (exact 1-byte LDA-immediate swaps) ----
+// Shape I (106 rows): LDA #id directly before JSR (bank6 DECC / bank7 DECC /
+// bank4 C216 tailcall): id byte at fileoff cpu-0x8000-1, guarded by A9 before + 20 after.
+// Shape L (3 rows: 1F/21/22 bomb conduct): cpu IS the LDA addr (shared JSR tail at
+// 0x9769): id byte at fileoff cpu-0x8000+1, guarded by A9 at cpu-0x8000.
+// Shape T (1 row: 2A tank area-BGM): table-driven via LA124 (see TANK_SONGS).
+import { SITES } from "./sound.js";
+export const TANK_SONGS = { BANK: 4, COUNT: 8 };
+export function tankTableOffset(bank4) {
+  if (!(bank4 instanceof Uint8Array)) return -1;
+  const seq = [0x2A, 0x09, 0x09, 0x2A, 0x09, 0x09, 0x2A, 0x09];
+  let hit = -1;
+  for (let i = 0; i + 8 <= bank4.length; i++) {
+    let m = true;
+    for (let k = 0; k < 8; k++) if (bank4[i + k] !== seq[k]) { m = false; break; }
+    if (m) { if (hit >= 0) return -2; hit = i; }
+  }
+  return hit;
+}
+export function getTankSongs(bank4) {
+  const o = tankTableOffset(bank4);
+  if (o < 0) return null;
+  const out = [];
+  for (let i = 0; i < TANK_SONGS.COUNT; i++) out.push(bank4[o + i]);
+  return out;
+}
+export function serializeTankSongs(base4, edited) {
+  const errors = [];
+  const o = tankTableOffset(base4);
+  if (o < 0) return { ok: false, errors: ['no-table'] };
+  const out = base4.slice();
+  const keys = Object.keys(edited || {});
+  for (let i = 0; i < keys.length; i++) {
+    const idx = +keys[i];
+    if (!(idx >= 0 && idx < TANK_SONGS.COUNT && (idx | 0) === idx)) { errors.push(keys[i] + ':bad-idx'); continue; }
+    const v = edited[keys[i]];
+    if (!Number.isInteger(v) || v < 0 || v > 84) { errors.push(keys[i] + ':range'); continue; }
+    out[o + idx] = v;
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, errors: [], bytes: out };
+}
+export function siteKey(bank, cpu) { return bank + ':' + cpu.toString(16); }
+export function sitePatchInfo(banks, bank, cpu) {
+  const B = banks ? banks[bank] : null;
+  if (!(B instanceof Uint8Array)) return null;
+  let off = -1, shape = '';
+  const io = cpu - 0x8000 - 1;
+  if (io >= 1 && io + 1 < B.length && B[io - 1] === 0xA9 && B[io + 1] === 0x20) { off = io; shape = 'I'; }
+  else {
+    const lo = cpu - 0x8000 + 1;
+    if (lo >= 1 && lo < B.length && B[lo - 1] === 0xA9) { off = lo; shape = 'L'; }
+  }
+  if (off < 0) return null;
+  return { off: off, shape: shape, cur: B[off] };
+}
+export function allSiteInfos(banks) {
+  const out = [];
+  for (const k of Object.keys(SITES)) {
+    const id = parseInt(k, 16);
+    for (const r of SITES[k]) {
+      if (r.b === 4 && r.cpu === 0xA120) { out.push({ key: 'T:' + k, song: k, id: id, bank: 4, cpu: r.cpu, shape: 'T', note: r.n }); continue; }
+      const p = sitePatchInfo(banks, r.b, r.cpu);
+      if (!p) { out.push({ key: siteKey(r.b, r.cpu), song: k, id: id, bank: r.b, cpu: r.cpu, shape: '?', note: r.n }); continue; }
+      out.push({ key: siteKey(r.b, r.cpu), song: k, id: id, bank: r.b, cpu: r.cpu, shape: p.shape, off: p.off, cur: p.cur, note: r.n });
+    }
+  }
+  return out;
+}
+export function serializeSites(banks, edited) {
+  const errors = []; const touched = new Set();
+  if (!banks || !banks.length) return { ok: false, errors: ['bad-banks'] };
+  const out = banks.map((B) => (B instanceof Uint8Array) ? B.slice() : null);
+  const keys = Object.keys(edited || {});
+  for (let i = 0; i < keys.length; i++) {
+    const parts = keys[i].split(':');
+    if (parts.length !== 2) { errors.push(keys[i] + ':bad-key'); continue; }
+    const bank = +parts[0], cpu = parseInt(parts[1], 16);
+    const p = sitePatchInfo(banks, bank, cpu);
+    if (!p) { errors.push(keys[i] + ':no-site'); continue; }
+    const v = edited[keys[i]];
+    if (!Number.isInteger(v) || v < 0 || v > 84) { errors.push(keys[i] + ':range'); continue; }
+    out[bank][p.off] = v; touched.add(bank);
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, errors: [], bytes: out, banks: Array.from(touched).sort() };
+}

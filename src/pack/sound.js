@@ -157,7 +157,7 @@ export const SITES = {
   '39': [{ b: 7, cpu: 0x84FC, n: 'same-area door' }],
   '3D': [{ b: 7, cpu: 0x8534, n: 'player death (C52A)' }],
   '4E': [{ b: 7, cpu: 0xB60A, n: 'intro cinematic (F5D9 loop end)' }],
-  '54': [{ b: 7, cpu: 0xA30B, n: 'title (E309 init)' }],
+  '54': [{ b: 7, cpu: 0xA30B, n: 'E309 init path (headless patch of this byte leaves boot $54 intact; see S5a notes)' }],
   '18': [{ b: 7, cpu: 0x841D, n: 'cutscene/continue path' }, { b: 7, cpu: 0x8567, n: 'cutscene/continue path (2nd)' }],
   '19': [{ b: 7, cpu: 0xB8A3, n: 'nibble-adjust jingle (F88C)' }],
 };

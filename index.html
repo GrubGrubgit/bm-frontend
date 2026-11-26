@@ -125,6 +125,11 @@ button{padding:10px 14px;margin:2px}
 <div class="shellRow"><span>song pointer remap (S4: exact 2-byte word copy)</span></div>
 <div class="shellRow"><span>remap</span><label>id <input id="edPtrId" type="number" min="0" max="84" value="45" style="width:64px"></label><label>to <input id="edPtrTarget" type="number" min="0" max="84" value="84" style="width:64px"></label><span id="edPtrOut" style="font-size:11px;text-align:left"></span></div>
 
+<div class='shellRow'><span>request sites (S5: per-site LDA immediate, 1 byte each)</span><span id='edSiteInfo'></span></div>
+<div class='shellRow'><label>filter <input id='edSiteFilter' type='text' size='16' placeholder='e.g. 7:a30b or bomb' style='width:160px'></label></div>
+<div style='overflow:auto;max-height:30vh;border:1px solid #444'><table id='edSiteTbl' style='font-size:12px;margin:0 auto'></table></div>
+<div class='shellRow'><span>tank area songs (S5: LA124 table, 8 bytes)</span><span id='edTankInfo'></span></div>
+<div style='overflow:auto;max-height:20vh;border:1px solid #444'><table id='edTankTbl' style='font-size:12px;margin:0 auto'></table></div>
 <div class="shellRow"><span>type stats (P3c bank-6 / P3d bank-4 HP-damage, global per type)</span><span id="edStatInfo"></span></div>
 <div style="overflow:auto;max-height:30vh;border:1px solid #444"><table id="edStatTbl" style="font-size:12px;margin:0 auto"></table></div>
 <div class="shellRow"><label>pack name <input id="edPackName" type="text" size="24" placeholder="my level edit"></label><button id="edSaveBtn">Save as pack</button><span id="edStatus"></span></div>

@@ -10,14 +10,14 @@ import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
 import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
 import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine } from "../pack/gaps.js";
 import { getAreaSongs, serializeAreaSongs, AREA_TABLE } from "../pack/sound.js";
-import { parseSong, songLine, remapSongs, ptrOf, allSiteInfos, getTankSongs } from '../pack/songs.js';
+import { parseSong, songLine, remapSongs, ptrOf, allSiteInfos, getTankSongs, serializeTankSongs } from '../pack/songs.js';
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
   brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
-  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {}, edSongPtr: {}, edSiteFilter: '',
+  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {}, edSongPtr: {}, edSiteFilter: '', edTankSongs: {},
   chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
 };
 // 4KB CHR bank -> levels using it as bg bank (labels for the bank picker).
@@ -676,14 +676,28 @@ function renderSites() {
   }
   if (info) info.textContent = rows.length + ' sites read-only (code immediates are compiled into the engine; tank table below is data)';
 }
-function renderTankSongs() {
-  const info = el('edTankInfo'), tbl = el('edTankTbl');
-  if (!tbl) return;
-  tbl.innerHTML = '';
+function effTankSong(i) {
   const base = S.resolved ? S.resolved.prg[4] : null;
   let songs = null;
   try { songs = getTankSongs(base); } catch (err) { songs = null; }
   if (!songs) songs = [42, 9, 9, 42, 9, 9, 42, 9];
+  const e = S.edTankSongs[i];
+  return (e === undefined) ? songs[i] : e;
+}
+function commitTankSong(i, value) {
+  if (!(i >= 0 && i < 8 && (i | 0) === i) || !Number.isInteger(value) || value < 0 || value > 84) {
+    log('editor: tankSongs refusing out-of-range t' + i + '=' + value);
+    repaint();
+    return;
+  }
+  S.edTankSongs[i] = value;
+  log('editor: tankSongs t' + i + ' -> $' + value.toString(16) + ' (LA124 table)');
+  repaint();
+}
+function renderTankSongs() {
+  const info = el('edTankInfo'), tbl = el('edTankTbl');
+  if (!tbl) return;
+  tbl.innerHTML = '';
   const hr = document.createElement('tr');
   const heads = ['slot', 'song'];
   for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }
@@ -691,10 +705,16 @@ function renderTankSongs() {
   for (let i = 0; i < 8; i++) {
     const tr = document.createElement('tr');
     const td0 = document.createElement('td'); td0.textContent = 't' + i; tr.appendChild(td0);
-    const td1 = document.createElement('td'); td1.textContent = '$' + songs[i].toString(16) + ' (' + songs[i] + ')'; tr.appendChild(td1);
+    const td1 = document.createElement('td');
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.min = 0; inp.max = 84; inp.value = effTankSong(i);
+    inp.style.width = '64px';
+    inp.dataset.i = i;
+    inp.addEventListener('change', function () { commitTankSong(this.dataset.i | 0, this.value | 0); });
+    td1.appendChild(inp); tr.appendChild(td1);
     tbl.appendChild(tr);
   }
-  if (info) info.textContent = 'LA124 table bank4 (read-only until S5b driver; edits need end-to-end proof)';
+  if (info) info.textContent = 'LA124 table bank4, exact 8 bytes (1 patch per changed byte); A118 refresh plays LA124[$14&7] after boss-countdown expiry';
 }
 function renderSongBrowser() {
   const inp = el("edSongSel"), out = el("edSongOut");
@@ -1014,6 +1034,13 @@ async function saveAsPack() {
         patches.push(makePatch("prg", 5, run.off, run.bytes));
       }
     }
+    if (Object.keys(S.edTankSongs).length) {
+      const tz = serializeTankSongs(S.resolved.prg[4], S.edTankSongs);
+      if (!tz.ok) throw new Error('serialize tankSongs: ' + tz.errors.join(' '));
+      for (const run of diffRuns(S.stock.prg[4], tz.bytes)) {
+        patches.push(makePatch('prg', 4, run.off, run.bytes));
+      }
+    }
     if (Object.keys(S.edEnemies).length) {
       let structural = false;
       for (const k of Object.keys(S.edEnemies)) {
@@ -1039,6 +1066,7 @@ async function saveAsPack() {
     S.edTankStats = {};
     S.edAreaSongs = {};
     S.edSongPtr = {};
+    S.edTankSongs = {};
     repaint();
     try { await api.refreshPacks(); } catch (e) {}
     try { if (api.setPack) api.setPack(id); } catch (e2) {}
@@ -1063,6 +1091,7 @@ async function loadAll() {
   S.edEnemies = {};
   S.edStats = {};
   S.edTankStats = {};
+  S.edTankSongs = {};
   const pe = parseSpawns(active.prg[SPAWN_BANK]);
   if (!pe.ok) throw new Error("parse enemies: " + pe.errors.join(" "));
   S.enemies = pe;

@@ -1795,20 +1795,144 @@ swapABInput.addEventListener("change", () => {
   prefs.swapAB = !!swapABInput.checked; padFlags.swapAB = prefs.swapAB; savePrefs(prefs);
   shellLog("swap A/B " + (prefs.swapAB ? "on" : "off"));
 });
-// ---- P1 editor (lazy) ----
+// ---- P1 editor on its own view (hash route #/editor) ----
+// The play page was cluttered with the editor inline, so the editor now
+// lives on its own view: #/editor hides the play UI (controls, ROM loader,
+// video, logs, pack row) and shows only a slim header + the editor.
+// Deep-linkable, Back returns to play, level persists, opens on the live
+// game area when the engine is running.
+let editorModPromise = null;
+function getEditorMod() {
+  if (!editorModPromise) editorModPromise = import("./ui/editor.js");
+  return editorModPromise;
+}
+function editorApiObj() {
+  return {
+    log: shellLog,
+    refreshPacks: () => refreshPackSel(),
+    setPack: (id) => window.BM.setPack(id),
+    ensurePack: () => l2ensurePack(),
+    loadStock: async () => { const p = await loadPack(); return (p && validatePack(p).ok) ? p : null; },
+  };
+}
+function currentAreaLevel() {
+  try {
+    const ex = l2host && l2host.inst && l2host.inst.exports;
+    if (ex && typeof ex.bm_ram_rd === "function") {
+      const a = ex.bm_ram_rd(0x14) & 15;
+      return a < 8 ? a + 9 : a - 7;
+    }
+  } catch (e) {}
+  return null;
+}
+function ensureEditorHeader() {
+  let h = document.getElementById("editorHeader");
+  if (h) return h;
+  h = document.createElement("div");
+  h.id = "editorHeader";
+  h.hidden = true;
+  h.style.cssText = "display:flex;gap:8px;align-items:center;justify-content:flex-start;margin:6px 0;";
+  const back = document.createElement("button");
+  back.id = "editorBackBtn";
+  back.textContent = "\u2190 Back";
+  back.addEventListener("click", () => {
+    try {
+      if (location.hash === "#/editor") location.hash = "#/";
+      else setEditorView(false);
+    } catch (e) { setEditorView(false); }
+  });
+  const t = document.createElement("b");
+  t.textContent = "Level editor";
+  const s = document.createElement("span");
+  s.id = "editorHeaderStatus";
+  s.style.cssText = "font-size:12px;opacity:0.8";
+  h.appendChild(back); h.appendChild(t); h.appendChild(s);
+  const ctn = document.getElementById("editorCtn");
+  if (ctn && ctn.parentNode) ctn.parentNode.insertBefore(h, ctn);
+  else document.body.insertBefore(h, document.body.firstChild);
+  return h;
+}
+function eachPlayEl(fn) {
+  const ids = ["shellGrid", "playCtn", "touchCtn", "gameCanvas", "pickBtn", "romInput", "dropEl", "wipeBtn", "metaEl", "logEl", "shellStatus", "probeEl"];
+  for (const id of ids) {
+    const e = document.getElementById(id);
+    if (e && !e.closest("#editorCtn") && !e.closest("#editorHeader")) fn(e);
+  }
+  document.querySelectorAll(".shellRow").forEach((e) => {
+    if (!e.closest("#editorCtn")) fn(e);
+  });
+  document.querySelectorAll("h3").forEach((e) => {
+    if (e.closest("#editorCtn")) return;
+    if (/game|rom loader|video/i.test(e.textContent || "")) fn(e);
+  });
+  document.querySelectorAll("p").forEach((e) => {
+    if (e.closest("#editorCtn")) return;
+    if (/movie records automatically/i.test(e.textContent || "")) fn(e);
+  });
+}
+function setEditorView(on) {
+  const header = ensureEditorHeader();
+  header.hidden = !on;
+  window.__bmEditorView = !!on;
+  try {
+    const hs = document.getElementById("editorHeaderStatus");
+    if (hs) hs.textContent = on ? ("level " + ((window.__bmEditorLevel || "") || "")) : "";
+  } catch (e) {}
+  if (on) {
+    eachPlayEl((e) => {
+      if (e.dataset.bmPrevHidden === undefined) e.dataset.bmPrevHidden = e.hidden ? "1" : "0";
+      e.hidden = true;
+    });
+  } else {
+    eachPlayEl((e) => {
+      if (e.dataset.bmPrevHidden !== undefined) {
+        e.hidden = e.dataset.bmPrevHidden === "1";
+        delete e.dataset.bmPrevHidden;
+      } else e.hidden = false;
+    });
+    try {
+      const m = editorModPromise;
+      if (m) getEditorMod().then((mod) => { try { mod.closeEditor(); } catch (e) {} }).catch(() => {});
+    } catch (e) {}
+    const ctn = document.getElementById("editorCtn");
+    if (ctn) ctn.hidden = true;
+  }
+}
+async function openEditorView() {
+  setEditorView(true);
+  try {
+    const mod = await getEditorMod();
+    const lvl = currentAreaLevel();
+    window.__bmEditorLevel = lvl || window.__bmEditorLevel || null;
+    const ok = await mod.openEditor(editorApiObj(), lvl ? { initialLevel: lvl } : undefined);
+    try {
+      const hs = document.getElementById("editorHeaderStatus");
+      if (hs) hs.textContent = "level " + mod.getEditorLevel() + (lvl ? " (from game area)" : "");
+    } catch (e) {}
+    if (!ok) shellLog("editor: pick a ROM on the play page first (Back returns)");
+    try {
+      const sel = document.getElementById("edLevelSel");
+      if (sel) sel.addEventListener("change", () => {
+        try { window.__bmEditorLevel = sel.value | 0; } catch (e) {}
+      });
+    } catch (e) {}
+  } catch (e) { shellLog("editor err " + String((e && e.message) || e).slice(0, 120)); }
+}
+function editorRoute() {
+  try {
+    if (location.hash === "#/editor") { openEditorView(); return; }
+  } catch (e) {}
+  if (window.__bmEditorView) setEditorView(false);
+}
 const editorBtn = document.getElementById("editorBtn");
 if (editorBtn) editorBtn.addEventListener("click", async () => {
   try {
-    const m = await import("./ui/editor.js");
-    await m.toggleEditor({
-      log: shellLog,
-      refreshPacks: () => refreshPackSel(),
-      setPack: (id) => window.BM.setPack(id),
-      ensurePack: () => l2ensurePack(),
-      loadStock: async () => { const p = await loadPack(); return (p && validatePack(p).ok) ? p : null; },
-    });
-  } catch (e) { shellLog("editor err " + String((e && e.message) || e).slice(0, 120)); }
+    if (location.hash !== "#/editor") location.hash = "#/editor";
+    else await openEditorView();
+  } catch (e) { await openEditorView(); }
 });
+window.addEventListener("hashchange", editorRoute);
+try { if (location.hash === "#/editor") editorRoute(); } catch (e) {}
 // ---- P0 custom packs: selector + import/export/delete ----
 const packSel = document.getElementById("packSel");
 const packInput = document.getElementById("packInput");

@@ -27,6 +27,34 @@ for (const [lvl, b] of Object.entries(BG_CHR_BANK)) {
 }
 for (const k of Object.keys(BANK_USERS)) BANK_USERS[k].sort((a, b) => a - b);
 function el(id) { return document.getElementById(id); }
+const ED_LEVEL_KEY = "bm-editor-level";
+function loadPersistedLevel() {
+  try {
+    const v = parseInt(localStorage.getItem(ED_LEVEL_KEY), 10);
+    if (v >= 1 && v <= 16) return v;
+  } catch (e) {}
+  return null;
+}
+function persistLevel(lvl) {
+  try { localStorage.setItem(ED_LEVEL_KEY, String(lvl)); } catch (e) {}
+}
+function showNoRomNotice(msg) {
+  const ctn = el("editorCtn");
+  if (!ctn) return;
+  let n = el("edNoRom");
+  if (!n) {
+    n = document.createElement("div");
+    n.id = "edNoRom";
+    n.style.cssText = "background:#332200;border:1px solid #fc6;color:#ffe;padding:10px;margin:8px 0;text-align:left";
+    ctn.insertBefore(n, ctn.firstChild);
+  }
+  n.hidden = false;
+  n.textContent = msg;
+}
+function hideNoRomNotice() {
+  const n = el("edNoRom");
+  if (n) n.hidden = true;
+}
 function log(m) { try { api.log(m); } catch (e) {} }
 function cur() { return S.parsed[S.level] ? S.parsed[S.level].L : null; }
 function bankOfLevel(level) { for (const b of [0, 1, 2]) { const p = S.parsed["b" + b]; if (p && p.levels.some(L => L.level === level)) return b; } return -1; }
@@ -1164,7 +1192,9 @@ function fillLevelSel() {
   sel.value = S.level;
 }
 async function selectLevel(lvl) {
+  lvl = Math.max(1, Math.min(16, lvl | 0));
   S.level = lvl;
+  persistLevel(lvl);
   S.chrBank = BG_CHR_BANK[lvl];
   S.chrTile = 0;
   S.selCell = -1; S.selStruct = -1; S.selCombo = -1;
@@ -1177,14 +1207,32 @@ async function selectLevel(lvl) {
   }
   repaint();
 }
-export async function toggleEditor(a) {
-  api = a;
+export function isEditorOpen() { return S.open; }
+export function getEditorLevel() { return S.level; }
+export function closeEditor() {
   const ctn = el("editorCtn");
-  if (!ctn) return;
-  if (S.open) { ctn.hidden = true; S.open = false; return; }
+  if (ctn) ctn.hidden = true;
+  S.open = false;
+}
+export async function openEditor(a, opts) {
+  api = a || api;
+  const ctn = el("editorCtn");
+  if (!ctn) return false;
+  if (S.open) { ctn.hidden = false; return true; }
+  const want = opts && opts.initialLevel >= 1 && opts.initialLevel <= 16
+    ? opts.initialLevel : (loadPersistedLevel() || S.level || 1);
+  S.level = want;
   try {
     await loadAll();
-  } catch (e) { log("editor: " + String((e && e.message) || e)); return; }
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    log("editor: " + msg);
+    ctn.hidden = false;
+    S.open = false;
+    showNoRomNotice("Pick a ROM on the play page first - the editor needs the stock pack to load levels.");
+    return false;
+  }
+  hideNoRomNotice();
   ctn.hidden = false;
   S.open = true;
   fillLevelSel();
@@ -1214,4 +1262,9 @@ export async function toggleEditor(a) {
   if (sbs) sbs.onchange = () => { S.chrSub = sbs.value | 0; repaint(); };
   await selectLevel(S.level);
   log("editor: open (level " + S.level + ", " + Object.keys(S.parsed).filter(k => k[0] === "b").length + " banks)");
+  return true;
+}
+export async function toggleEditor(a, opts) {
+  if (S.open) { closeEditor(); return; }
+  await openEditor(a, opts);
 }

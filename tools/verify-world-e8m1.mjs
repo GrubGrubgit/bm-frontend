@@ -34,15 +34,16 @@ const per = {};
 for (const s of w.sides) per[s.level] = (per[s.level] || 0) + 1;
 const exp = { 1: 7, 2: 7, 3: 7, 4: 6, 5: 7, 6: 5, 7: 26, 8: 6, 9: 5, 10: 4, 11: 5, 12: 4, 13: 5, 14: 4, 15: 5, 16: 5 };
 ok('C sides per level match (L7 hub=26)', JSON.stringify(per) === JSON.stringify(exp), JSON.stringify(per));
-// D: one traversable world
+// D: traversable world (main + sealed L1/L9 pair loop)
 const dc = w.doorComponents;
-ok('D all 108 door screens mutually reachable (1 component)', dc.length === 1 && dc[0].length === 108, dc.length + ' comps');
+ok('D door screens form closed pair-loop components (98+10)', dc.length === 2 && dc.map((c) => c.length).sort((a, b) => a - b).join(',') === '10,98', dc.map((c) => c.length).join(','));
 const main = w.components.slice().sort((a, b) => b.length - a.length)[0];
 const doorSet = new Set(w.sides.map((s) => s.level + ':' + s.sx + ',' + s.sy));
-ok('D main component holds every door screen (763 screens)', main.length === 763 && [...doorSet].every((k) => main.includes(k)), 'main=' + main.length);
-// E: pocket census (INFO only -- isolated walkable pockets have no doors by D,
-// so they are map margins or upgrade-sealed; M3 fog-of-war + M4 symbols handle
-// them; exact D counts above pin the border rule against regressions)
+ok('D main component 773 screens holds 98/108 door screens (10 in sealed pair-loop)', main.length === 773 && [...doorSet].filter((k) => main.includes(k)).length === 98, 'main=' + main.length);
+// E: pocket census (INFO + sealed-loop pin -- most isolated walkable pockets
+// are map margins or upgrade-sealed (M3 fog-of-war + M4 symbols handle them);
+// sides 14-23 form a closed L1<->L9 pair loop, walk-sealed under the corrected
+// row-major decode (bit7=solid, vram-proven); exact D/E counts pin the border rule)
 const parsed = [0, 1, 2].map((b) => parseBank(stock.prg[b], b));
 const LL = {};
 for (const p of parsed) for (const l of p.levels) LL[l.level] = l;
@@ -61,7 +62,7 @@ for (let lv = 1; lv <= 16; lv++) {
 console.log('INFO isolated walkable pockets (>128 tiles): ' + pockets.length);
 console.log('INFO ' + pockets.join(' '));
 const pocketDoors = w.sides.filter((s) => !mainSet.has(s.level + ':' + s.sx + ',' + s.sy));
-ok('E pockets hold no doors (unreachable except via play)', pocketDoors.length === 0, pocketDoors.map((s) => s.idx).join(','));
+ok('E sealed pair-loop sides pinned (sides 14-23, L1<->L9 closed loop)', pocketDoors.length === 10 && pocketDoors.map((s) => s.idx).join(',') === '14,15,16,17,18,19,20,21,22,23', pocketDoors.map((s) => s.idx).join(','));
 // F: level geometry
 const rowsOk = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 15, 16].every((lv) => w.levels[lv].rows === 32) && w.levels[9].rows === 25 && w.levels[13].rows === 29;
 ok('F map rows (32 tank, 25 L9, 29 L13)', rowsOk);

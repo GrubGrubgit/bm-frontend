@@ -5,8 +5,10 @@
 // 32x32 (2x2 combos), block 64x64 (2x2 structs), all row-major
 // [TL,TR,BL,BR] (row-major PROVEN exact 2026-11-23: full 32x30 L1 spawn
 // vicinity reproduced the live PPU nametable + attr bytes 960/960).
+// Master palette mirrors the engine NESPAL (bm_api.c) so the
+// editor preview matches wasm-engine colors exactly.
 // Map is 32 blocks wide; rows = 32 tank, 25 level 9, 29 level 13.
-export const NES_PALETTE = ["#575757","#000C8E","#0800A6","#340096","#550061","#630015","#5A0000","#3C0E00","#112800","#003B00","#004200","#003A05","#002652","#000000","#000000","#000000","#A5A5A5","#0041D9","#2F1EFF","#6704F2","#9400B4","#AA0057","#A31800","#803900","#4B5B00","#137600","#008100","#007923","#006288","#000000","#000000","#000000","#FFFFFF","#4A9FFF","#797EFF","#AF63FF","#DD55FF","#F757C2","#F76A63","#DC8810","#AEA900","#78C400","#4AD211","#2FCF64","#2FBDC4","#414141","#000000","#000000","#FFFFFF","#B9DDFF","#CAD1FF","#DEC6FF","#F0C0FF","#FCC0EE","#FDC6CA","#F5D0AA","#E4DD95","#D0E892","#BDEEA2","#B2EEC0","#B0E8E3","#B3B3B3","#000000","#000000"];
+export const NES_PALETTE = ["#757575","#271b8f","#0000ab","#47009f","#8f0077","#ab0013","#a70000","#7f0b00","#432b00","#004700","#005100","#003a6b","#000000","#000000","#000000","#000000","#bcbcbc","#0078f8","#0058f8","#6844fc","#d800cc","#e40058","#f83800","#e45c10","#ac7c00","#00b800","#00a800","#00a844","#008888","#000000","#000000","#000000","#f8f8f8","#3cbcfc","#6888fc","#9878f8","#f878f8","#f85898","#f87858","#fca044","#f8b800","#b8f818","#58d854","#58f898","#00e8d8","#787878","#000000","#000000","#fcfcfc","#a4e4fc","#b8b8f8","#d8b8f8","#f8b8f8","#f8a8c0","#f0d0b0","#fce0a8","#f8d878","#d8f878","#b8f8b8","#b8f8d8","#00fcfc","#f8d8f8","#000000","#000000"];
 // BG 4KB CHR bank per game level (Data Crystal CHR-ROM table).
 export const BG_CHR_BANK = { 1: 8, 2: 9, 3: 10, 4: 11, 5: 12, 6: 13, 7: 14, 8: 15, 9: 17, 16: 17, 11: 18, 13: 18, 10: 19, 14: 19, 12: 20, 15: 20 };
 export const MAP_COLS = 32;
@@ -32,15 +34,20 @@ export function decodeTile(bank4kBytes, tile) {
 function hexRgb(hex) { return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]; }
 const PAL_RGB = NES_PALETTE.map(hexRgb);
 // Resolve one 64x64 block to 8x8 tile grid: [{tile, sub}] row-major.
+// (2026-11-27: fixed intra-block assembly order -- the old nested
+// push() emitted (sy,sx,cy,cx,ty,tx) nesting order, NOT geometric
+// row-major; every consumer indexed out[ty*8+tx] geometrically, so
+// detail tiles were permuted within each block. Proven vs live PPU
+// vram: L1 spawn window now matches 832/832 tile indices.)
 export function blockTiles(L, blockIdx) {
-  const out = [];
+  const out = new Array(64);
   for (let sy = 0; sy < 2; sy++) for (let sx = 0; sx < 2; sx++) {
     const structIdx = L.blocks[blockIdx * 4 + sy * 2 + sx];
     for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 2; cx++) {
       const comboIdx = L.structs[structIdx * 4 + cy * 2 + cx];
       const sub = L.attrs[comboIdx] & 3;
       for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 2; tx++) {
-        out.push({ tile: L.combos[comboIdx * 4 + ty * 2 + tx], sub });
+        out[(sy * 4 + cy * 2 + ty) * 8 + (sx * 4 + cx * 2 + tx)] = { tile: L.combos[comboIdx * 4 + ty * 2 + tx], sub };
       }
     }
   }

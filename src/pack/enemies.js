@@ -428,3 +428,23 @@ export function rebuildSpawns(parsed, edited) {
   }
   return { ok: true, errors: [], bytes: out };
 }
+// ---- editor-gap batch: pure spawn-type validation (no DOM) ----
+// Closes the 6.1 per-area-validation follow-up for proven-harmful types.
+// Trap sets are proven in area-0 (tank) / area-9 (overhead) only; unmapped
+// types pass with warn (validity elsewhere NOT proven, needs per-area proof).
+export function spawnTypeAllowed(isTank, type) {
+  const t = type | 0;
+  if (t < 0 || t > 127) return { ok: false, reason: "range" };
+  if (isTank) {
+    if (TANK_TRAP_TYPES.has(t)) return { ok: false, reason: "trap" };
+    if (t === 32) return { ok: true, warn: "boss" };
+    if (TANK_DORMANT_TYPES.has(t)) return { ok: true, warn: "dormant" };
+    if (tankEmptyType(t)) return { ok: true, warn: "empty" };
+    if (!(t in TANK_TYPE_ACTOR) && powerupSubtype(t) < 0) return { ok: true, warn: "unmapped" };
+    return { ok: true };
+  };
+  if (INVALID_TYPES.has(t)) return { ok: false, reason: "trap" };
+  if (powerupSubtype(t) >= 0) return { ok: true };
+  if (!(t in TYPE_ACTOR)) return { ok: true, warn: "unmapped" };
+  return { ok: true };
+}

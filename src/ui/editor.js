@@ -7,7 +7,8 @@ import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, NES_PALETTE, MAP_COLS } f
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
 import { SPR_PAL, SPR_CYCLE, spriteBanksFor, isPureSpriteBank } from "../pack/sprites.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
-import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR } from "../pack/enemies.js";
+import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
+import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText } from "../pack/gaps.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
@@ -92,6 +93,7 @@ function repaint() {
   renderScrollGrids(E);
   renderEnemies();
   renderStatTbl();
+  renderRENotes();
   renderPalStrip(E);
   fillChrBankSel();
   renderChrTab(E);
@@ -494,6 +496,14 @@ function commitEnemyRec(key, i, field, value) {
   }
   const cur = S.edEnemies[key] || { types: E.L.types.slice(), xs: E.L.xs.slice(), ys: E.L.ys.slice() };
   S.edEnemies[key] = cur;
+  if (field === 't') {
+    const chk2 = spawnTypeAllowed(key[0] === 'A', value | 0);
+    if (!chk2.ok) {
+      log('editor: enemies refusing retype to ' + (value | 0) + ' in ' + key + ' (' + chk2.reason + ' at activation, area-proven)');
+      repaint();
+      return;
+    }
+  }
   if (field === 't') cur.types[i] = Math.max(0, Math.min(127, value | 0));
   if (field === 'x') cur.xs[i] = Math.max(0, Math.min(255, value | 0));
   if (field === 'y') cur.ys[i] = Math.max(0, Math.min(255, value | 0));
@@ -522,6 +532,12 @@ function addEnemyRec(key) {
   const t = Math.max(0, Math.min(127, (tEl && tEl.value | 0) || 0));
   const x = Math.max(0, Math.min(255, (xEl && xEl.value | 0) || 0));
   const y = Math.max(0, Math.min(255, (yEl && yEl.value | 0) || 0));
+  const chk = spawnTypeAllowed(key[0] === 'A', t);
+  if (!chk.ok) {
+    log('editor: enemies refusing type ' + t + ' in ' + key + ' (' + chk.reason + ' at activation, area-proven)');
+    repaint();
+    return;
+  }
   if (key[0] === 'A' && t === BOSS_TYPE) {
     log('editor: enemies refusing to add a second type-32 to tank area ' + key);
     repaint();
@@ -542,6 +558,21 @@ function addEnemyRec(key) {
   S.edEnemies[key] = { types, xs, ys };
   log('editor: enemies added ' + key + '[' + E.n + '] t=' + t + ' x=' + x + ' y=' + y);
   repaint();
+}
+function renderRENotes() {
+  const nz = el('edRENotes'), dz = el('edDoorList');
+  if (!nz && !dz) return;
+  const isTank = enemyKeyForLevel(S.level)[0] === 'A';
+  if (nz) nz.textContent = physicsText() + ' || ' + slotText() + (isTank ? ' || tank: type->actor->routine in AI column' : ' || overhead: type->actor->routine in AI column');
+  if (dz) {
+    dz.textContent = '';
+    try {
+      const d = doorsForLevel(S.resolved ? S.resolved.prg[7] : null, S.level);
+      if (!d.ok) dz.textContent = 'doors: n/a';
+      else if (!d.sides.length) dz.textContent = 'no door sides in area $' + d.area.toString(16);
+      else dz.textContent = 'area $' + d.area.toString(16) + ': ' + d.sides.map(function (s) { return 'r' + s.row + '($' + s.x.toString(16) + ',$' + s.y.toString(16) + ')->a$' + s.toArea.toString(16) + '($' + s.toX.toString(16) + ',$' + s.toY.toString(16) + ')'; }).join(' ');
+    } catch (err) { dz.textContent = 'doors: n/a'; }
+  }
 }
 function renderEnemies() {
   const info = el('edEnemyInfo'), tbl = el('edEnemyTbl'), warn = el('edEnemyWarn'), bud = el('edEnemyBudget');
@@ -564,7 +595,7 @@ function renderEnemies() {
   const bg = spawnBudget(S.enemies, trial);
   if (bud) bud.textContent = bg.ok ? ('bank-3 budget: ' + bg.free + ' bytes free (~' + Math.max(0, Math.floor(bg.free / 3)) + ' adds)') : 'bank-3 budget: n/a';
   const hr = document.createElement('tr');
-  const heads = ['rec', 'type', 'x', 'y', 'sprA/B', ''];
+  const heads = ['rec', 'type', 'x', 'y', 'sprA/B', 'AI', ''];
   for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }
   tbl.appendChild(hr);
   for (let i = 0; i < n; i++) {
@@ -584,6 +615,11 @@ function renderEnemies() {
     const td = document.createElement('td');
     td.textContent = String.fromCharCode(36) + sp.a.toString(16) + '/' + String.fromCharCode(36) + sp.b.toString(16);
     tr.appendChild(td);
+    const bh = behaviorFor(key[0] === 'A', E.types[i]);
+    const tdB = document.createElement('td');
+    tdB.textContent = behaviorText(bh);
+    tdB.title = bh.note || (bh.actor == null ? 'no actor mapped (unproven area/type)' : 'actor routine');
+    tr.appendChild(tdB);
     const tdD = document.createElement('td');
     const del = document.createElement('button');
     del.textContent = 'x';

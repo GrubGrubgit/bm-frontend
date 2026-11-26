@@ -102,3 +102,24 @@ export function parseSong(bank5, id) {
 export function songLine(r) {
   return 'song $' + r.id.toString(16) + ': ' + r.channels.length + 'ch ' + r.notes + 'n/' + r.loops + 'L/' + r.gosubs + 'G ends' + r.ends + ' [' + r.channels.map(function (c) { return 'ch' + c.slot + '@' + c.stream.toString(16) + '+' + c.bytes; }).join(' ') + ']';
 }
+
+// ---- S4: song pointer-table remap (swap what an id plays) ----
+// Each id owns one word @SONG_PTR.OFFSET+id*2 (bank5). A remap copies the
+// target id's word over the id's word: exact 2-byte replace, data untouched.
+export function remapSongs(base5, edited) {
+  const errors = [];
+  if (!(base5 instanceof Uint8Array) || base5.length !== STREAM.BANK_LEN) return { ok: false, errors: ['bad-bank5'] };
+  const out = base5.slice();
+  const keys = Object.keys(edited || {});
+  for (let i = 0; i < keys.length; i++) {
+    const idx = +keys[i];
+    if (!(idx >= 0 && idx < SONG_PTR.COUNT && (idx | 0) === idx)) { errors.push(keys[i] + ':bad-idx'); continue; }
+    const t = edited[keys[i]];
+    if (!Number.isInteger(t) || t < 0 || t >= SONG_PTR.COUNT) { errors.push(keys[i] + ':range'); continue; }
+    const so = SONG_PTR.OFFSET + idx * 2, to = SONG_PTR.OFFSET + t * 2;
+    out[so] = base5[to]; out[so + 1] = base5[to + 1];
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, errors: [], bytes: out };
+}
+export function ptrOf(bank5, id) { const p = songPtr(bank5, id); return p < 0 ? null : p; }

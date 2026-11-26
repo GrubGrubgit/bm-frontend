@@ -122,6 +122,9 @@ button{padding:10px 14px;margin:2px}
 
 <div class="shellRow"><span>song browser (S3: bank-5 structure, read-only)</span></div>
 <div class="shellRow"><span>song</span><label>id <input id="edSongSel" type="text" size="4" value="6" style="width:56px"></label><span id="edSongOut" style="font-size:11px;text-align:left"></span></div>
+<div class="shellRow"><span>song pointer remap (S4: exact 2-byte word copy)</span></div>
+<div class="shellRow"><span>remap</span><label>id <input id="edPtrId" type="number" min="0" max="84" value="45" style="width:64px"></label><label>to <input id="edPtrTarget" type="number" min="0" max="84" value="84" style="width:64px"></label><span id="edPtrOut" style="font-size:11px;text-align:left"></span></div>
+
 <div class="shellRow"><span>type stats (P3c bank-6 / P3d bank-4 HP-damage, global per type)</span><span id="edStatInfo"></span></div>
 <div style="overflow:auto;max-height:30vh;border:1px solid #444"><table id="edStatTbl" style="font-size:12px;margin:0 auto"></table></div>
 <div class="shellRow"><label>pack name <input id="edPackName" type="text" size="24" placeholder="my level edit"></label><button id="edSaveBtn">Save as pack</button><span id="edStatus"></span></div>

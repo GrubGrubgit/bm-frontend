@@ -10,14 +10,14 @@ import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
 import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
 import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine } from "../pack/gaps.js";
 import { getAreaSongs, serializeAreaSongs, AREA_TABLE } from "../pack/sound.js";
-import { parseSong, songLine } from "../pack/songs.js";
+import { parseSong, songLine, remapSongs, ptrOf } from "../pack/songs.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
   brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
-  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {},
+  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {}, edSongPtr: {},
   chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
 };
 // 4KB CHR bank -> levels using it as bg bank (labels for the bank picker).
@@ -99,6 +99,7 @@ function repaint() {
   renderSoundNotes();
   renderAreaSongs();
   renderSongBrowser();
+  renderSongPtr();
   renderPalStrip(E);
   fillChrBankSel();
   renderChrTab(E);
@@ -598,6 +599,45 @@ function commitAreaSong(i, value) {
   repaint();
 }
 
+
+function effSongPtr(id) {
+  const base = S.resolved ? S.resolved.prg[5] : null;
+  if (!base) return null;
+  const e = S.edSongPtr[id];
+  const t = (e === undefined) ? id : e;
+  return { from: ptrOf(base, id), to: ptrOf(base, t), target: t };
+}
+function commitSongPtr(id, target) {
+  if (!(id >= 0 && id < 85 && (id | 0) === id) || !Number.isInteger(target) || target < 0 || target > 84) {
+    log("editor: songPtr refusing out-of-range " + id + "->" + target);
+    repaint();
+    return;
+  }
+  S.edSongPtr[id] = target;
+  log("editor: songPtr $" + id.toString(16) + " -> $" + target.toString(16) + " (pointer word copy)");
+  repaint();
+}
+function renderSongPtr() {
+  const a = el("edPtrId"), b = el("edPtrTarget"), out = el("edPtrOut");
+  if (!a && !out) return;
+  const upd = function () {
+    if (!out) return;
+    try {
+      const id = parseInt(String(a.value).trim(), 10);
+      const m = effSongPtr(id);
+      if (!m || m.from == null) { out.textContent = 'ptr: n/a'; return; }
+      out.textContent = 'ptr $' + m.from.toString(16) + (m.target === id ? ' (stock)' : ' -> $' + m.to.toString(16) + ' (remapped)');
+    } catch (err) { out.textContent = 'ptr: n/a'; }
+  };
+  if (a) {
+    if (!a.dataset.wired) {
+      a.dataset.wired = '1';
+      a.addEventListener('change', upd);
+      if (b) b.addEventListener('change', function () { commitSongPtr(parseInt(String(a.value).trim(), 10), parseInt(String(b.value).trim(), 10)); upd(); });
+    }
+    upd();
+  }
+}
 function renderSongBrowser() {
   const inp = el("edSongSel"), out = el("edSongOut");
   if (!inp && !out) return;
@@ -909,6 +949,13 @@ async function saveAsPack() {
         patches.push(makePatch("prg", AREA_TABLE.BANK, run.off, run.bytes));
       }
     }
+    if (Object.keys(S.edSongPtr).length) {
+      const rp = remapSongs(S.resolved.prg[5], S.edSongPtr);
+      if (!rp.ok) throw new Error("serialize songPtr: " + rp.errors.join(" "));
+      for (const run of diffRuns(S.stock.prg[5], rp.bytes)) {
+        patches.push(makePatch("prg", 5, run.off, run.bytes));
+      }
+    }
     if (Object.keys(S.edEnemies).length) {
       let structural = false;
       for (const k of Object.keys(S.edEnemies)) {
@@ -933,6 +980,7 @@ async function saveAsPack() {
     S.edStats = {};
     S.edTankStats = {};
     S.edAreaSongs = {};
+    S.edSongPtr = {};
     repaint();
     try { await api.refreshPacks(); } catch (e) {}
     try { if (api.setPack) api.setPack(id); } catch (e2) {}

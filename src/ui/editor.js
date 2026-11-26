@@ -9,13 +9,14 @@ import { SPR_PAL, SPR_CYCLE, spriteBanksFor, isPureSpriteBank } from "../pack/sp
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
 import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
 import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine } from "../pack/gaps.js";
+import { getAreaSongs, serializeAreaSongs, AREA_TABLE } from "../pack/sound.js";
 export { diffRuns };
 import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
   brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
-  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {},
+  chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {},
   chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
 };
 // 4KB CHR bank -> levels using it as bg bank (labels for the bank picker).
@@ -95,6 +96,7 @@ function repaint() {
   renderStatTbl();
   renderRENotes();
   renderSoundNotes();
+  renderAreaSongs();
   renderPalStrip(E);
   fillChrBankSel();
   renderChrTab(E);
@@ -576,6 +578,46 @@ function renderRENotes() {
   }
 }
 
+
+function effAreaSong(i) {
+  const base = S.resolved ? S.resolved.prg[AREA_TABLE.BANK] : null;
+  const songs = getAreaSongs(base) || [6, 4, 2, 19, 7, 5, 55, 43];
+  const e = S.edAreaSongs[i];
+  return (e === undefined) ? songs[i] : e;
+}
+function commitAreaSong(i, value) {
+  if (!(i >= 0 && i < AREA_TABLE.COUNT) || !Number.isInteger(value) || value < 0 || value > 84) {
+    log("editor: areaSongs refusing out-of-range a" + i + "=" + value);
+    repaint();
+    return;
+  }
+  S.edAreaSongs[i] = value;
+  log("editor: areaSongs a" + i + " -> " + value + " (GLOBAL per area&7)");
+  repaint();
+}
+function renderAreaSongs() {
+  const info = el("edAreaSongInfo"), tbl = el("edAreaSongTbl");
+  if (!tbl) return;
+  tbl.innerHTML = "";
+  const hr = document.createElement("tr");
+  const heads = ["area", "levels", "song"];
+  for (let h = 0; h < heads.length; h++) { const th = document.createElement("th"); th.textContent = heads[h]; hr.appendChild(th); }
+  tbl.appendChild(hr);
+  for (let i = 0; i < AREA_TABLE.COUNT; i++) {
+    const tr = document.createElement("tr");
+    const td0 = document.createElement("td"); td0.textContent = "a" + i; tr.appendChild(td0);
+    const td1 = document.createElement("td"); td1.textContent = "tank L" + (i + 9) + " + dung L" + (i + 1); tr.appendChild(td1);
+    const td2 = document.createElement("td");
+    const inp = document.createElement("input");
+    inp.type = "number"; inp.min = 0; inp.max = 84; inp.value = effAreaSong(i);
+    inp.style.width = "64px";
+    inp.dataset.i = i;
+    inp.addEventListener("change", function () { commitAreaSong(this.dataset.i | 0, this.value | 0); });
+    td2.appendChild(inp); tr.appendChild(td2);
+    tbl.appendChild(tr);
+  }
+  if (info) info.textContent = "LCDC8 bank7+3528, exact 8 bytes (1 patch per changed byte). Note: intro advance waits for the entry song to end, so a longer song delays the dungeon BGM";
+}
 function renderSoundNotes() {
   const nz = el("edSoundNotes"), inp = el("edSoundId"), out = el("edSoundOut");
   if (!nz && !out) return;
@@ -833,6 +875,13 @@ async function saveAsPack() {
         patches.push(makePatch('prg', TANK_STAT_BANK, run.off, run.bytes));
       }
     }
+    if (Object.keys(S.edAreaSongs).length) {
+      const ar = serializeAreaSongs(S.resolved.prg[AREA_TABLE.BANK], S.edAreaSongs);
+      if (!ar.ok) throw new Error("serialize areaSongs: " + ar.errors.join(" "));
+      for (const run of diffRuns(S.stock.prg[AREA_TABLE.BANK], ar.bytes)) {
+        patches.push(makePatch("prg", AREA_TABLE.BANK, run.off, run.bytes));
+      }
+    }
     if (Object.keys(S.edEnemies).length) {
       let structural = false;
       for (const k of Object.keys(S.edEnemies)) {
@@ -856,6 +905,7 @@ async function saveAsPack() {
     S.edEnemies = {};
     S.edStats = {};
     S.edTankStats = {};
+    S.edAreaSongs = {};
     repaint();
     try { await api.refreshPacks(); } catch (e) {}
     try { if (api.setPack) api.setPack(id); } catch (e2) {}

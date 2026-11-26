@@ -163,3 +163,29 @@ export const SITES = {
 };
 export function sitesFor(id) { const k = Number(id).toString(16).toUpperCase(); return SITES[k] || []; }
 export function siteCount() { let n = 0; for (const k in SITES) n += SITES[k].length; return n; }
+
+// ---- S2: area entry-music table (LCDC8, fixed bank 7) ----
+// CDBA: DEC2 silence, A = $14 & 7, song = table[A], DECC queue. The 8 bytes
+// sit code-tight between JMP DECC and entry_CDD0 (zero slack, exact replace).
+export const AREA_TABLE = { BANK: 7, OFFSET: 3528, COUNT: 8 };
+export function getAreaSongs(prg7) {
+  if (!(prg7 instanceof Uint8Array) || prg7.length < AREA_TABLE.OFFSET + AREA_TABLE.COUNT) return null;
+  const out = [];
+  for (let i = 0; i < AREA_TABLE.COUNT; i++) out.push(prg7[AREA_TABLE.OFFSET + i]);
+  return out;
+}
+export function serializeAreaSongs(base7, edited) {
+  const errors = [];
+  if (!(base7 instanceof Uint8Array) || base7.length < AREA_TABLE.OFFSET + AREA_TABLE.COUNT) return { ok: false, errors: ["bad-bank7"] };
+  const out = base7.slice();
+  const keys = Object.keys(edited || {});
+  for (let i = 0; i < keys.length; i++) {
+    const idx = +keys[i];
+    if (!(idx >= 0 && idx < AREA_TABLE.COUNT && (idx | 0) === idx)) { errors.push(keys[i] + ':bad-idx'); continue; }
+    const v = edited[keys[i]];
+    if (!Number.isInteger(v) || v < 0 || v > SONG_TABLE.MAX_ID) { errors.push(keys[i] + ':range'); continue; }
+    out[AREA_TABLE.OFFSET + idx] = v;
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, errors: [], bytes: out };
+}

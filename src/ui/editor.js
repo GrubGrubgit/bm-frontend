@@ -581,19 +581,13 @@ function renderInspector(E) {
   const add = (tag, text) => { const d = document.createElement(tag); d.textContent = text; box.appendChild(d); return d; };
   const helpTop = document.createElement("div");
   helpTop.className = "edHelp";
+  helpTop.id = "edMapHelp";
   helpTop.textContent = "Map cells hold blocks: 1 block = 64px (2x2 structs); 1 struct = 32px (2x2 combos); 1 combo = 16px (2x2 tiles + 1 attr byte). Paint mode stamps the brush block (preview next to the brush box, above the map); inspect mode selects a cell to show its block/struct/combo chain below. Undo/redo buttons sit by the save row (Ctrl+Z / Ctrl+Shift+Z).";
   box.appendChild(helpTop);
   if (S.selCell >= 0) {
     const bi = E.map[S.selCell];
     const cx = S.selCell % MAP_COLS, cy = Math.floor(S.selCell / MAP_COLS);
     add("div", "cell (" + cx + "," + cy + ") block " + bi);
-    const bpvRow = document.createElement("div");
-    const bpvLab = document.createElement("span");
-    bpvLab.textContent = "block preview: ";
-    const bpv = document.createElement("canvas");
-    paintPreviewInto(bpv, renderBlockImage(E, bgBank(), E.pal, bi), 96);
-    bpv.title = "block " + bi + " = 2x2 structs [" + st.join(",") + "]";
-    bpvRow.appendChild(bpvLab); bpvRow.appendChild(bpv); box.appendChild(bpvRow);
     const setRow = document.createElement("div");
     setRow.textContent = "set block: ";
     const inp = document.createElement("input");
@@ -616,6 +610,13 @@ function renderInspector(E) {
     const st = [];
     for (let i = 0; i < 4; i++) st.push(E.blocks[bi * 4 + i]);
     add("div", "block " + bi + " structs [" + st.join(",") + "]");
+    const bpvRow = document.createElement("div");
+    const bpvLab = document.createElement("span");
+    bpvLab.textContent = "block preview: ";
+    const bpv = document.createElement("canvas");
+    paintPreviewInto(bpv, renderBlockImage(E, bgBank(), E.pal, bi), 96);
+    bpv.title = "block " + bi + " = 2x2 structs [" + st.join(",") + "]";
+    bpvRow.appendChild(bpvLab); bpvRow.appendChild(bpv); box.appendChild(bpvRow);
   }
   // struct browser
   const sRow = document.createElement("div");

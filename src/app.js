@@ -1903,6 +1903,7 @@ function setEditorView(on) {
     const ctn = document.getElementById("editorCtn");
     if (ctn) ctn.hidden = true;
   }
+  try { window.scrollTo(0, 0); } catch (e) {}
 }
 async function openEditorView() {
   setEditorView(true);

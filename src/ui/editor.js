@@ -419,6 +419,7 @@ function buildBrushPicker() {
     syncBrushInputs(cur() ? effLevel(cur()) : null);
     repaint();
   });
+  syncBrushInputs(cur() ? effLevel(cur()) : null);
 }
 function paintPreviewInto(cv, img, size) {
   if (!cv) return;

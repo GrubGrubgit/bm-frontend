@@ -16,7 +16,7 @@ import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
-  brush: 0, mode: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
+  brush: 0, mode: "paint", tool: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
   chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {}, edSongPtr: {}, edSiteFilter: '', edTankSongs: {}, edSites: {},
   chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
   undo: [], redo: [], painting: false, strokeOpen: false, chrPainting: false, keysWired: false,
@@ -61,6 +61,20 @@ function hideNoRomNotice() {
 const ED_TAB_KEY = "bm-editor-tab";
 const ED_ZOOM_KEY = "bm-editor-zoom";
 const ED_ZOOMS = [4, 8, 12, 16, 24, 32];
+const ED_TOOL_KEY = "bm-editor-tool";
+const ED_TOOLS = [
+  { id: "scroll", label: "Pan", title: "pan/scroll the map (drag scrolls, never paints; use on touch)" },
+  { id: "paint", label: "Brush", title: "paint the brush block (see brush row above the map)" },
+  { id: "erase", label: "Eraser", title: "erase: stamp block 0" },
+  { id: "pick", label: "Picker", title: "eyedropper: tap a map cell to load its block into the brush" },
+];
+function loadPersistedTool() {
+  try {
+    const v = localStorage.getItem(ED_TOOL_KEY);
+    if (ED_TOOLS.some((t) => t.id === v)) return v;
+  } catch (e) {}
+  return "paint";
+}
 const ED_TABS = [
   { id: "map", label: "Map", anchors: ["edLevelSel", "edModeBadge", "edMap", "edBrush", "edCellInfo", "edInspector", "edScrollV", "edScrollH", "edScrollHint"] },
   { id: "pal", label: "Palette", anchors: ["edPal", "edPalSlots", "edPalInfo", "edPalPick"] },
@@ -151,12 +165,69 @@ function setEditorTab(id) {
     }
   }
 }
+function mapScrollBox() {
+  const cv = el("edMap");
+  return cv && cv.parentNode ? cv.parentNode : null;
+}
+function buildToolRow() {
+  if (el("edToolRow")) return;
+  const box = mapScrollBox();
+  if (!box || !box.parentNode) return;
+  const row = document.createElement("div");
+  row.id = "edToolRow";
+  row.dataset.edTab = "map";
+  row.style.cssText = "display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;";
+  const lab = document.createElement("span");
+  lab.textContent = "Map tool:";
+  lab.style.cssText = "font-weight:bold;";
+  row.appendChild(lab);
+  for (const t of ED_TOOLS) {
+    const bb = document.createElement("button");
+    bb.textContent = t.label;
+    bb.title = t.title;
+    bb.dataset.edToolBtn = t.id;
+    bb.style.cssText = "min-width:64px;min-height:44px;";
+    bb.addEventListener("click", () => setEditorTool(t.id));
+    row.appendChild(bb);
+  }
+  box.parentNode.insertBefore(row, box);
+  refreshToolRow();
+}
+function refreshToolRow() {
+  const row = el("edToolRow");
+  if (!row) return;
+  for (const bb of Array.from(row.querySelectorAll("[data-ed-tool-btn]"))) {
+    const on = bb.dataset.edToolBtn === (S.tool || "paint");
+    bb.style.fontWeight = on ? "bold" : "";
+    bb.style.background = on ? "#246" : "";
+  }
+}
+function setEditorTool(id) {
+  if (!ED_TOOLS.some((t) => t.id === id)) id = "paint";
+  S.tool = id;
+  try { localStorage.setItem(ED_TOOL_KEY, id); } catch (e) {}
+  refreshToolRow();
+  applyToolToMap();
+}
+function applyToolToMap() {
+  const cv = el("edMap");
+  if (!cv) return;
+  const t = S.tool || "paint";
+  cv.style.touchAction = t === "scroll" ? "pan-x pan-y" : "none";
+  cv.style.cursor = t === "scroll" ? "grab" : t === "pick" ? "copy" : "crosshair";
+}
 function buildZoomRow() {
+  const stale = el("edZoomRow");
+  if (stale) {
+    const cvx = el("edMap");
+    if (cvx && stale.parentNode === cvx.parentNode) stale.remove();
+  }
   if (el("edZoomRow")) return;
   const cv = el("edMap");
   if (!cv || !cv.parentNode) return;
   const row = document.createElement("div");
   row.id = "edZoomRow";
+  row.dataset.edTab = "map";
   row.style.cssText = "display:flex;gap:8px;align-items:center;margin:8px 0;";
   const lab0 = document.createElement("span");
   lab0.textContent = "Map zoom:";
@@ -179,7 +250,9 @@ function buildZoomRow() {
   inp.addEventListener("click", () => stepZoom(1));
   row.appendChild(lab0);
   row.appendChild(out); row.appendChild(lab); row.appendChild(inp);
-  cv.parentNode.insertBefore(row, cv);
+  const box = mapScrollBox();
+  if (box && box.parentNode) box.parentNode.insertBefore(row, box);
+  else cv.parentNode.insertBefore(row, cv);
   updateZoomLabel();
 }
 function updateZoomLabel() {
@@ -303,6 +376,50 @@ function buildBrushPreview() {
   br.parentNode.appendChild(cap);
   br.parentNode.appendChild(cv);
 }
+function nBlocksOf(E) { return E.blocks.length / 4; }
+function syncBrushInputs(E) {
+  const n = E ? nBlocksOf(E) : null;
+  if (n !== null) S.brush = Math.max(0, Math.min(n - 1, S.brush | 0));
+  const br = el("edBrush");
+  if (br) {
+    if (n !== null) br.max = n - 1;
+    if (String(br.value) !== String(S.brush)) br.value = S.brush;
+  }
+  const sel = el("edBrushSel");
+  if (sel) {
+    if (n !== null && sel.options.length !== n) {
+      sel.innerHTML = "";
+      for (let i = 0; i < n; i++) {
+        const o = document.createElement("option");
+        o.value = i;
+        o.textContent = "block " + i;
+        sel.appendChild(o);
+      }
+    }
+    if (String(sel.value) !== String(S.brush)) sel.value = S.brush;
+  }
+}
+function buildBrushPicker() {
+  if (el("edBrushSel")) return;
+  const br = el("edBrush");
+  if (!br || !br.parentNode) return;
+  br.title = "brush block index (synced with the dropdown; Picker tool or Alt+click eyedrops from the map)";
+  const sel = document.createElement("select");
+  sel.id = "edBrushSel";
+  sel.title = "brush block: every valid block in this level";
+  sel.style.cssText = "max-width:150px;";
+  sel.addEventListener("change", () => {
+    S.brush = sel.value | 0;
+    syncBrushInputs(cur() ? effLevel(cur()) : null);
+    repaint();
+  });
+  br.parentNode.insertBefore(sel, br.nextSibling);
+  br.addEventListener("change", () => {
+    S.brush = Math.max(0, br.value | 0);
+    syncBrushInputs(cur() ? effLevel(cur()) : null);
+    repaint();
+  });
+}
 function paintPreviewInto(cv, img, size) {
   if (!cv) return;
   cv.width = 64; cv.height = 64;
@@ -355,23 +472,42 @@ function mapCellFromEvent(ev) {
   if (bx < 0 || by < 0 || bx >= MAP_COLS || by >= E.map.length / MAP_COLS) return -1;
   return by * MAP_COLS + bx;
 }
-function applyMapCell(cell, startStroke) {
+function stampMapCell(cell, value, label, startStroke) {
   const L = cur();
   if (!L || cell < 0) return;
   const E = effLevel(L);
-  if (S.mode === "paint") {
-    if (startStroke) { pushHistory("paint block"); S.strokeOpen = true; }
-    const m = ((S.edited[E.level] && S.edited[E.level].map) || E.map).slice();
-    m[cell] = S.brush;
-    editsFor(E.level).map = m;
-    S.selCell = cell;
-    repaint();
-  } else {
-    S.selCell = cell;
-    repaint();
-  }
+  const nBlk = E.blocks.length / 4;
+  const v = Math.max(0, Math.min(nBlk - 1, value | 0));
+  const m = ((S.edited[E.level] && S.edited[E.level].map) || E.map).slice();
+  if (m[cell] === v) { S.selCell = cell; repaint(); return; }
+  if (startStroke) { pushHistory(label); S.strokeOpen = true; }
+  m[cell] = v;
+  editsFor(E.level).map = m;
+  S.selCell = cell;
+  repaint();
+}
+function applyMapCell(cell, startStroke) {
+  const t = S.tool || "paint";
+  if (t === "scroll") return;
+  if (t === "pick") { pickMapCell(cell); return; }
+  stampMapCell(cell, t === "erase" ? 0 : S.brush, t === "erase" ? "erase block" : "paint block", startStroke);
+}
+function pickMapCell(cell) {
+  if (cell < 0) return;
+  const L = cur();
+  if (!L) return;
+  const E = effLevel(L);
+  S.brush = Math.max(0, Math.min(E.blocks.length / 4 - 1, E.map[cell] | 0));
+  S.selCell = cell;
+  syncBrushInputs(E);
+  const info = el("edCellInfo");
+  if (info) info.textContent = "picked block " + S.brush + " from cell (" + (cell % MAP_COLS) + "," + Math.floor(cell / MAP_COLS) + ")";
+  log("editor: pick block " + S.brush);
+  repaint();
 }
 function onMapPointerDown(ev) {
+  if ((S.tool || "paint") === "scroll") return;
+  if (ev.altKey) { pickMapCell(mapCellFromEvent(ev)); return; }
   if (ev.cancelable) ev.preventDefault();
   S.painting = true; S.strokeOpen = false;
   try { el("edMap").setPointerCapture(ev.pointerId); } catch (e) {}
@@ -380,6 +516,7 @@ function onMapPointerDown(ev) {
 function onMapPointerMove(ev) {
   if (!S.painting) return;
   if (ev.pointerType === "mouse" && (ev.buttons & 1) === 0) { S.painting = false; return; }
+  if ((S.tool || "paint") !== "paint" && (S.tool || "paint") !== "erase") { S.painting = false; return; }
   if (ev.cancelable) ev.preventDefault();
   applyMapCell(mapCellFromEvent(ev), !S.strokeOpen);
 }
@@ -433,8 +570,11 @@ function buildEditorChrome() {
   wireUndoKeys();
   if (!S.tabsBuilt) {
     if (!S.zoom) S.zoom = loadZoom();
+    S.tool = loadPersistedTool();
     buildEditorTabs();
+    buildToolRow();
     buildZoomRow();
+    buildBrushPicker();
     buildBrushPreview();
     buildUndoRow();
     updateZoomLabel();
@@ -442,6 +582,7 @@ function buildEditorChrome() {
     S.tabsBuilt = true;
   }
   setEditorTab(S.tab || loadPersistedTab() || "map");
+  applyToolToMap();
 }
 
 function cur() { return S.parsed[S.level] ? S.parsed[S.level].L : null; }
@@ -487,8 +628,7 @@ function repaint() {
     const nBlk = E.blocks.length / 4;
     paintPreviewInto(bpv0, renderBlockImage(E, bgBank(), E.pal, Math.max(0, Math.min(nBlk - 1, S.brush | 0))), 56);
   }
-  const br0 = el("edBrush");
-  if (br0) br0.max = E.blocks.length / 4 - 1;
+  syncBrushInputs(E);
   const cv = el("edMap");
   const doorCells = new Set();
   try {
@@ -582,19 +722,19 @@ function renderInspector(E) {
   const helpTop = document.createElement("div");
   helpTop.className = "edHelp";
   helpTop.id = "edMapHelp";
-  helpTop.textContent = "Map cells hold blocks: 1 block = 64px (2x2 structs); 1 struct = 32px (2x2 combos); 1 combo = 16px (2x2 tiles + 1 attr byte). Paint mode stamps the brush block (preview next to the brush box, above the map); inspect mode selects a cell to show its block/struct/combo chain below. Undo/redo buttons sit by the save row (Ctrl+Z / Ctrl+Shift+Z).";
+  helpTop.textContent = "Map cells hold blocks: 1 block = 64px (2x2 structs); 1 struct = 32px (2x2 combos); 1 combo = 16px (2x2 tiles + 1 attr byte). Tools above the map: Pan scrolls (touch-safe, never paints); Brush stamps the brush block; Eraser stamps block 0; Picker loads a tapped cell into the brush (or hold Alt and tap any time). Undo/redo buttons sit by the save row (Ctrl+Z / Ctrl+Shift+Z).";
   box.appendChild(helpTop);
   if (S.selCell >= 0) {
     const bi = E.map[S.selCell];
     const cx = S.selCell % MAP_COLS, cy = Math.floor(S.selCell / MAP_COLS);
-    add("div", "cell (" + cx + "," + cy + ") block " + bi);
+    add("div", "selected cell (" + cx + "," + cy + "): block " + bi);
     const setRow = document.createElement("div");
-    setRow.textContent = "set block: ";
+    setRow.textContent = "set this cell to block: ";
     const inp = document.createElement("input");
     inp.type = "number"; inp.min = 0; inp.max = E.blocks.length / 4 - 1; inp.value = bi;
     inp.style.width = "90px";
     const btn = document.createElement("button");
-    btn.textContent = "paint";
+    btn.textContent = "set";
     btn.addEventListener("click", () => {
       pushHistory("set block");
       const v = Math.max(0, Math.min(E.blocks.length / 4 - 1, inp.value | 0));
@@ -609,7 +749,7 @@ function renderInspector(E) {
     setRow.appendChild(inp); setRow.appendChild(btn); box.appendChild(setRow);
     const st = [];
     for (let i = 0; i < 4; i++) st.push(E.blocks[bi * 4 + i]);
-    add("div", "block " + bi + " structs [" + st.join(",") + "]");
+    add("div", "block " + bi + " = structs [" + st.join(",") + "] (chain:)");
     const bpvRow = document.createElement("div");
     const bpvLab = document.createElement("span");
     bpvLab.textContent = "block preview: ";
@@ -617,10 +757,16 @@ function renderInspector(E) {
     paintPreviewInto(bpv, renderBlockImage(E, bgBank(), E.pal, bi), 96);
     bpv.title = "block " + bi + " = 2x2 structs [" + st.join(",") + "]";
     bpvRow.appendChild(bpvLab); bpvRow.appendChild(bpv); box.appendChild(bpvRow);
+    for (let k = 0; k < 4; k++) {
+      const si = st[k];
+      const scc = [];
+      for (let j = 0; j < 4; j++) scc.push(E.structs[si * 4 + j]);
+      add("div", "struct " + si + " = combos [" + scc.join(",") + "]");
+    }
   }
   // struct browser
   const sRow = document.createElement("div");
-  sRow.textContent = "struct ";
+  sRow.textContent = "browse struct (each = 2x2 combos): ";
   const sSel = document.createElement("select");
   const nS = E.structs.length / 4;
   for (let i = 0; i < nS; i++) { const o = document.createElement("option"); o.value = i; o.textContent = i; sSel.appendChild(o); }
@@ -635,7 +781,7 @@ function renderInspector(E) {
   sRow.appendChild(sInfo); box.appendChild(sRow);
   // combo browser + patterns + attr editor
   const cRow = document.createElement("div");
-  cRow.textContent = "combo ";
+  cRow.textContent = "browse combo (each = 2x2 tiles + attr): ";
   const cSel = document.createElement("select");
   const nC = E.combos.length / 4;
   for (let i = 0; i < nC; i++) { const o = document.createElement("option"); o.value = i; o.textContent = i; cSel.appendChild(o); }
@@ -1628,12 +1774,16 @@ export async function openEditor(a, opts) {
     cv.onpointerdown = onMapPointerDown;
     cv.onpointermove = onMapPointerMove;
     cv.onpointerup = onMapPointerUp;
-    cv.style.touchAction = "none";
+    cv.onpointercancel = onMapPointerUp;
+    applyToolToMap();
   }
   document.querySelectorAll('input[name="edMode"]').forEach(r => {
-    r.checked = r.value === S.mode;
-    r.onchange = () => { S.mode = r.value; };
+    try {
+      const lab = r.closest ? r.closest("label") : r.parentNode;
+      if (lab && lab.tagName === "LABEL") lab.hidden = true;
+    } catch (e) {}
   });
+  S.mode = "paint";
   const sc = el("edScrollChk");
   if (sc) sc.onchange = () => { S.showScroll = !!sc.checked; repaint(); };
   const br = el("edBrush");

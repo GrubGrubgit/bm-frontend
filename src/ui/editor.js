@@ -67,6 +67,7 @@ const ED_TOOLS = [
   { id: "paint", label: "Brush", title: "paint the brush block (see brush row above the map)" },
   { id: "erase", label: "Eraser", title: "erase: stamp block 0" },
   { id: "pick", label: "Picker", title: "eyedropper: tap a map cell to load its block into the brush" },
+  { id: "inspect", label: "Inspect", title: "select a map cell to show its block/struct/combo chain (never paints, never changes the brush)" },
 ];
 function loadPersistedTool() {
   try {
@@ -214,7 +215,7 @@ function applyToolToMap() {
   if (!cv) return;
   const t = S.tool || "paint";
   cv.style.touchAction = t === "scroll" ? "pan-x pan-y" : "none";
-  cv.style.cursor = t === "scroll" ? "grab" : t === "pick" ? "copy" : "crosshair";
+  cv.style.cursor = t === "scroll" ? "grab" : t === "pick" ? "copy" : t === "inspect" ? "cell" : "crosshair";
 }
 function buildZoomRow() {
   const stale = el("edZoomRow");
@@ -491,6 +492,7 @@ function applyMapCell(cell, startStroke) {
   const t = S.tool || "paint";
   if (t === "scroll") return;
   if (t === "pick") { pickMapCell(cell); return; }
+  if (t === "inspect") { S.selCell = cell; repaint(); return; }
   stampMapCell(cell, t === "erase" ? 0 : S.brush, t === "erase" ? "erase block" : "paint block", startStroke);
 }
 function pickMapCell(cell) {

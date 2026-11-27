@@ -211,6 +211,39 @@ ok('walk runs clean (both hit gameplay)', !RB.trap && !RA.trap && outB[900].cur 
   ok('modal: gameplay 1 pre-prompt, ev5 hides (vis 0)', !R.trap && r990.vis === 1 && r1100.vis === 0, R.trap || ('990=' + r990.vis + ' 1100=' + r1100.vis + ' ev5end=' + ev5));
 }
 // Shell: no rendering left (sync/persistence only), invalidate wired.
+// E8-M6: modal font pin (regression for the garbled-text bug: render must
+// use the E0 font page for modal NT, which menu_draw clears to text-only).
+// Real boot, E2 menu open: NT bytes are ASCII AND the pixels match the
+// staged font tile bits exactly (white 252 on black 0, palhi 0).
+{
+  const outM = {};
+  const RM = await drive({ span: 400, rec: false, taps: [{ at: 120, pad: 8 }], frames: [250], out: outM,
+    onFrame: (ex, f) => { if (f === 10) { ex.bm_enhanced_set(1); ex.bm_saving_set(0); } } });
+  const mm = new Uint8Array(RM.ex.memory.buffer);
+  const sb = Array.from(mm.slice(RM.ex.bm_savestate_ptr(), RM.ex.bm_savestate_ptr() + RM.ex.bm_savestate_len()));
+  const ntAt = (r, c) => sb[2428 + r * 32 + c];
+  const hdrOk = (() => { let s = ''; for (let c = 0; c < 32; c++) { const b = ntAt(4, c); s += (b === 0 ? ' ' : String.fromCharCode(b)); } return s.indexOf('BLASTER MASTER') >= 0; })();
+  const flat = [];
+  for (const bb of stock.chr) for (let i = 0; i < bb.length; i++) flat.push(bb[i]);
+  const F = outM[250].bytes;
+  const spots = [[4, 9, 66], [4, 10, 76], [8, 9, 1]];
+  let pxBad = 0, pxChecked = 0, pxFirst = '', ntOk = true;
+  for (const sp of spots) {
+    const r = sp[0], c = sp[1], want = sp[2];
+    if (ntAt(r, c) !== want) { ntOk = false; pxFirst += 'nt' + r + 'x' + c + '=' + ntAt(r, c) + ' '; continue; }
+    const t = want;
+    for (let pr = 0; pr < 8; pr++) for (let pc = 0; pc < 8; pc++) {
+      const lo = flat[7 * 4096 + t * 16 + pr], hi = flat[7 * 4096 + t * 16 + 8 + pr];
+      const bit = ((lo >> (7 - pc)) & 1) | (((hi >> (7 - pc)) & 1) << 1);
+      const o = ((r * 8 + pr) * 256 + (c * 8 + pc)) * 4;
+      const er = bit ? 252 : 0, eg = bit ? 252 : 0, eb = bit ? 252 : 0;
+      pxChecked++;
+      if (F[o] !== er || F[o + 1] !== eg || F[o + 2] !== eb) { pxBad++; if (!pxFirst) pxFirst = 't' + t + ' px' + pr + ',' + pc + ' got=' + F[o] + ',' + F[o + 1] + ',' + F[o + 2] + ' exp=' + er + ',' + eg + ',' + eb; }
+    }
+  }
+  ok('E2 menu open in real boot (header + NT bytes)', !RM.trap && hdrOk && ntOk, RM.trap || pxFirst);
+  ok('E2 menu pixels match font tiles exactly', !RM.trap && pxBad === 0 && pxChecked === 192, 'bad=' + pxBad + ' checked=' + pxChecked + ' ' + pxFirst);
+}
 // E8-M5: minimap HUD toggle (default on; off == enhanced-off video exactly).
 {
   const onF = (ex, f) => { if (f === 200) ex.bm_enhanced_set(1); if (f === 300) ex.bm_warp_raw(9); if (f >= 400 && f < 1200) ex.bm_set_pad(128); };

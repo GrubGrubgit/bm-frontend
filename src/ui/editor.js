@@ -8,7 +8,7 @@ import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack
 import { SPR_PAL, SPR_CYCLE, spriteBanksFor, isPureSpriteBank } from "../pack/sprites.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
 import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
-import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine } from "../pack/gaps.js";
+import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine, aiLabelFor, enemyTypeOptions } from "../pack/gaps.js";
 import { getAreaSongs, serializeAreaSongs, AREA_TABLE } from "../pack/sound.js";
 import { parseSong, songLine, remapSongs, ptrOf, allSiteInfos, getTankSongs, serializeTankSongs, sitesMapOf, SITE_HOOK7_UNHOOKED } from '../pack/songs.js';
 export { diffRuns };
@@ -16,7 +16,7 @@ import { loadCustomPack, saveCustomPack } from "../pack/store.js";
 let api = null;
 const S = {
   open: false, stock: null, parsed: {}, edited: {}, level: 1,
-  brush: 0, mode: "paint", tool: "paint", selCell: -1, selStruct: -1, selCombo: -1, showScroll: false,
+  brush: 0, mode: "paint", tool: "paint", brushMode: "block", enemyBrushType: 0, selCell: -1, selEnemy: -1, movingEnemy: null, movingBlock: null, selStruct: -1, selCombo: -1, showScroll: false,
   chr: {}, enemies: null, edEnemies: {}, edStats: {}, edTankStats: {}, edAreaSongs: {}, edSongPtr: {}, edSiteFilter: '', edTankSongs: {}, edSites: {},
   chrBank: -1, chrTile: 0, chrInk: 3, chrSub: 0, palSlot: 0,
   undo: [], redo: [], painting: false, strokeOpen: false, chrPainting: false, keysWired: false,
@@ -62,13 +62,22 @@ const ED_TAB_KEY = "bm-editor-tab";
 const ED_ZOOM_KEY = "bm-editor-zoom";
 const ED_ZOOMS = [4, 8, 12, 16, 24, 32, 48, 64];
 const ED_TOOL_KEY = "bm-editor-tool";
+const ED_BRUSHMODE_KEY = "bm-editor-brushmode";
 const ED_TOOLS = [
   { id: "scroll", label: "Pan", title: "pan/scroll the map (drag scrolls, never paints; use on touch)" },
   { id: "paint", label: "Brush", title: "paint the brush block (see brush row above the map)" },
   { id: "erase", label: "Eraser", title: "erase: stamp block 0" },
   { id: "pick", label: "Picker", title: "eyedropper: tap a map cell to load its block into the brush" },
   { id: "inspect", label: "Inspect", title: "select a map cell to show its block/struct/combo chain (never paints, never changes the brush)" },
+  { id: "move", label: "Move", title: "drag a block or an enemy to move it (enemy x/y follow automatically)" },
 ];
+function loadBrushMode() {
+  try {
+    const v = localStorage.getItem(ED_BRUSHMODE_KEY);
+    if (v === "enemy" || v === "block") return v;
+  } catch (e) {}
+  return "block";
+}
 function loadPersistedTool() {
   try {
     const v = localStorage.getItem(ED_TOOL_KEY);
@@ -215,7 +224,7 @@ function applyToolToMap() {
   if (!cv) return;
   const t = S.tool || "paint";
   cv.style.touchAction = t === "scroll" ? "pan-x pan-y" : "none";
-  cv.style.cursor = t === "scroll" ? "grab" : t === "pick" ? "copy" : t === "inspect" ? "cell" : "crosshair";
+  cv.style.cursor = t === "scroll" ? "grab" : t === "pick" ? "copy" : t === "inspect" ? "cell" : t === "move" ? "move" : "crosshair";
 }
 function buildZoomRow() {
   const stale = el("edZoomRow");
@@ -290,7 +299,7 @@ function ensureEditorTheme() {
   document.head.appendChild(st);
 }
 function snapEdits() {
-  return { edited: structuredClone(S.edited), chr: structuredClone(S.chr) };
+  return { edited: structuredClone(S.edited), chr: structuredClone(S.chr), en: structuredClone(S.edEnemies) };
 }
 function pushHistory(label) {
   try {
@@ -305,7 +314,7 @@ function doUndo() {
   try {
     S.redo.push(snapEdits());
     const h = S.undo.pop();
-    S.edited = h.snap.edited; S.chr = h.snap.chr;
+    S.edited = h.snap.edited; S.chr = h.snap.chr; if (h.snap.en) S.edEnemies = h.snap.en; S.selEnemy = -1;
     log("editor: undo " + h.label);
   } catch (e) { log("editor: undo failed"); }
   updateUndoBtns(); repaint();
@@ -315,7 +324,7 @@ function doRedo() {
   try {
     S.undo.push({ label: "redo", snap: snapEdits() });
     const h = S.redo.pop();
-    S.edited = h.edited; S.chr = h.chr;
+    S.edited = h.edited; S.chr = h.chr; if (h.en) S.edEnemies = h.en; S.selEnemy = -1;
     log("editor: redo");
   } catch (e) { log("editor: redo failed"); }
   updateUndoBtns(); repaint();
@@ -336,7 +345,7 @@ function buildUndoRow() {
   const u = document.createElement("button");
   u.id = "edUndoBtn";
   u.textContent = "Undo";
-  u.title = "undo last map/palette/scroll/CHR edit (Ctrl+Z)";
+  u.title = "undo last edit (Ctrl+Z)";
   u.style.cssText = "min-height:44px;";
   const r = document.createElement("button");
   r.id = "edRedoBtn";
@@ -421,6 +430,80 @@ function buildBrushPicker() {
     repaint();
   });
   syncBrushInputs(cur() ? effLevel(cur()) : null);
+}
+function setBrushMode(m) {
+  S.brushMode = (m === "enemy") ? "enemy" : "block";
+  try { localStorage.setItem(ED_BRUSHMODE_KEY, S.brushMode); } catch (e) {}
+  renderBrushMode();
+}
+function buildBrushModeRow() {
+  if (el("edBrushModeRow")) return;
+  const br = el("edBrush");
+  if (!br || !br.parentNode || !br.parentNode.parentNode) return;
+  const host = br.parentNode;
+  const row = document.createElement("div");
+  row.id = "edBrushModeRow";
+  row.dataset.edTab = "map";
+  row.style.cssText = "display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;";
+  const lab = document.createElement("span");
+  lab.textContent = "Brush paints:";
+  lab.style.cssText = "font-weight:bold;";
+  row.appendChild(lab);
+  const modes = [["block", "Blocks", "stamp map blocks"], ["enemy", "Enemies", "tap the map to add a spawn record of the chosen type"]];
+  for (const m of modes) {
+    const b = document.createElement("button");
+    b.textContent = m[1];
+    b.title = m[2];
+    b.dataset.edBrushModeBtn = m[0];
+    b.style.cssText = "min-width:64px;min-height:44px;";
+    b.addEventListener("click", () => setBrushMode(m[0]));
+    row.appendChild(b);
+  }
+  const tsel = document.createElement("select");
+  tsel.id = "edEnemyBrushType";
+  tsel.title = "enemy type to stamp (sprite bytes + AI label follow)";
+  tsel.style.cssText = "max-width:300px;";
+  tsel.addEventListener("change", () => { S.enemyBrushType = tsel.value | 0; renderBrushMode(); });
+  row.appendChild(tsel);
+  const info = document.createElement("span");
+  info.id = "edEnemyBrushInfo";
+  row.appendChild(info);
+  host.parentNode.insertBefore(row, host.nextSibling);
+  renderBrushMode();
+}
+function renderBrushMode() {
+  const row = el("edBrushModeRow");
+  if (!row) return;
+  for (const b of Array.from(row.querySelectorAll("[data-edBrushModeBtn]"))) {
+    const on = b.dataset.edBrushModeBtn === (S.brushMode || "block");
+    b.style.fontWeight = on ? "bold" : "";
+    b.style.background = on ? "#246" : "";
+  }
+  const tsel = el("edEnemyBrushType"), info = el("edEnemyBrushInfo");
+  const show = (S.brushMode || "block") === "enemy";
+  if (tsel) tsel.hidden = !show;
+  if (info) info.hidden = !show;
+  if (!show) return;
+  const key = enemyKeyForLevel(S.level);
+  const isTank = isTankKey(key);
+  if (tsel) {
+    if (tsel.dataset.mode !== (isTank ? "A" : "B")) {
+      tsel.innerHTML = "";
+      for (const o of enemyTypeOptions(isTank)) {
+        const op = document.createElement("option");
+        op.value = o.t;
+        op.textContent = o.label;
+        tsel.appendChild(op);
+      }
+      tsel.dataset.mode = isTank ? "A" : "B";
+    }
+    if (String(tsel.value) !== String(S.enemyBrushType | 0)) tsel.value = S.enemyBrushType | 0;
+  }
+  if (info) {
+    const tt = S.enemyBrushType | 0;
+    const sp = spriteFor(tt);
+    info.textContent = "spr $" + (sp.a < 0 ? "--" : sp.a.toString(16)) + "/$" + (sp.b < 0 ? "--" : sp.b.toString(16)) + " | AI " + aiLabelFor(isTank, tt);
+  }
 }
 function paintPreviewInto(cv, img, size) {
   if (!cv) return;
@@ -509,21 +592,120 @@ function pickMapCell(cell) {
   repaint();
 }
 function onMapPointerDown(ev) {
-  if ((S.tool || "paint") === "scroll") return;
+  const t = S.tool || "paint";
+  if (t === "scroll") return;
   if (ev.altKey) { pickMapCell(mapCellFromEvent(ev)); return; }
+  if (t === "move") {
+    const key = enemyKeyForLevel(S.level);
+    const hi = enemyHitFromEvent(ev);
+    if (ev.cancelable) ev.preventDefault();
+    if (hi >= 0) {
+      if (!ensureEnemyEdit(key)) return;
+      pushHistory("move enemy");
+      S.movingEnemy = { key: key, idx: hi };
+      S.selEnemy = hi;
+      try { el("edMap").setPointerCapture(ev.pointerId); } catch (e) {}
+      repaint();
+      return;
+    }
+    const cell = mapCellFromEvent(ev);
+    if (cell >= 0) {
+      const L = cur();
+      if (!L) return;
+      S.movingBlock = { cell: cell, value: effLevel(L).map[cell], snap: snapEdits() };
+      S.selCell = cell;
+      S.selEnemy = -1;
+      try { el("edMap").setPointerCapture(ev.pointerId); } catch (e) {}
+      repaint();
+    }
+    return;
+  }
+  if (t === "inspect") {
+    if (ev.cancelable) ev.preventDefault();
+    const hi = enemyHitFromEvent(ev);
+    if (hi >= 0) { S.selEnemy = hi; repaint(); return; }
+    S.selEnemy = -1;
+    applyMapCell(mapCellFromEvent(ev), true);
+    return;
+  }
+  if (t === "erase") {
+    if (ev.cancelable) ev.preventDefault();
+    const hi = enemyHitFromEvent(ev);
+    if (hi >= 0) { deleteEnemyRec(enemyKeyForLevel(S.level), hi); S.selEnemy = -1; repaint(); return; }
+    S.painting = true; S.strokeOpen = false;
+    try { el("edMap").setPointerCapture(ev.pointerId); } catch (e) {}
+    applyMapCell(mapCellFromEvent(ev), true);
+    return;
+  }
+  if (t === "pick") { pickMapCell(mapCellFromEvent(ev)); return; }
   if (ev.cancelable) ev.preventDefault();
   S.painting = true; S.strokeOpen = false;
   try { el("edMap").setPointerCapture(ev.pointerId); } catch (e) {}
-  applyMapCell(mapCellFromEvent(ev), true);
+  if (t === "paint" && (S.brushMode || "block") === "enemy") addEnemyAtEvent(ev);
+  else applyMapCell(mapCellFromEvent(ev), true);
 }
 function onMapPointerMove(ev) {
+  if (S.movingEnemy) {
+    if (ev.pointerType === "mouse" && (ev.buttons & 1) === 0) { S.movingEnemy = null; return; }
+    const b = canvasByteXY(ev);
+    if (!b) return;
+    const cur = ensureEnemyEdit(S.movingEnemy.key);
+    if (!cur) { S.movingEnemy = null; return; }
+    cur.xs[S.movingEnemy.idx] = b.x;
+    cur.ys[S.movingEnemy.idx] = b.y;
+    if (ev.cancelable) ev.preventDefault();
+    repaint();
+    return;
+  }
+  if (S.movingBlock) {
+    if (ev.pointerType === "mouse" && (ev.buttons & 1) === 0) { S.movingBlock = null; repaint(); return; }
+    if (ev.cancelable) ev.preventDefault();
+    return;
+  }
   if (!S.painting) return;
   if (ev.pointerType === "mouse" && (ev.buttons & 1) === 0) { S.painting = false; return; }
+  if ((S.tool || "paint") === "paint" && (S.brushMode || "block") === "enemy") { S.painting = false; return; }
   if ((S.tool || "paint") !== "paint" && (S.tool || "paint") !== "erase") { S.painting = false; return; }
   if (ev.cancelable) ev.preventDefault();
   applyMapCell(mapCellFromEvent(ev), !S.strokeOpen);
 }
-function onMapPointerUp(ev) { S.painting = false; S.strokeOpen = false; }
+function onMapPointerUp(ev) {
+  if (S.movingEnemy) {
+    const m = S.movingEnemy;
+    S.movingEnemy = null;
+    const E = effEnemyList(m.key);
+    if (E) log("editor: moved enemy " + m.key + "[" + m.idx + "] to x=" + E.xs[m.idx] + " y=" + E.ys[m.idx]);
+    updateUndoBtns();
+    repaint();
+    return;
+  }
+  if (S.movingBlock) {
+    const mb = S.movingBlock;
+    S.movingBlock = null;
+    const cell = mapCellFromEvent(ev);
+    if (cell >= 0 && cell !== mb.cell) {
+      const L = cur();
+      if (L) {
+        const E = effLevel(L);
+        if (mb.value !== E.map[cell]) {
+          S.undo.push({ label: "move block", snap: mb.snap });
+          if (S.undo.length > 60) S.undo.shift();
+          S.redo.length = 0;
+          const mp = ((S.edited[E.level] && S.edited[E.level].map) || E.map).slice();
+          mp[mb.cell] = 0;
+          mp[cell] = mb.value;
+          editsFor(E.level).map = mp;
+          log("editor: moved block " + mb.value + " (" + cellCoords(mb.cell) + ") -> (" + cellCoords(cell) + ")");
+        }
+      }
+    }
+    S.selCell = cell >= 0 ? cell : mb.cell;
+    updateUndoBtns();
+    repaint();
+    return;
+  }
+  S.painting = false; S.strokeOpen = false;
+}
 function chrGridPick(ev) {
   const grid = el("edChrGrid");
   if (!grid) return;
@@ -574,11 +756,13 @@ function buildEditorChrome() {
   if (!S.tabsBuilt) {
     if (!S.zoom) S.zoom = loadZoom();
     S.tool = loadPersistedTool();
+    S.brushMode = loadBrushMode();
     buildEditorTabs();
     buildToolRow();
     buildZoomRow();
     buildBrushPicker();
     buildBrushPreview();
+    buildBrushModeRow();
     buildUndoRow();
     updateZoomLabel();
     updateUndoBtns();
@@ -655,6 +839,8 @@ function repaint() {
     scrollV: scroll.subarray(0, 8), scrollH: scroll.subarray(8, 16),
     doorBlocks: doorCells,
   });
+  renderEnemyMarkers(S.zoom || 16);
+  renderBrushMode();
   renderInspector(E);
   renderScrollGrids(E);
   renderEnemies();
@@ -717,6 +903,67 @@ function renderPalStrip(E) {
 }
 const ATTR_BITS_TANK = ["pal0", "pal1", "door/ent0", "door/ent1", "damage", "ladder", "water(brk)", "solid"];
 const ATTR_BITS_OVERHEAD = ["pal0", "pal1", "door/ent0", "door/ent1", "bit4(no-eff)", "bit5(unused)", "bit6(solid-only)", "solid"]; // 6.2
+function renderEnemyPanel(E, box) {
+  if (S.selEnemy < 0) return;
+  const key = enemyKeyForLevel(S.level);
+  const EL = effEnemyList(key);
+  if (!EL || S.selEnemy >= EL.n) { S.selEnemy = -1; return; }
+  const i = S.selEnemy, isTank = isTankKey(key);
+  const t = EL.types[i];
+  const sec = document.createElement("div");
+  sec.style.cssText = "border:1px solid #ffd23f;padding:6px;margin:6px 0;text-align:left;";
+  const hd = document.createElement("div");
+  hd.textContent = "enemy r" + i + " (area " + key + ") — record type, sprite + AI";
+  hd.style.cssText = "font-weight:bold;";
+  sec.appendChild(hd);
+  const tRow = document.createElement("div");
+  tRow.textContent = "type (drives sprite + AI): ";
+  const tsel = document.createElement("select");
+  tsel.style.cssText = "max-width:300px;";
+  for (const o of enemyTypeOptions(isTank)) {
+    const op = document.createElement("option");
+    op.value = o.t;
+    op.textContent = o.label;
+    tsel.appendChild(op);
+  }
+  tsel.value = t;
+  tsel.addEventListener("change", () => commitEnemyRec(key, i, "t", tsel.value | 0));
+  tRow.appendChild(tsel);
+  sec.appendChild(tRow);
+  const sp = spriteFor(t);
+  const spRow = document.createElement("div");
+  spRow.textContent = "sprite bytes (fixed by type): $" + (sp.a < 0 ? "--" : sp.a.toString(16)) + " / $" + (sp.b < 0 ? "--" : sp.b.toString(16));
+  sec.appendChild(spRow);
+  const bh = behaviorFor(isTank, t);
+  const aiRow = document.createElement("div");
+  aiRow.textContent = "AI (fixed by type): " + aiLabelFor(isTank, t);
+  aiRow.title = behaviorText(bh) + (bh.note ? " — " + bh.note : "");
+  sec.appendChild(aiRow);
+  const xyRow = document.createElement("div");
+  xyRow.textContent = "pos x/y (auto-set by the Move tool): ";
+  const fields = [["x", EL.xs[i]], ["y", EL.ys[i]]];
+  for (let k = 0; k < fields.length; k++) {
+    const inp = document.createElement("input");
+    inp.type = "number"; inp.min = 0; inp.max = 255; inp.value = fields[k][1];
+    inp.style.width = "64px";
+    inp.dataset.f = fields[k][0];
+    inp.title = fields[k][0] + " pixel-hi (world px = v*16+8)";
+    inp.addEventListener("change", function () { commitEnemyRec(key, i, this.dataset.f, this.value | 0); });
+    xyRow.appendChild(inp);
+  }
+  sec.appendChild(xyRow);
+  const del = document.createElement("button");
+  del.textContent = "delete record " + i;
+  del.addEventListener("click", () => { deleteEnemyRec(key, i); S.selEnemy = -1; repaint(); });
+  sec.appendChild(del);
+  if (isTank && t === BOSS_TYPE) {
+    const w = document.createElement("div");
+    w.textContent = "BOSS egg: killing it sets this area clear bit — retype/delete refused, moving far unwise.";
+    w.style.cssText = "color:#fc6;";
+    sec.appendChild(w);
+  }
+  box.appendChild(sec);
+}
 function renderInspector(E) {
   const box = el("edInspector");
   if (!box) return;
@@ -725,8 +972,9 @@ function renderInspector(E) {
   const helpTop = document.createElement("div");
   helpTop.className = "edHelp";
   helpTop.id = "edMapHelp";
-  helpTop.textContent = "Map cells hold blocks: 1 block = 64px (2x2 structs); 1 struct = 32px (2x2 combos); 1 combo = 16px (2x2 tiles + 1 attr byte). Tools above the map: Pan scrolls (touch-safe, never paints); Brush stamps the brush block; Eraser stamps block 0; Picker loads a tapped cell into the brush (or hold Alt and tap any time). Undo/redo buttons sit by the save row (Ctrl+Z / Ctrl+Shift+Z).";
+  helpTop.textContent = "Map cells hold blocks: 1 block = 64px (2x2 structs); 1 struct = 32px (2x2 combos); 1 combo = 16px (2x2 tiles + 1 attr byte). Tools above the map: Pan scrolls (touch-safe, never paints); Brush stamps the brush block; Eraser stamps block 0; Picker loads a tapped cell into the brush (or hold Alt and tap any time). Move drags blocks or enemies on the map (enemy x/y follow; eraser on an enemy deletes its spawn record). Dots on the map are spawn records (red = boss egg, gold ring = selected). Undo/redo buttons sit by the save row (Ctrl+Z / Ctrl+Shift+Z).";
   box.appendChild(helpTop);
+  renderEnemyPanel(E, box);
   if (S.selCell >= 0) {
     const bi = E.map[S.selCell];
     const cx = S.selCell % MAP_COLS, cy = Math.floor(S.selCell / MAP_COLS);
@@ -1054,6 +1302,85 @@ function bossIdxOf(key, types, n) {
   for (let i = 0; i < n; i++) if (types[i] === BOSS_TYPE) return i;
   return -1;
 }
+function isTankKey(key) { return key[0] === "A"; }
+function ensureEnemyEdit(key) {
+  const E = effEnemyList(key);
+  if (!E) return null;
+  if (!S.edEnemies[key]) S.edEnemies[key] = { types: E.L.types.slice(), xs: E.L.xs.slice(), ys: E.L.ys.slice() };
+  return S.edEnemies[key];
+}
+function enemyBlockXY(x, y) { return { bx: (x * 16 + 8) / 64, by: (y * 16 + 8) / 64 }; }
+function curMapRows() { const L = cur(); if (!L) return 0; return effLevel(L).map.length / MAP_COLS; }
+function canvasByteXY(ev) {
+  const cv = el("edMap");
+  if (!cv) return null;
+  const r = cv.getBoundingClientRect();
+  if (!r.width || !r.height) return null;
+  const gx = (ev.clientX - r.left) / r.width * MAP_COLS * 64;
+  const gy = (ev.clientY - r.top) / r.height * curMapRows() * 64;
+  return { x: Math.max(0, Math.min(255, Math.round((gx - 8) / 16))), y: Math.max(0, Math.min(255, Math.round((gy - 8) / 16))) };
+}
+function enemyHitFromEvent(ev) {
+  const key = enemyKeyForLevel(S.level);
+  const E = effEnemyList(key);
+  if (!E) return -1;
+  const cv = el("edMap");
+  if (!cv) return -1;
+  const r = cv.getBoundingClientRect();
+  if (!r.width || !r.height) return -1;
+  const bpx = S.zoom || 16;
+  const px = (ev.clientX - r.left) / r.width * cv.width;
+  const py = (ev.clientY - r.top) / r.height * cv.height;
+  const rad = Math.max(8, bpx * 0.75);
+  let best = -1, bd = rad * rad;
+  for (let i = 0; i < E.n; i++) {
+    const p = enemyBlockXY(E.xs[i], E.ys[i]);
+    const dx = p.bx * bpx - px, dy = p.by * bpx - py;
+    const d = dx * dx + dy * dy;
+    if (d <= bd) { bd = d; best = i; }
+  }
+  return best;
+}
+function cellCoords(c) { return (c % MAP_COLS) + "," + Math.floor(c / MAP_COLS); }
+function renderEnemyMarkers(bpx) {
+  const cv = el("edMap");
+  if (!cv) return;
+  const key = enemyKeyForLevel(S.level);
+  const E = effEnemyList(key);
+  if (!E) return;
+  const ctx = cv.getContext("2d");
+  if (!ctx) return;
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let i = 0; i < E.n; i++) {
+    const p = enemyBlockXY(E.xs[i], E.ys[i]);
+    const cx = p.bx * bpx, cy = p.by * bpx;
+    if (cx < 0 || cy < 0 || cx > cv.width || cy > cv.height) continue;
+    const boss = isTankKey(key) && E.types[i] === BOSS_TYPE;
+    const rr = Math.max(3, bpx * 0.4);
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr, 0, 6.2832);
+    ctx.fillStyle = boss ? "#c00" : "rgba(10,10,10,0.85)";
+    ctx.fill();
+    ctx.lineWidth = Math.max(1.5, bpx * 0.12);
+    ctx.strokeStyle = (i === S.selEnemy) ? "#ffd23f" : "#fff";
+    ctx.stroke();
+    if (bpx >= 10) {
+      ctx.fillStyle = "#fff";
+      ctx.font = Math.max(9, bpx * 0.55) + "px monospace";
+      ctx.fillText(String(i), cx, cy);
+    }
+    if (i === S.selEnemy) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr + 3, 0, 6.2832);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#ffd23f";
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
 function commitEnemyRec(key, i, field, value) {
   const E = effEnemyList(key);
   if (!E || i < 0 || i >= E.n) return;
@@ -1062,6 +1389,7 @@ function commitEnemyRec(key, i, field, value) {
     repaint();
     return;
   }
+  pushHistory("enemy edit");
   const cur = S.edEnemies[key] || { types: E.L.types.slice(), xs: E.L.xs.slice(), ys: E.L.ys.slice() };
   S.edEnemies[key] = cur;
   if (field === 't') {
@@ -1089,17 +1417,22 @@ function deleteEnemyRec(key, i) {
   const t = Array.from(E.types.slice(0, E.n)); t.splice(i, 1); t.push(0xFF);
   const x = Array.from(E.xs); x.splice(i, 1);
   const y = Array.from(E.ys); y.splice(i, 1);
+  pushHistory("delete enemy");
   S.edEnemies[key] = { types: Uint8Array.from(t), xs: Uint8Array.from(x), ys: Uint8Array.from(y) };
   log('editor: enemies deleted ' + key + '[' + i + '] (' + E.n + '->' + x.length + ')');
   repaint();
 }
-function addEnemyRec(key) {
+function addEnemyAtEvent(ev) {
+  const b = canvasByteXY(ev);
+  if (!b) return;
+  addEnemyRecAt(enemyKeyForLevel(S.level), S.enemyBrushType | 0, b.x, b.y);
+}
+function addEnemyRecAt(key, t, x, y) {
   const E = effEnemyList(key);
-  if (!E) return;
-  const tEl = el('edEnemyType'), xEl = el('edEnemyX'), yEl = el('edEnemyY');
-  const t = Math.max(0, Math.min(127, (tEl && tEl.value | 0) || 0));
-  const x = Math.max(0, Math.min(255, (xEl && xEl.value | 0) || 0));
-  const y = Math.max(0, Math.min(255, (yEl && yEl.value | 0) || 0));
+  if (!E) return false;
+  t = Math.max(0, Math.min(127, t | 0));
+  x = Math.max(0, Math.min(255, x | 0));
+  y = Math.max(0, Math.min(255, y | 0));
   const chk = spawnTypeAllowed(key[0] === 'A', t);
   if (!chk.ok) {
     log('editor: enemies refusing type ' + t + ' in ' + key + ' (' + chk.reason + ' at activation, area-proven)');
@@ -1123,9 +1456,16 @@ function addEnemyRec(key) {
     repaint();
     return;
   }
+  pushHistory("add enemy");
   S.edEnemies[key] = { types, xs, ys };
+  S.selEnemy = E.n;
   log('editor: enemies added ' + key + '[' + E.n + '] t=' + t + ' x=' + x + ' y=' + y);
   repaint();
+  return true;
+}
+function addEnemyRec(key) {
+  const tEl = el('edEnemyType'), xEl = el('edEnemyX'), yEl = el('edEnemyY');
+  addEnemyRecAt(key, (tEl && tEl.value | 0) || 0, (xEl && xEl.value | 0) || 0, (yEl && yEl.value | 0) || 0);
 }
 function renderRENotes() {
   const nz = el('edRENotes'), dz = el('edDoorList');
@@ -1398,7 +1738,11 @@ function renderEnemies() {
   tbl.appendChild(hr);
   for (let i = 0; i < n; i++) {
     const tr = document.createElement('tr');
-    const td0 = document.createElement('td'); td0.textContent = (i === bIdx ? i + ' BOSS' : i); tr.appendChild(td0);
+    const td0 = document.createElement('td'); td0.textContent = (i === bIdx ? i + ' BOSS' : i);
+    td0.style.cssText = 'cursor:pointer;text-decoration:underline;';
+    td0.title = 'select this enemy on the tilemap';
+    (function (idx) { td0.addEventListener('click', function () { S.selEnemy = idx; S.selCell = -1; setEditorTab('map'); repaint(); }); })(i);
+    tr.appendChild(td0);
     const fields = [['t', E.types[i], 127], ['x', E.xs[i], 255], ['y', E.ys[i], 255]];
     for (let k = 0; k < fields.length; k++) {
       const td = document.createElement('td');
@@ -1415,8 +1759,8 @@ function renderEnemies() {
     tr.appendChild(td);
     const bh = behaviorFor(key[0] === 'A', E.types[i]);
     const tdB = document.createElement('td');
-    tdB.textContent = behaviorText(bh);
-    tdB.title = bh.note || (bh.actor == null ? 'no actor mapped (unproven area/type)' : 'actor routine');
+    tdB.textContent = aiLabelFor(key[0] === 'A', E.types[i]);
+    tdB.title = behaviorText(bh) + (bh.note ? ' — ' + bh.note : '');
     tr.appendChild(tdB);
     const tdD = document.createElement('td');
     const del = document.createElement('button');
@@ -1475,7 +1819,7 @@ function renderStatTbl() {
   const E = effEnemyList(key);
   if (!E) { if (info) info.textContent = ''; return; }
   if (E.L.mode !== 'tank') {
-    if (info) info.textContent = 'bank-4 table: GLOBAL per type (all A-list areas: levels 9-16, $14 0-7)';
+    if (info) info.textContent = 'HP/damage table (bank 4, CPU $B326, 16 entries e0-e15): one row per enemy TYPE, shared by every level that spawns it (Sophia overhead areas, levels 9-16). byte 0 = max HP the enemy spawns with; byte 1 = damage its shots/contact deal.';
     const seenT = {};
     const rowsT = [];
     const noEntryT = [];
@@ -1489,7 +1833,7 @@ function renderStatTbl() {
     }
     rowsT.sort(function (a, b) { return a.idx - b.idx; });
     const hrT = document.createElement('tr');
-    const headsT = ['type', 'actor', 'HP', 'dmg', ''];
+    const headsT = ['type (table entry)', 'AI actor', 'HP = max health (byte 0)', 'dmg = attack damage (byte 1)', ''];
     for (let h = 0; h < headsT.length; h++) { const th = document.createElement('th'); th.textContent = headsT[h]; hrT.appendChild(th); }
     tbl.appendChild(hrT);
     for (let r = 0; r < rowsT.length; r++) {
@@ -1497,10 +1841,9 @@ function renderStatTbl() {
       const locked = TANK_TRAP_TYPES.has(type);
       const st = effTankStat(idx);
       const tr = document.createElement('tr');
-      const td0 = document.createElement('td'); td0.textContent = type + ' (e' + idx + ')'; tr.appendChild(td0);
+      const td0 = document.createElement('td'); td0.textContent = 'type ' + type + ' -> entry e' + idx; td0.title = 'table entry e' + idx + ' drives every level that spawns type ' + type; tr.appendChild(td0);
       const tdA = document.createElement('td');
-      const av = TANK_TYPE_ACTOR[type];
-      tdA.textContent = (av === undefined) ? '?' : ('$' + av.toString(16)); tr.appendChild(tdA);
+      tdA.textContent = aiLabelFor(true, type); tdA.title = behaviorText(behaviorFor(true, type)); tr.appendChild(tdA);
       const fields = [['hp', st.hp], ['dmg', st.dmg]];
       for (let k = 0; k < fields.length; k++) {
         const td = document.createElement('td');
@@ -1516,17 +1859,17 @@ function renderStatTbl() {
         tr.appendChild(td);
       }
       const tdN = document.createElement('td');
-      tdN.textContent = locked ? 'locked: activation-traps here' : '';
+      tdN.textContent = locked ? 'locked: trap type (activation-trap, proven harmful — not editable)' : '';
       tr.appendChild(tdN);
       tbl.appendChild(tr);
     }
     let extraT = '';
-    for (let i = 0; i < E.n; i++) if (E.types[i] === BOSS_TYPE) { extraT += ' | boss egg ($20): HP $80, not table-driven'; break; }
-    if (noEntryT.length && info) info.textContent += ' | no table entry (stock HP; 16-31 empty, 32+ special): types ' + noEntryT.join(',');
+    for (let i = 0; i < E.n; i++) if (E.types[i] === BOSS_TYPE) { extraT += ' | boss egg (type 32): HP $80 fixed by its hatch routine, not table-driven'; break; }
+    if (noEntryT.length && info) info.textContent += ' | types with no table entry keep stock HP ($20): types ' + noEntryT.join(',');
     if (extraT && info) info.textContent += extraT;
     return;
   }
-  if (info) info.textContent = 'bank-6 table: GLOBAL per type (all B-list areas: levels 1-8, $14 8-15)';
+  if (info) info.textContent = 'HP/damage table (bank 6, CPU $A36A, 30 entries e0-e29): one row per enemy TYPE, shared by every level that spawns it (Jason side-view dungeons, levels 1-8). byte 0 = max HP the enemy spawns with; byte 1 = contact damage it deals.';
   const seen = {};
   const rows = [];
   const noEntry = [];
@@ -1540,7 +1883,7 @@ function renderStatTbl() {
   }
   rows.sort(function (a, b) { return a.idx - b.idx; });
   const hr = document.createElement('tr');
-  const heads = ['type', 'actor', 'HP', 'dmg', ''];
+  const heads = ['type (table entry)', 'AI actor', 'HP = max health (byte 0)', 'dmg = contact damage (byte 1)', ''];
   for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }
   tbl.appendChild(hr);
   for (let r = 0; r < rows.length; r++) {
@@ -1548,10 +1891,9 @@ function renderStatTbl() {
     const locked = INVALID_TYPES.has(type);
     const st = effStat(idx);
     const tr = document.createElement('tr');
-    const td0 = document.createElement('td'); td0.textContent = type + ' (e' + idx + ')'; tr.appendChild(td0);
+    const td0 = document.createElement('td'); td0.textContent = 'type ' + type + ' -> entry e' + idx; td0.title = 'table entry e' + idx + ' drives every level that spawns type ' + type; tr.appendChild(td0);
     const tdA = document.createElement('td');
-    const av = TYPE_ACTOR[type];
-    tdA.textContent = (av === undefined) ? '?' : ('$' + av.toString(16)); tr.appendChild(tdA);
+    tdA.textContent = aiLabelFor(false, type); tdA.title = behaviorText(behaviorFor(false, type)); tr.appendChild(tdA);
     const fields = [['hp', st.hp], ['dmg', st.dmg]];
     for (let k = 0; k < fields.length; k++) {
       const td = document.createElement('td');
@@ -1567,11 +1909,11 @@ function renderStatTbl() {
       tr.appendChild(td);
     }
     const tdN = document.createElement('td');
-    tdN.textContent = locked ? 'locked: activation-traps here' : (idx === 2 ? 'shared by types 1+2' : '');
+    tdN.textContent = locked ? 'locked: trap type (activation-trap, proven harmful — not editable)' : (idx === 2 ? 'entry e2 also drives type 1 (shared actor)' : '');
     tr.appendChild(tdN);
     tbl.appendChild(tr);
   }
-  if (noEntry.length && info) info.textContent += ' | no table entry (stock HP): types ' + noEntry.join(',');
+  if (noEntry.length && info) info.textContent += ' | types with no table entry keep stock HP: types ' + noEntry.join(',');
 }
 async function saveAsPack() {
   const nameEl = el("edPackName");
@@ -1731,7 +2073,7 @@ async function selectLevel(lvl) {
   persistLevel(lvl);
   S.chrBank = BG_CHR_BANK[lvl];
   S.chrTile = 0;
-  S.selCell = -1; S.selStruct = -1; S.selCombo = -1;
+  S.selCell = -1; S.selStruct = -1; S.selCombo = -1; S.selEnemy = -1; S.movingEnemy = null; S.movingBlock = null;
   const badge = el("edModeBadge");
   if (badge) badge.textContent = LEVEL_MODE[lvl];
   const L = cur();

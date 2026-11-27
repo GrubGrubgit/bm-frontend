@@ -1,7 +1,7 @@
 // Editor-gap batch: read-only RE summaries for the editor (pure, no DOM).
 // Wires 6.4f physics + 6.4g behavior + P4 doors + 6.4e sound into the enemies tab and a
 // notes panel. All facts proven headless elsewhere (see PLAN 6.1/6.4f/6.4g/6.4e).
-import { TANK_TYPE_ACTOR, TYPE_ACTOR, TANK_TRAP_TYPES, INVALID_TYPES, TANK_DORMANT_TYPES, tankEmptyType, powerupSubtype, BOSS_TYPE } from "./enemies.js";
+import { TANK_TYPE_ACTOR, TYPE_ACTOR, TANK_TRAP_TYPES, INVALID_TYPES, TANK_DORMANT_TYPES, tankEmptyType, powerupSubtype, BOSS_TYPE, spriteFor, spawnTypeAllowed } from "./enemies.js";
 import { DUN_TABLE, TANK_TABLE, SLOT_BASE, SLOT_STRIDE, SLOT_N, DUN_TABLE_BASE, TANK_TABLE_BASE } from "./behavior.js";
 import { JASON_RUN, JASON_JUMP, TANK } from "./physics.js";
 import { parseDoors, pairOf } from "./doors.js";
@@ -71,4 +71,34 @@ export function soundSitesLine(raw) {
   const tag = "$" + (s.length === 1 ? "0" + s : s);
   if (!rows.length) return "song " + tag + ": no pinned request sites";
   return "song " + tag + ": " + rows.map(function (r) { return "b" + r.b + "@" + r.cpu.toString(16) + " " + r.n; }).join(" | ");
+}
+
+// Friendly AI names for the WYSIWYG editor (actor ids are decimal here:
+// $55=85 walker, $59=89 converter, $45=69 tank-flyer, $23=35 powerup,
+// $5B=91 egg, $63=99 boss; see NOTES above + 6.4g traces).
+const AI_SHORT = { 85: "walker", 89: "converter", 69: "tank-flyer", 35: "powerup", 91: "egg", 99: "boss" };
+export function aiShortFor(isTank, type) {
+  const b = behaviorFor(isTank, type);
+  if (b.actor == null || b.routine == null) return "?";
+  return AI_SHORT[b.actor] || ("actor $" + b.actor.toString(16));
+}
+export function aiLabelFor(isTank, type) {
+  const b = behaviorFor(isTank, type);
+  if (b.actor == null || b.routine == null) return "? unmapped" + (b.tag ? " [" + b.tag + "]" : "");
+  const nm = AI_SHORT[b.actor] || ("actor $" + b.actor.toString(16));
+  return nm + " -> $" + b.routine.toString(16) + (b.tag ? " [" + b.tag + "]" : "");
+}
+export function enemyTypeOptions(isTank) {
+  const out = [];
+  for (let t = 0; t < 128; t++) {
+    const bb = behaviorFor(isTank, t);
+    const sp = spriteFor(t);
+    const chk = spawnTypeAllowed(isTank, t);
+    const spr = "$" + (sp.a < 0 ? "--" : sp.a.toString(16)) + "/$" + (sp.b < 0 ? "--" : sp.b.toString(16));
+    let label = "t" + t + ": " + aiLabelFor(isTank, t) + " (spr " + spr + ")";
+    if (!chk.ok) label += " [REFUSED: " + chk.reason + "]";
+    else if (chk.warn) label += " [" + chk.warn + "]";
+    out.push({ t: t, label: label, tag: bb.tag || "", ok: chk.ok, warn: chk.warn || "" });
+  }
+  return out;
 }

@@ -60,7 +60,7 @@ function hideNoRomNotice() {
 // ---- Editor tabs + map zoom (one section visible at a time) ----
 const ED_TAB_KEY = "bm-editor-tab";
 const ED_ZOOM_KEY = "bm-editor-zoom";
-const ED_ZOOMS = [4, 8, 12, 16, 24, 32];
+const ED_ZOOMS = [4, 8, 12, 16, 24, 32, 48, 64];
 const ED_TOOL_KEY = "bm-editor-tool";
 const ED_TOOLS = [
   { id: "scroll", label: "Pan", title: "pan/scroll the map (drag scrolls, never paints; use on touch)" },

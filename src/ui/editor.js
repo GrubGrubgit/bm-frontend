@@ -7,7 +7,7 @@ import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, renderBlockImage, NES_PAL
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
 import { SPR_PAL, SPR_CYCLE, spriteBanksFor, isPureSpriteBank } from "../pack/sprites.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
-import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
+import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, spriteTileFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
 import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine, aiLabelFor, enemyTypeOptions } from "../pack/gaps.js";
 import { getAreaSongs, serializeAreaSongs, AREA_TABLE } from "../pack/sound.js";
 import { parseSong, songLine, remapSongs, ptrOf, allSiteInfos, getTankSongs, serializeTankSongs, sitesMapOf, SITE_HOOK7_UNHOOKED } from '../pack/songs.js';
@@ -502,7 +502,8 @@ function renderBrushMode() {
   if (info) {
     const tt = S.enemyBrushType | 0;
     const sp = spriteFor(tt);
-    info.textContent = "spr $" + (sp.a < 0 ? "--" : sp.a.toString(16)) + "/$" + (sp.b < 0 ? "--" : sp.b.toString(16)) + " | AI " + aiLabelFor(isTank, tt);
+    const lv = spriteTileFor(isTank, tt);
+    info.textContent = "spr $" + (sp.a < 0 ? "--" : sp.a.toString(16)) + "/$" + (sp.b < 0 ? "--" : sp.b.toString(16)) + " (live $" + (lv < 0 ? "--" : lv.toString(16)) + ") | AI " + aiLabelFor(isTank, tt);
   }
 }
 function paintPreviewInto(cv, img, size) {
@@ -932,7 +933,8 @@ function renderEnemyPanel(E, box) {
   sec.appendChild(tRow);
   const sp = spriteFor(t);
   const spRow = document.createElement("div");
-  spRow.textContent = "sprite bytes (fixed by type): $" + (sp.a < 0 ? "--" : sp.a.toString(16)) + " / $" + (sp.b < 0 ? "--" : sp.b.toString(16));
+  const lv2 = spriteTileFor(isTank, t);
+  spRow.textContent = "sprite bytes (fixed by type): $" + (sp.a < 0 ? "--" : sp.a.toString(16)) + " / $" + (sp.b < 0 ? "--" : sp.b.toString(16)) + " (live on map: $" + (lv2 < 0 ? "--" : lv2.toString(16)) + ")";
   sec.appendChild(spRow);
   const bh = behaviorFor(isTank, t);
   const aiRow = document.createElement("div");
@@ -1342,6 +1344,49 @@ function enemyHitFromEvent(ev) {
   return best;
 }
 function cellCoords(c) { return (c % MAP_COLS) + "," + Math.floor(c / MAP_COLS); }
+function nesRgb(ci) {
+  const h = NES_PALETTE[ci & 63];
+  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+}
+function enemySpriteImg(isTank, tile) {
+  if (!(tile >= 0)) return null;
+  const banks = spriteBanksFor(S.level);
+  if (!banks.length) return null;
+  const tall = !!isTank;
+  const w = 8, h = tall ? 16 : 8;
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext("2d");
+  if (!ctx) return null;
+  const img = ctx.createImageData(w, h);
+  const pal = [0x0F, SPR_PAL[0], SPR_PAL[1], SPR_PAL[2], 0x0F, SPR_PAL[3], SPR_PAL[4], SPR_PAL[5], 0x0F, SPR_PAL[6], SPR_PAL[7], SPR_PAL[8], 0x00, SPR_CYCLE[0], SPR_CYCLE[0], SPR_CYCLE[0]];
+  let painted = 0;
+  const half = function (bank4k, t, dy) {
+    let px = null;
+    try { px = chrTilePx(bank4k, t); } catch (e) { px = null; }
+    if (!px) return false;
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      const v = px[y * 8 + x];
+      if (!v) continue;
+      const rgb = nesRgb(pal[v & 3]);
+      const o = (((dy + y) * w) + x) * 4;
+      img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = 255;
+      painted++;
+    }
+    return true;
+  };
+  let okAll = false;
+  if (tall) {
+    const b1 = banks.length > 1 ? banks[1] : banks[0];
+    const bk = (tile & 1) ? b1 : banks[0];
+    okAll = half(bk, tile & ~1, 0) && half(bk, tile | 1, 8);
+  } else {
+    okAll = half(banks[0], tile, 0);
+  }
+  if (!okAll || !painted) return null;
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
 function renderEnemyMarkers(bpx) {
   const cv = el("edMap");
   if (!cv) return;
@@ -1350,33 +1395,72 @@ function renderEnemyMarkers(bpx) {
   if (!E) return;
   const ctx = cv.getContext("2d");
   if (!ctx) return;
+  const isTank = isTankKey(key);
+  const cache = {};
+  const imgFor = function (tile) {
+    const k = (isTank ? "A" : "B") + tile;
+    if (cache[k] === undefined) cache[k] = enemySpriteImg(isTank, tile);
+    return cache[k];
+  };
   ctx.save();
+  ctx.imageSmoothingEnabled = false;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (let i = 0; i < E.n; i++) {
     const p = enemyBlockXY(E.xs[i], E.ys[i]);
     const cx = p.bx * bpx, cy = p.by * bpx;
-    if (cx < 0 || cy < 0 || cx > cv.width || cy > cv.height) continue;
-    const boss = isTankKey(key) && E.types[i] === BOSS_TYPE;
-    const rr = Math.max(3, bpx * 0.4);
-    ctx.beginPath();
-    ctx.arc(cx, cy, rr, 0, 6.2832);
-    ctx.fillStyle = boss ? "#c00" : "rgba(10,10,10,0.85)";
-    ctx.fill();
-    ctx.lineWidth = Math.max(1.5, bpx * 0.12);
-    ctx.strokeStyle = (i === S.selEnemy) ? "#ffd23f" : "#fff";
-    ctx.stroke();
-    if (bpx >= 10) {
-      ctx.fillStyle = "#fff";
-      ctx.font = Math.max(9, bpx * 0.55) + "px monospace";
-      ctx.fillText(String(i), cx, cy);
-    }
-    if (i === S.selEnemy) {
+    if (cx < -32 || cy < -32 || cx > cv.width + 32 || cy > cv.height + 32) continue;
+    const boss = isTank && E.types[i] === BOSS_TYPE;
+    const tile = spriteTileFor(isTank, E.types[i]);
+    const img = tile >= 0 ? imgFor(tile) : null;
+    if (img) {
+      const sc = Math.max(1, Math.round(bpx * 0.75 / img.height));
+      const w = img.width * sc, h = img.height * sc;
+      ctx.drawImage(img, Math.round(cx - w / 2), Math.round(cy - h / 2), w, h);
+      const rr = Math.max(w, h) / 2 + 3;
+      if (boss) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, rr, 0, 6.2832);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#c00";
+        ctx.stroke();
+      }
+      if (i === S.selEnemy) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, rr + 2, 0, 6.2832);
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "#ffd23f";
+        ctx.stroke();
+      }
+      if (bpx >= 16) {
+        ctx.font = "bold 9px monospace";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.strokeText(String(i), cx, cy + h / 2 + 7);
+        ctx.fillStyle = (i === S.selEnemy) ? "#ffd23f" : "#fff";
+        ctx.fillText(String(i), cx, cy + h / 2 + 7);
+      }
+    } else {
+      const rr = Math.max(3, bpx * 0.4);
       ctx.beginPath();
-      ctx.arc(cx, cy, rr + 3, 0, 6.2832);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "#ffd23f";
+      ctx.arc(cx, cy, rr, 0, 6.2832);
+      ctx.fillStyle = boss ? "#c00" : "rgba(10,10,10,0.85)";
+      ctx.fill();
+      ctx.lineWidth = Math.max(1.5, bpx * 0.12);
+      ctx.strokeStyle = (i === S.selEnemy) ? "#ffd23f" : "#fff";
       ctx.stroke();
+      if (bpx >= 10) {
+        ctx.fillStyle = "#fff";
+        ctx.font = Math.max(9, bpx * 0.55) + "px monospace";
+        ctx.fillText(String(i), cx, cy);
+      }
+      if (i === S.selEnemy) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, rr + 3, 0, 6.2832);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#ffd23f";
+        ctx.stroke();
+      }
     }
   }
   ctx.restore();

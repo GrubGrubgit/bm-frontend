@@ -127,6 +127,20 @@ export const SPR_B = [0x54,0x56,0x58,0x5B,0x5D,0x5F,0x62,0x64,0x66,0x68,0x6A,0x6
 export function spriteFor(type) {
   return { a: type < SPR_A.length ? SPR_A[type] : -1, b: type < SPR_B.length ? SPR_B[type] : -1 };
 }
+// Live-table selection (PROVEN headless 2026-11-27: warp_raw(8) dungeon
+// settles $FF=0x90 with nonzero $0150 slot sprite bytes all in SPR_B;
+// warp_raw(0) overhead settles $FF=0xB0 with nonzero bytes all in SPR_A;
+// overhead slot8 actor $45 == TANK_TYPE_ACTOR[14] and $0150[8]==SPR_A[14].
+// $FF bit5 is the 8x16-sprite mode flag (overhead-only); CA89 stages A when
+// set, B when clear. So tank/A-lists render SPR_A, dungeon/B-lists SPR_B.
+// Returns the live tile, or -1 for empty (0) / out-of-range table slots --
+// the marker falls back to a dot (no live enemy tile is 0; minima are $1A+).
+export function spriteTileFor(isTank, type) {
+  const t = type | 0;
+  const sp = spriteFor(t);
+  const v = isTank ? sp.a : sp.b;
+  return (v == null || v <= 0) ? -1 : v;
+}
 
 // ---- 6.1b: per-type stat table (bank6, overhead areas) ----
 // 30 entries x 4 bytes at CPU $A36A (bank-rel $236A), ends $A3E1; code

@@ -2,7 +2,7 @@
 // Run: node tools/verify-pack-gaps.mjs
 import { readFileSync } from "fs";
 import { buildPack } from "../src/pack/builder.js";
-import { TANK_TYPE_ACTOR, TYPE_ACTOR, TANK_TRAP_TYPES, INVALID_TYPES, TANK_DORMANT_TYPES, tankEmptyType, powerupSubtype, spawnTypeAllowed } from "../src/pack/enemies.js";
+import { TANK_TYPE_ACTOR, TYPE_ACTOR, TANK_TRAP_TYPES, INVALID_TYPES, TANK_DORMANT_TYPES, tankEmptyType, powerupSubtype, spawnTypeAllowed, SPR_A, SPR_B, spriteTileFor } from "../src/pack/enemies.js";
 import { DUN_TABLE, TANK_TABLE } from "../src/pack/behavior.js";
 import { behaviorFor, behaviorText, doorsForLevel, levelArea, physicsText, slotText, areaSongText, soundText, soundSitesLine, aiLabelFor, enemyTypeOptions } from "../src/pack/gaps.js";
 import { parseDoors, pairOf } from "../src/pack/doors.js";
@@ -93,6 +93,58 @@ const stock = buildPack(rom, "ref.nes").pack;
   ok("ed move tool", ed.includes("movingEnemy") && ed.includes("movingBlock") && ed.includes("addEnemyRecAt"));
   ok("ed brush modes", ed.includes("edBrushModeRow") && ed.includes("edEnemyBrushType"));
   ok("ai labels", aiLabelFor(false, 0).indexOf("walker") >= 0 && aiLabelFor(false, 35).indexOf("actor $35") >= 0 && enemyTypeOptions(false).length === 128 && enemyTypeOptions(true).length === 128);
+}
+// ---- live sprite-table mapping (headless proof 2026-11-27) ----
+{
+  ok("spr live tank14", spriteTileFor(true, 14) === 0x44);
+  ok("spr live dun5", spriteTileFor(false, 5) === 0x5f);
+  ok("spr live tank33", spriteTileFor(true, 33) === 0x1a);
+  ok("spr live dun0", spriteTileFor(false, 0) === 0x54);
+  ok("spr zero+range fallback", spriteTileFor(true, 16) === -1 && spriteTileFor(false, 30) === -1 && spriteTileFor(true, 43) === -1 && spriteTileFor(false, 45) === -1 && spriteTileFor(true, 128) === -1 && spriteTileFor(false, -1) === -1);
+}
+// ---- live-table dynamics: $FF mode flag + slot sprite bytes ----
+{
+  const WASMB = new Uint8Array(readFileSync(PROJ + "/frontend/build/game.wasm"));
+  const catB = (banks) => { const q = new Uint8Array(banks[0].length * banks.length); banks.forEach((bb, i) => q.set(bb, i * banks[0].length)); return q; };
+  async function snapAt(k) {
+    let n = -1; let ram = null;
+    const inst = (await WebAssembly.instantiate(WASMB, { env: { host_frame: (f) => {
+      n = n + 1;
+      const ex = win.exports;
+      ex.bm_set_pad(0);
+      if (n === 61) ex.bm_set_pad(8);
+      if (n === 700) ex.bm_warp_raw(k);
+      if (n === 1150) { ex.bm_snap(); ram = new Uint8Array(2048); for (let a = 0; a < 2048; a++) ram[a] = ex.bm_ram_rd(a); }
+      if (n >= 1155) throw new Error("STOP");
+    } } })).instance;
+    const win = { exports: inst.exports };
+    try {
+      const mm8 = new Uint8Array(win.exports.memory.buffer);
+      mm8.set(catB(stock.prg), win.exports.bm_stage_ptr()); win.exports.bm_load_prg();
+      mm8.set(catB(stock.chr), win.exports.bm_stage_ptr()); win.exports.bm_load_chr();
+      win.exports.bm_boot();
+    } catch (e) { if (e.message !== "STOP") return null; }
+    return ram;
+  }
+  const d1 = await snapAt(8), d2 = await snapAt(8), o1 = await snapAt(0), o2 = await snapAt(0);
+  ok("spr dyn boot", !!(d1 && d2 && o1 && o2));
+  if (d1 && d2 && o1 && o2) {
+    const win1 = (r) => { const o = []; for (let i = 0; i < 16; i++) o.push(r[336 + i]); return o; };
+    const eq16 = (a, b) => a.every((v, i) => v === b[i]);
+    ok("spr dyn determinism", d1[255] === d2[255] && o1[255] === o2[255] && eq16(win1(d1), win1(d2)) && eq16(win1(o1), win1(o2)));
+    ok("dun FF is 90", d1[255] === 0x90);
+    ok("ovh FF is b0", o1[255] === 0xb0);
+    const setB = new Set(SPR_B), setA = new Set(SPR_A);
+    ok("dun s150 in SPR_B", win1(d1).every((v) => v === 0 || setB.has(v)));
+    ok("ovh s150 in SPR_A", win1(o1).every((v) => v === 0 || setA.has(v)));
+    ok("ovh slot8 t14 tile44", o1[1024 + 8 * 14] === 0x45 && o1[336 + 8] === 0x44);
+  }
+}
+// ---- sprite-marker editor wiring ----
+{
+  const ed2 = readFileSync(PROJ + "/frontend/src/ui/editor.js", "utf8");
+  ok("ed live tile helper", ed2.includes("spriteTileFor(isTank") && ed2.includes("enemySpriteImg"));
+  ok("ed live readout", ed2.includes("live on map") && ed2.includes("(live $"));
 }
 console.log("---- gaps: " + pass + " pass / " + fail + " fail ----");
 if (fail) process.exit(1);

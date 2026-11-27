@@ -127,20 +127,92 @@ export const SPR_B = [0x54,0x56,0x58,0x5B,0x5D,0x5F,0x62,0x64,0x66,0x68,0x6A,0x6
 export function spriteFor(type) {
   return { a: type < SPR_A.length ? SPR_A[type] : -1, b: type < SPR_B.length ? SPR_B[type] : -1 };
 }
-// Live-table selection (PROVEN headless 2026-11-27: warp_raw(8) dungeon
-// settles $FF=0x90 with nonzero $0150 slot sprite bytes all in SPR_B;
-// warp_raw(0) overhead settles $FF=0xB0 with nonzero bytes all in SPR_A;
-// overhead slot8 actor $45 == TANK_TYPE_ACTOR[14] and $0150[8]==SPR_A[14].
-// $FF bit5 is the 8x16-sprite mode flag (overhead-only); CA89 stages A when
-// set, B when clear. So tank/A-lists render SPR_A, dungeon/B-lists SPR_B.
-// Returns the live tile, or -1 for empty (0) / out-of-range table slots --
-// the marker falls back to a dot (no live enemy tile is 0; minima are $1A+).
-export function spriteTileFor(isTank, type) {
+// Live OAM-observed actor sprites (PROVEN headless 2026-11-27).
+// The staged SPR_A/SPR_B bytes above are spawn-time only: CA89 slot-fill
+// stages one byte into $0150, but actor behaviors overwrite OAM every
+// frame, so the staged byte NEVER describes what is on screen (tank $45
+// stages $44 but shows $4c+$ad-$cf; dungeon $55 stages $54 but shows
+// $c2/$d2; live subpalettes are 1-2, never the staged 0). Markers MUST use
+// this table. Key = actor id. Missing key = live appearance UNOBSERVED
+// (marker shows an honest dot); explicit null = proven to emit no OAM
+// (honest dot + note). tiles[] = widest observed frame; a = OAM attr,
+// dx/dy = px offsets from the cluster min-x/min-y, w/h = composite px.
+// tank entries are 8x16 (even tiles chr0 = bank16, odd tiles chr1 = level
+// BG bank); dungeon entries are 8x8 from sprite chr0. Probes:
+// probe-oam.mjs (stock drive) + probe-sweep.mjs + probe-sweep2.mjs
+// (cooked all-same-type packs, still + drive, all dynamics x2).
+export const ACTOR_SPRITES = {
+  0x23: { mode: 'tank', sub: 1, w: 16, h: 16, tiles: [
+    { t: 0x80, a: 0x01, dx: 0, dy: 0 }, { t: 0x90, a: 0x01, dx: 8, dy: 0 } ] },
+  0x31: { mode: 'tank', sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xc7, a: 0x1d, dx: 0, dy: 0 }, { t: 0xd7, a: 0x1d, dx: 8, dy: 0 } ],
+    note: 'frame A; frame B is $c5/$d5' },
+  0x45: { mode: 'tank', sub: 1, w: 24, h: 59, tiles: [
+    { t: 0xad, a: 0x1d, dx: 0, dy: 0 }, { t: 0xbd, a: 0x1d, dx: 8, dy: 0 },
+    { t: 0xcd, a: 0x1d, dx: 16, dy: 0 }, { t: 0xaf, a: 0x1d, dx: 0, dy: 16 },
+    { t: 0xbf, a: 0x1d, dx: 8, dy: 16 }, { t: 0xcf, a: 0x1d, dx: 16, dy: 16 },
+    { t: 0x4c, a: 0x01, dx: 8, dy: 43 } ],
+    note: 'frame B; frame A is $dd-$ff; $4c trails 19-43px below the body' },
+  0x5b: null,
+  0x63: { mode: 'tank', sub: 2, w: 16, h: 16, tiles: [
+    { t: 0xa7, a: 0x02, dx: 0, dy: 0 }, { t: 0xb7, a: 0x02, dx: 8, dy: 0 } ],
+    note: 'boss: 11 such pairs spread wide; marker shows one' },
+  0x55: { mode: 'dun', sub: 1, w: 16, h: 8, tiles: [
+    { t: 0xd2, a: 0x5d, dx: 0, dy: 0 }, { t: 0xc2, a: 0x5d, dx: 8, dy: 0 } ],
+    note: 'frame $c2/$d2; also $c0/$d0' },
+  0x59: { mode: 'dun', sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xee, a: 0x81, dx: 0, dy: 0 }, { t: 0xfc, a: 0x81, dx: 8, dy: 0 },
+    { t: 0xef, a: 0x81, dx: 0, dy: 8 }, { t: 0xfd, a: 0x91, dx: 8, dy: 8 } ],
+    note: 'frame A; frame B is $e9/$f9/$eb/$fb' },
+  0x02: { mode: 'dun', sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xf9, a: 0x8d, dx: 0, dy: 0 }, { t: 0xe9, a: 0x8d, dx: 8, dy: 0 },
+    { t: 0xfb, a: 0x9d, dx: 0, dy: 8 }, { t: 0xeb, a: 0x9d, dx: 8, dy: 8 } ],
+    note: 'shared with $59 frame B; state-dependent' },
+  0x60: { mode: 'dun', sub: 1, w: 16, h: 24, tiles: [
+    { t: 0xab, a: 0x0d, dx: 0, dy: 0 }, { t: 0xbb, a: 0x0d, dx: 8, dy: 0 },
+    { t: 0xac, a: 0x0d, dx: 0, dy: 8 }, { t: 0xbc, a: 0x0d, dx: 8, dy: 8 },
+    { t: 0xae, a: 0x1d, dx: 0, dy: 16 }, { t: 0xbe, a: 0x1d, dx: 8, dy: 16 } ] },
+  0x35: { mode: 'dun', sub: 1, w: 16, h: 16, tiles: [
+    { t: 0x60, a: 0x01, dx: 0, dy: 0 }, { t: 0x70, a: 0x01, dx: 8, dy: 0 },
+    { t: 0x61, a: 0x01, dx: 0, dy: 8 }, { t: 0x71, a: 0x01, dx: 8, dy: 8 } ] },
+};
+export const ACTOR_SPRITE_NOTES = {
+  0x5b: 'egg invisible until hatch (emits no OAM as $5b)',
+  0x5a: 'live layout unobserved (8-sprite, state-dependent)',
+};
+export function actorFor(isTank, type) {
   const t = type | 0;
-  const sp = spriteFor(t);
-  const v = isTank ? sp.a : sp.b;
-  return (v == null || v <= 0) ? -1 : v;
+  if (t < 0 || t > 127) return null;
+  if (isTank) {
+    if (t in TANK_TYPE_ACTOR) return TANK_TYPE_ACTOR[t];
+    if (powerupSubtype(t) >= 0) return 0x23;
+    return null;
+  }
+  if (powerupSubtype(t) >= 0) return 0x35;
+  if (t in TYPE_ACTOR) return TYPE_ACTOR[t];
+  return null;
 }
+export function actorSpriteFor(isTank, type) {
+  const a = actorFor(isTank, type);
+  if (a == null) return undefined;
+  if (!(a in ACTOR_SPRITES)) return undefined;
+  const s = ACTOR_SPRITES[a];
+  if (s !== null && s !== undefined && s.mode !== (isTank ? 'tank' : 'dun')) return undefined;
+  return s;
+}
+export function liveSpriteSummary(isTank, type) {
+  const a = actorFor(isTank, type);
+  if (a == null) return 'no actor (unmapped type)';
+  const s = actorSpriteFor(isTank, type);
+  if (s === undefined) {
+    const n = ACTOR_SPRITE_NOTES[a];
+    return 'actor $' + a.toString(16) + ' live unobserved' + (n ? ' (' + n + ')' : '');
+  }
+  if (s === null) return ACTOR_SPRITE_NOTES[a] || ('actor $' + a.toString(16) + ' emits no OAM');
+  const tiles = s.tiles.map(function (e) { return '$' + e.t.toString(16); }).join(',');
+  return s.tiles.length + 'spr ' + tiles + ' sub' + s.sub + ' ' + s.w + 'x' + s.h;
+}
+
 
 // ---- 6.1b: per-type stat table (bank6, overhead areas) ----
 // 30 entries x 4 bytes at CPU $A36A (bank-rel $236A), ends $A3E1; code

@@ -2,7 +2,7 @@
 // Run: node tools/verify-pack-gaps.mjs
 import { readFileSync } from "fs";
 import { buildPack } from "../src/pack/builder.js";
-import { TANK_TYPE_ACTOR, TYPE_ACTOR, TANK_TRAP_TYPES, INVALID_TYPES, TANK_DORMANT_TYPES, tankEmptyType, powerupSubtype, spawnTypeAllowed, SPR_A, SPR_B, spriteTileFor } from "../src/pack/enemies.js";
+import { TANK_TYPE_ACTOR, TYPE_ACTOR, TANK_TRAP_TYPES, INVALID_TYPES, TANK_DORMANT_TYPES, tankEmptyType, powerupSubtype, spawnTypeAllowed, SPR_A, SPR_B, actorSpriteFor, actorFor, liveSpriteSummary, parseSpawns, serializeSpawns } from "../src/pack/enemies.js";
 import { DUN_TABLE, TANK_TABLE } from "../src/pack/behavior.js";
 import { behaviorFor, behaviorText, doorsForLevel, levelArea, physicsText, slotText, areaSongText, soundText, soundSitesLine, aiLabelFor, enemyTypeOptions } from "../src/pack/gaps.js";
 import { parseDoors, pairOf } from "../src/pack/doors.js";
@@ -94,14 +94,32 @@ const stock = buildPack(rom, "ref.nes").pack;
   ok("ed brush modes", ed.includes("edBrushModeRow") && ed.includes("edEnemyBrushType"));
   ok("ai labels", aiLabelFor(false, 0).indexOf("walker") >= 0 && aiLabelFor(false, 35).indexOf("actor $35") >= 0 && enemyTypeOptions(false).length === 128 && enemyTypeOptions(true).length === 128);
 }
-// ---- live sprite-table mapping (headless proof 2026-11-27) ----
+// ---- live OAM-observed actor sprites (headless proof 2026-11-27; staged SPR_* retired from markers) ----
 {
-  ok("spr live tank14", spriteTileFor(true, 14) === 0x44);
-  ok("spr live dun5", spriteTileFor(false, 5) === 0x5f);
-  ok("spr live tank33", spriteTileFor(true, 33) === 0x1a);
-  ok("spr live dun0", spriteTileFor(false, 0) === 0x54);
-  ok("spr zero+range fallback", spriteTileFor(true, 16) === -1 && spriteTileFor(false, 30) === -1 && spriteTileFor(true, 43) === -1 && spriteTileFor(false, 45) === -1 && spriteTileFor(true, 128) === -1 && spriteTileFor(false, -1) === -1);
+  const has = (s, t) => !!s && s.tiles.some((e) => e.t === t);
+  const s45 = actorSpriteFor(true, 14);
+  ok("live t45 7spr cf sub1", !!s45 && s45.tiles.length === 7 && s45.sub === 1 && has(s45, 0xcf) && has(s45, 0x4c) && s45.w === 24);
+  const s31 = actorSpriteFor(true, 5);
+  ok("live t5 pair c7d7", !!s31 && s31.tiles.length === 2 && s31.tiles[0].t === 0xc7 && s31.tiles[1].t === 0xd7 && s31.sub === 1);
+  const s23 = actorSpriteFor(true, 33);
+  ok("live t33 pair 8090", !!s23 && s23.tiles.length === 2 && s23.tiles[0].t === 0x80 && s23.tiles[1].t === 0x90);
+  ok("live egg null", actorSpriteFor(true, 32) === null);
+  const sb = actorSpriteFor(true, 49);
+  ok("live boss pair a7b7 sub2", !!sb && sb.tiles.length === 2 && sb.tiles[0].t === 0xa7 && sb.sub === 2);
+  const d55 = actorSpriteFor(false, 0);
+  ok("live d0 walker c2d2", !!d55 && d55.tiles.length === 2 && has(d55, 0xc2) && has(d55, 0xd2) && d55.sub === 1);
+  const d59 = actorSpriteFor(false, 2);
+  ok("live d2 conv eefc", !!d59 && d59.tiles.length === 4 && has(d59, 0xee) && has(d59, 0xfd));
+  const d35 = actorSpriteFor(false, 33);
+  ok("live d33 pow 6070", !!d35 && d35.tiles.length === 4 && has(d35, 0x60) && has(d35, 0x71));
+  const d60 = actorSpriteFor(false, 5);
+  ok("live d5 ab-ac-ae", !!d60 && d60.tiles.length === 6 && has(d60, 0xab) && has(d60, 0xbe));
+  ok("live unmapped undefined", actorSpriteFor(true, 70) === undefined && actorSpriteFor(false, 70) === undefined);
+  ok("live range+mode undef", actorSpriteFor(true, -1) === undefined && actorSpriteFor(true, 10) === undefined);
+  ok("live summary", liveSpriteSummary(true, 14).indexOf("$cf") >= 0 && liveSpriteSummary(true, 32).indexOf("invisible") >= 0 && liveSpriteSummary(true, 1).indexOf("unobserved") >= 0 && liveSpriteSummary(true, 70).indexOf("no actor") >= 0);
+  ok("live actor ids", actorFor(true, 14) === 0x45 && actorFor(true, 33) === 0x23 && actorFor(false, 0) === 0x55 && actorFor(false, 33) === 0x35);
 }
+
 // ---- live-table dynamics: $FF mode flag + slot sprite bytes ----
 {
   const WASMB = new Uint8Array(readFileSync(PROJ + "/frontend/build/game.wasm"));
@@ -140,11 +158,82 @@ const stock = buildPack(rom, "ref.nes").pack;
     ok("ovh slot8 t14 tile44", o1[1024 + 8 * 14] === 0x45 && o1[336 + 8] === 0x44);
   }
 }
+// ---- live-OAM dynamics: cooked all-same-type packs, slots + OAM clusters (x2) ----
+{
+  const cook = (key, type) => {
+    const P = { prg: stock.prg.map((b) => b.slice()), chr: stock.chr.map((b) => b.slice()) };
+    const p = parseSpawns(P.prg[3]);
+    const L = p.lists.filter((z) => z.key === key)[0];
+    const t = L.types.slice();
+    for (let i = 0; i < L.n; i++) t[i] = type;
+    const ed = {};
+    ed[key] = { types: t, xs: L.xs.slice(), ys: L.ys.slice() };
+    const s = serializeSpawns(p, ed);
+    if (!s.ok) return null;
+    P.prg[3] = s.bytes;
+    return P;
+  };
+  const runOAM = async (P, warpKind, k, warpAt, padFn, snapsAt) => {
+    let n = -1;
+    const out = [];
+    const inst = (await WebAssembly.instantiate(WASMB2, { env: { host_frame: (f) => {
+      n++;
+      const ex = win.exports;
+      ex.bm_set_pad(padFn(n));
+      if (n === warpAt) { if (warpKind === 0) ex.bm_warp_raw(k); else ex.bm_warp(k); }
+      if (snapsAt.indexOf(n) >= 0) {
+        ex.bm_snap();
+        const ram = new Uint8Array(2048);
+        for (let a = 0; a < 2048; a++) ram[a] = ex.bm_ram_rd(a);
+        const mem = new Uint8Array(ex.memory.buffer);
+        const op = ex.bm_oam_ptr();
+        out.push({ n, ram, oam: mem.slice(op, op + 256) });
+      }
+      if (n >= snapsAt[snapsAt.length - 1] + 5) throw new Error("STOP");
+    } } })).instance;
+    const win = { exports: inst.exports };
+    try {
+      const mm8 = new Uint8Array(win.exports.memory.buffer);
+      mm8.set(catB2(P.prg), win.exports.bm_stage_ptr()); win.exports.bm_load_prg();
+      mm8.set(catB2(P.chr), win.exports.bm_stage_ptr()); win.exports.bm_load_chr();
+      win.exports.bm_boot();
+    } catch (e) { if (e.message !== "STOP") return []; }
+    return out;
+  };
+  const WASMB2 = new Uint8Array(readFileSync(PROJ + "/frontend/build/game.wasm"));
+  const catB2 = (banks) => { const q = new Uint8Array(banks[0].length * banks.length); banks.forEach((bb, i) => q.set(bb, i * banks[0].length)); return q; };
+  const still = (n) => n === 61 ? 8 : 0;
+  const drive = (n) => n === 61 ? 8 : ((n >= 860) ? 128 : 0);
+  const hasTile = (oam, t) => { for (let i = 0; i < 64; i++) if (oam[i * 4 + 1] === t) return true; return false; };
+  const actors = (ram) => { const o = []; for (let i = 0; i < 18; i++) o.push(ram[1024 + i * 14]); return o; };
+  const PT = cook("A0", 14);
+  const T1 = await runOAM(PT, 0, 0, 700, still, [1150]);
+  const T2 = await runOAM(PT, 0, 0, 700, still, [1150]);
+  ok("live dyn T45 boot", T1.length === 1 && T2.length === 1);
+  if (T1.length && T2.length) {
+    const a1 = actors(T1[0].ram), a2 = actors(T2[0].ram);
+    ok("live dyn T45 slots", a1[8] === 0x45 && a1[11] === 0x45 && a2[8] === 0x45);
+    ok("live dyn T45 oam cf", hasTile(T1[0].oam, 0xcf) && hasTile(T2[0].oam, 0xcf));
+    ok("live dyn T45 deter", a1.every((v, i) => v === a2[i]) && T1[0].oam.every((v, i) => v === T2[0].oam[i]));
+  }
+  const PD = cook("B1", 33);
+  const D1 = await runOAM(PD, 1, 9, 700, drive, [1000]);
+  const D2 = await runOAM(PD, 1, 9, 700, drive, [1000]);
+  ok("live dyn Dpow boot", D1.length === 1 && D2.length === 1);
+  if (D1.length && D2.length) {
+    const a1 = actors(D1[0].ram);
+    ok("live dyn Dpow slots", a1.indexOf(0x35) >= 0);
+    ok("live dyn Dpow oam 60", hasTile(D1[0].oam, 0x60) && hasTile(D2[0].oam, 0x60));
+    ok("live dyn Dpow deter", a1.every((v, i) => v === actors(D2[0].ram)[i]));
+  }
+}
 // ---- sprite-marker editor wiring ----
 {
   const ed2 = readFileSync(PROJ + "/frontend/src/ui/editor.js", "utf8");
-  ok("ed live tile helper", ed2.includes("spriteTileFor(isTank") && ed2.includes("enemySpriteImg"));
-  ok("ed live readout", ed2.includes("live on map") && ed2.includes("(live $"));
+  ok("ed live tile helper", ed2.includes("actorSpriteFor(isTank") && ed2.includes("enemyActorImg"));
+  ok("ed live readout", ed2.includes("live sprites: ") && ed2.includes("live: "));
+  ok("ed no staged markers", !ed2.includes("spriteTileFor") && !ed2.includes("enemySpriteImg") && ed2.includes("liveSpriteSummary"));
 }
+
 console.log("---- gaps: " + pass + " pass / " + fail + " fail ----");
 if (fail) process.exit(1);

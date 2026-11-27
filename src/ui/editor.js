@@ -7,7 +7,7 @@ import { BG_CHR_BANK, chrBankBytes, paintMap, bitGrid, renderBlockImage, NES_PAL
 import { decodeTile, encodeTile, chrPatchDescs, TILES_PER_BANK4K } from "../pack/chr.js";
 import { SPR_PAL, SPR_CYCLE, spriteBanksFor, isPureSpriteBank } from "../pack/sprites.js";
 import { makePatch, newCustomId, diffRuns } from "../pack/overlay.js";
-import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, spriteFor, spriteTileFor, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
+import { parseSpawns, serializeSpawns, rebuildSpawns, spawnBudget, actorSpriteFor, liveSpriteSummary, SPAWN_BANK, serializeStats, getStatEntry, STAT_BANK, statIdxFor, INVALID_TYPES, TYPE_ACTOR, BOSS_TYPE, BOSS_REC, keyForLevel, serializeTankStats, getTankStatEntry, TANK_STAT_BANK, tankStatIdxFor, TANK_TRAP_TYPES, TANK_TYPE_ACTOR, spawnTypeAllowed } from "../pack/enemies.js";
 import { behaviorFor, behaviorText, doorsForLevel, physicsText, slotText, areaSongText, soundText, soundSitesLine, aiLabelFor, enemyTypeOptions } from "../pack/gaps.js";
 import { getAreaSongs, serializeAreaSongs, AREA_TABLE } from "../pack/sound.js";
 import { parseSong, songLine, remapSongs, ptrOf, allSiteInfos, getTankSongs, serializeTankSongs, sitesMapOf, SITE_HOOK7_UNHOOKED } from '../pack/songs.js';
@@ -501,9 +501,7 @@ function renderBrushMode() {
   }
   if (info) {
     const tt = S.enemyBrushType | 0;
-    const sp = spriteFor(tt);
-    const lv = spriteTileFor(isTank, tt);
-    info.textContent = "spr $" + (sp.a < 0 ? "--" : sp.a.toString(16)) + "/$" + (sp.b < 0 ? "--" : sp.b.toString(16)) + " (live $" + (lv < 0 ? "--" : lv.toString(16)) + ") | AI " + aiLabelFor(isTank, tt);
+    info.textContent = "live: " + liveSpriteSummary(isTank, tt) + " | AI " + aiLabelFor(isTank, tt);
   }
 }
 function paintPreviewInto(cv, img, size) {
@@ -931,10 +929,8 @@ function renderEnemyPanel(E, box) {
   tsel.addEventListener("change", () => commitEnemyRec(key, i, "t", tsel.value | 0));
   tRow.appendChild(tsel);
   sec.appendChild(tRow);
-  const sp = spriteFor(t);
   const spRow = document.createElement("div");
-  const lv2 = spriteTileFor(isTank, t);
-  spRow.textContent = "sprite bytes (fixed by type): $" + (sp.a < 0 ? "--" : sp.a.toString(16)) + " / $" + (sp.b < 0 ? "--" : sp.b.toString(16)) + " (live on map: $" + (lv2 < 0 ? "--" : lv2.toString(16)) + ")";
+  spRow.textContent = "live sprites: " + liveSpriteSummary(isTank, t) + " (staged bytes are spawn-time only, never drawn)";
   sec.appendChild(spRow);
   const bh = behaviorFor(isTank, t);
   const aiRow = document.createElement("div");
@@ -1348,45 +1344,53 @@ function nesRgb(ci) {
   const h = NES_PALETTE[ci & 63];
   return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 }
-function enemySpriteImg(isTank, tile) {
-  if (!(tile >= 0)) return null;
+function enemyActorImg(isTank, type) {
+  const spec = actorSpriteFor(isTank, type);
+  if (!spec) return null;
   const banks = spriteBanksFor(S.level);
   if (!banks.length) return null;
   const tall = !!isTank;
-  const w = 8, h = tall ? 16 : 8;
   const cv = document.createElement("canvas");
-  cv.width = w; cv.height = h;
+  cv.width = spec.w; cv.height = spec.h;
   const ctx = cv.getContext("2d");
   if (!ctx) return null;
-  const img = ctx.createImageData(w, h);
+  const img = ctx.createImageData(spec.w, spec.h);
   const pal = [0x0F, SPR_PAL[0], SPR_PAL[1], SPR_PAL[2], 0x0F, SPR_PAL[3], SPR_PAL[4], SPR_PAL[5], 0x0F, SPR_PAL[6], SPR_PAL[7], SPR_PAL[8], 0x00, SPR_CYCLE[0], SPR_CYCLE[0], SPR_CYCLE[0]];
+  const base = (spec.sub & 3) * 4;
   let painted = 0;
-  const half = function (bank4k, t, dy) {
-    let px = null;
-    try { px = chrTilePx(bank4k, t); } catch (e) { px = null; }
-    if (!px) return false;
+  const put = function (px, dx, dy) {
     for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
       const v = px[y * 8 + x];
       if (!v) continue;
-      const rgb = nesRgb(pal[v & 3]);
-      const o = (((dy + y) * w) + x) * 4;
+      const xx = dx + x, yy = dy + y;
+      if (xx < 0 || yy < 0 || xx >= spec.w || yy >= spec.h) continue;
+      const rgb = nesRgb(pal[base + (v & 3)]);
+      const o = (yy * spec.w + xx) * 4;
       img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = 255;
       painted++;
     }
-    return true;
   };
-  let okAll = false;
-  if (tall) {
-    const b1 = banks.length > 1 ? banks[1] : banks[0];
-    const bk = (tile & 1) ? b1 : banks[0];
-    okAll = half(bk, tile & ~1, 0) && half(bk, tile | 1, 8);
-  } else {
-    okAll = half(banks[0], tile, 0);
+  for (let i = 0; i < spec.tiles.length; i++) {
+    const s = spec.tiles[i];
+    if (tall) {
+      const bk = (s.t & 1) ? (banks.length > 1 ? banks[1] : banks[0]) : banks[0];
+      let p1 = null, p2 = null;
+      try { p1 = chrTilePx(bk, s.t & ~1); } catch (e) { p1 = null; }
+      try { p2 = chrTilePx(bk, s.t | 1); } catch (e) { p2 = null; }
+      if (!p1 || !p2) return null;
+      put(p1, s.dx, s.dy); put(p2, s.dx, s.dy + 8);
+    } else {
+      let px = null;
+      try { px = chrTilePx(banks[0], s.t); } catch (e) { px = null; }
+      if (!px) return null;
+      put(px, s.dx, s.dy);
+    }
   }
-  if (!okAll || !painted) return null;
+  if (!painted) return null;
   ctx.putImageData(img, 0, 0);
   return cv;
 }
+
 function renderEnemyMarkers(bpx) {
   const cv = el("edMap");
   if (!cv) return;
@@ -1397,9 +1401,9 @@ function renderEnemyMarkers(bpx) {
   if (!ctx) return;
   const isTank = isTankKey(key);
   const cache = {};
-  const imgFor = function (tile) {
-    const k = (isTank ? "A" : "B") + tile;
-    if (cache[k] === undefined) cache[k] = enemySpriteImg(isTank, tile);
+  const imgFor = function (type) {
+    const k = (isTank ? "A" : "B") + (type | 0);
+    if (cache[k] === undefined) cache[k] = enemyActorImg(isTank, type);
     return cache[k];
   };
   ctx.save();
@@ -1411,8 +1415,7 @@ function renderEnemyMarkers(bpx) {
     const cx = p.bx * bpx, cy = p.by * bpx;
     if (cx < -32 || cy < -32 || cx > cv.width + 32 || cy > cv.height + 32) continue;
     const boss = isTank && E.types[i] === BOSS_TYPE;
-    const tile = spriteTileFor(isTank, E.types[i]);
-    const img = tile >= 0 ? imgFor(tile) : null;
+    const img = imgFor(E.types[i]);
     if (img) {
       const sc = Math.max(1, Math.round(bpx * 0.75 / img.height));
       const w = img.width * sc, h = img.height * sc;
@@ -1817,7 +1820,7 @@ function renderEnemies() {
   const bg = spawnBudget(S.enemies, trial);
   if (bud) bud.textContent = bg.ok ? ('bank-3 budget: ' + bg.free + ' bytes free (~' + Math.max(0, Math.floor(bg.free / 3)) + ' adds)') : 'bank-3 budget: n/a';
   const hr = document.createElement('tr');
-  const heads = ['rec', 'type', 'x', 'y', 'sprA/B', 'AI', ''];
+  const heads = ['rec', 'type', 'x', 'y', 'live', 'AI', ''];
   for (let h = 0; h < heads.length; h++) { const th = document.createElement('th'); th.textContent = heads[h]; hr.appendChild(th); }
   tbl.appendChild(hr);
   for (let i = 0; i < n; i++) {
@@ -1837,9 +1840,8 @@ function renderEnemies() {
       inp.addEventListener('change', function () { commitEnemyRec(key, this.dataset.i | 0, this.dataset.f, this.value | 0); });
       td.appendChild(inp); tr.appendChild(td);
     }
-    const sp = spriteFor(E.types[i]);
     const td = document.createElement('td');
-    td.textContent = String.fromCharCode(36) + sp.a.toString(16) + '/' + String.fromCharCode(36) + sp.b.toString(16);
+    td.textContent = liveSpriteSummary(key[0] === 'A', E.types[i]);
     tr.appendChild(td);
     const bh = behaviorFor(key[0] === 'A', E.types[i]);
     const tdB = document.createElement('td');

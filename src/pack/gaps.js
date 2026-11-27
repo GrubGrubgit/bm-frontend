@@ -1,7 +1,7 @@
 // Editor-gap batch: read-only RE summaries for the editor (pure, no DOM).
 // Wires 6.4f physics + 6.4g behavior + P4 doors + 6.4e sound into the enemies tab and a
 // notes panel. All facts proven headless elsewhere (see PLAN 6.1/6.4f/6.4g/6.4e).
-import { TANK_TYPE_ACTOR, TYPE_ACTOR, TANK_TRAP_TYPES, INVALID_TYPES, TANK_DORMANT_TYPES, tankEmptyType, powerupSubtype, BOSS_TYPE, spriteFor, spawnTypeAllowed } from "./enemies.js";
+import { TANK_TYPE_ACTOR, TYPE_ACTOR, TANK_TRAP_TYPES, INVALID_TYPES, TANK_DORMANT_TYPES, tankEmptyType, powerupSubtype, BOSS_TYPE, actorSpriteFor, liveSpriteSummary, spawnTypeAllowed } from "./enemies.js";
 import { DUN_TABLE, TANK_TABLE, SLOT_BASE, SLOT_STRIDE, SLOT_N, DUN_TABLE_BASE, TANK_TABLE_BASE } from "./behavior.js";
 import { JASON_RUN, JASON_JUMP, TANK } from "./physics.js";
 import { parseDoors, pairOf } from "./doors.js";
@@ -92,10 +92,9 @@ export function enemyTypeOptions(isTank) {
   const out = [];
   for (let t = 0; t < 128; t++) {
     const bb = behaviorFor(isTank, t);
-    const sp = spriteFor(t);
     const chk = spawnTypeAllowed(isTank, t);
-    const spr = "$" + (sp.a < 0 ? "--" : sp.a.toString(16)) + "/$" + (sp.b < 0 ? "--" : sp.b.toString(16));
-    let label = "t" + t + ": " + aiLabelFor(isTank, t) + " (spr " + spr + ")";
+    const spr = liveSpriteSummary(isTank, t);
+    let label = "t" + t + ": " + aiLabelFor(isTank, t) + " (live " + spr + ")";
     if (!chk.ok) label += " [REFUSED: " + chk.reason + "]";
     else if (chk.warn) label += " [" + chk.warn + "]";
     out.push({ t: t, label: label, tag: bb.tag || "", ok: chk.ok, warn: chk.warn || "" });

@@ -91,6 +91,67 @@ public class MainActivity extends Activity {
     s.setMediaPlaybackRequiresUserGesture(false);
     s.setAllowFileAccess(false);
     web.addJavascriptInterface(new BMApkBridge(), "BMApk");
+    web.setWebViewClient(new WebViewClient() {
+      public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest req) {
+        try {
+          if (!"GET".equals(req.getMethod())) return null;
+          if (!HOST.equals(req.getUrl().getHost())) return null;
+          AssetRoute r = AssetRoute.resolve(req.getUrl().getPath());
+          if (r == null) { miss(req.getUrl().getPath()); return null; }
+          InputStream in;
+          try {
+            in = getAssets().open(r.asset);
+          } catch (IOException e) {
+            miss(r.asset);
+            return null;
+          }
+          Map<String, String> h = new HashMap<String, String>();
+          h.put("Cross-Origin-Opener-Policy", "same-origin");
+          h.put("Cross-Origin-Embedder-Policy", "require-corp");
+          h.put("Cross-Origin-Resource-Policy", "same-origin");
+          h.put("Cache-Control", "no-store");
+          WebResourceResponse resp = new WebResourceResponse(r.mime, r.text ? "UTF-8" : null, 200, "OK", h, in);
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            resp.setResponseHeaders(h);
+          }
+          return resp;
+        } catch (Throwable t) { return null; }
+      }
+    });
+    web.setWebChromeClient(new WebChromeClient() {
+      public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
+        if (fileCb != null) fileCb.onReceiveValue(null);
+        fileCb = cb;
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        try {
+          startActivityForResult(Intent.createChooser(i, "Select ROM"), FILE_REQ);
+        } catch (ActivityNotFoundException e) {
+          fileCb = null;
+          cb.onReceiveValue(null);
+          return false;
+        }
+        return true;
+      }
+      public boolean onConsoleMessage(ConsoleMessage m) {
+        try {
+          if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR && m.message() != null && m.message().contains("SharedArrayBuffer")) {
+            String line = "JS: " + m.message() + " (" + m.sourceId() + ":" + m.lineNumber() + ")\n";
+            FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);
+            f.write(line.getBytes("UTF-8"));
+            f.close();
+          }
+        } catch (Throwable ignored7) {}
+        return false;
+      }
+    });
+    setContentView(web);
+    String base = startLocalServer();
+    if (base != null) web.loadUrl(base + "index.html?inapp=1");
+    else web.loadUrl("https://" + HOST + "/index.html?inapp=1");
+  }
+
   public class BMApkBridge {
     @JavascriptInterface
     public String saveMovie(String name, String dataUrl) {
@@ -166,67 +227,6 @@ public class MainActivity extends Activity {
       });
     }
   }
-    web.setWebViewClient(new WebViewClient() {
-      public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest req) {
-        try {
-          if (!"GET".equals(req.getMethod())) return null;
-          if (!HOST.equals(req.getUrl().getHost())) return null;
-          AssetRoute r = AssetRoute.resolve(req.getUrl().getPath());
-          if (r == null) { miss(req.getUrl().getPath()); return null; }
-          InputStream in;
-          try {
-            in = getAssets().open(r.asset);
-          } catch (IOException e) {
-            miss(r.asset);
-            return null;
-          }
-          Map<String, String> h = new HashMap<String, String>();
-          h.put("Cross-Origin-Opener-Policy", "same-origin");
-          h.put("Cross-Origin-Embedder-Policy", "require-corp");
-          h.put("Cross-Origin-Resource-Policy", "same-origin");
-          h.put("Cache-Control", "no-store");
-          WebResourceResponse resp = new WebResourceResponse(r.mime, r.text ? "UTF-8" : null, 200, "OK", h, in);
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            resp.setResponseHeaders(h);
-          }
-          return resp;
-        } catch (Throwable t) { return null; }
-      }
-    });
-    web.setWebChromeClient(new WebChromeClient() {
-      public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
-        if (fileCb != null) fileCb.onReceiveValue(null);
-        fileCb = cb;
-        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
-        i.addCategory(Intent.CATEGORY_OPENABLE);
-        i.setType("*/*");
-        try {
-          startActivityForResult(Intent.createChooser(i, "Select ROM"), FILE_REQ);
-        } catch (ActivityNotFoundException e) {
-          fileCb = null;
-          cb.onReceiveValue(null);
-          return false;
-        }
-        return true;
-      }
-      public boolean onConsoleMessage(ConsoleMessage m) {
-        try {
-          if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR && m.message() != null && m.message().contains("SharedArrayBuffer")) {
-            String line = "JS: " + m.message() + " (" + m.sourceId() + ":" + m.lineNumber() + ")\n";
-            FileOutputStream f = new FileOutputStream(new File(getFilesDir(), LOG), true);
-            f.write(line.getBytes("UTF-8"));
-            f.close();
-          }
-        } catch (Throwable ignored7) {}
-        return false;
-      }
-    });
-    setContentView(web);
-    String base = startLocalServer();
-    if (base != null) web.loadUrl(base + "index.html?inapp=1");
-    else web.loadUrl("https://" + HOST + "/index.html?inapp=1");
-  }
-
 
   private static String traceOf(Throwable e) {
     ByteArrayOutputStream bos = new ByteArrayOutputStream();

@@ -1,6 +1,6 @@
 # bm-frontend — Blaster Master web frontend (native port shell)
 
-Plays the statically recompiled Blaster Master engine (`bm-recomp`,
+Plays the statically recompiled Blaster Master engine ([bm-recomp](https://github.com/GrubGrubgit/bm-recomp),
 `recomp/gen/combined_enf.c` + `runtime.h`, pinned in `ENGINE_PIN`) in any
 modern browser. Native port, NOT an emulator: there is no 6502 CPU and no
 PPU/APU emulation — the lifted C IS the game logic; this repo is its
@@ -71,6 +71,11 @@ A full pack editor that rebuilds the game's data tables from your ROM:
   serving the staged game out of the APK with the same COOP/COEP headers
   as the dev server. No permissions, no network, no storage permission —
   supply the ROM once in-app and the pack persists there.
+
+## Sibling repos
+
+- Engine: [bm-recomp](https://github.com/GrubGrubgit/bm-recomp) - lifted game C, pinned by ENGINE_PIN, compiled unmodified.
+- Reference: [bm-disasm](https://github.com/GrubGrubgit/bm-disasm) - disassembly the RE table and routine pins are verified against.
 
 ## Build from source
 

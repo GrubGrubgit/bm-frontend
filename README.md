@@ -2,87 +2,132 @@
 
 Plays the statically recompiled Blaster Master engine (`bm-recomp`,
 `recomp/gen/combined_enf.c` + `runtime.h`, pinned in `ENGINE_PIN`) in any
-modern browser. Native port, NOT an emulator: the lifted C is the game;
-this repo is its platform layer (WebGL video, WebAudio audio, unified
-keyboard/touch/Bluetooth input, frame timing) plus a ROM-supplied asset pack.
+modern browser. Native port, NOT an emulator: there is no 6502 CPU and no
+PPU/APU emulation — the lifted C IS the game logic; this repo is its
+platform layer (frame timing in, WebGL video out, WebAudio audio out,
+keyboard/touch/gamepad input in) plus a ROM-supplied asset pack the engine
+runs off.
 
-- You supply your own Blaster Master (USA) NES ROM locally (picker /
+- You supply your own Blaster Master (USA) NES ROM locally (file picker /
   drag-drop). Nothing copyrighted ships in this repo or the pack cache
   except what your ROM provided at extract time in your own browser.
-- Engine sources are fetched at build from `bm-recomp` at `ENGINE_PIN`
-  into `build/vendor/` (gitignored) and compiled unmodified behind one thin
-  adapter (`src/core/bm_api.c`). See `SPEC.md` §3.
-- Structure (one concern per file under `src/`): `src/rom/`
-  `src/pack/`, `src/core/`, `src/video/` (WebGL), `src/audio/`,
-  `src/input/`, `src/ui/`, `src/app.js` + `window.BM`.
-- Plan: `PLAN.md` (bottom-up L0–L7, no demos). Spec: `SPEC.md`.
-  A layer is DONE only when all its acceptance checks pass on the phone.
-- Budgets: `work/` stays small and gitignored; guard before heavy sessions;
-  user approval for any single write over 100MB; no silent background jobs.
+  Known-good dump: CRC32 `bc300047`. Headered or headerless both accepted.
+- The same build runs on desktop and mobile browsers, as an installable
+  PWA, and inside the Android WebView APK.
+- Live site: https://grubgrubgit.github.io/bm-frontend/
+- Releases (APK attached): https://github.com/GrubGrubgit/bm-frontend/releases
 
-## window.BM shell + agent surface (SPEC section 7, finished in L6)
+## Features
 
-Shell (player + headless): all safe to call from the bridge eval channel.
-Touch-first: every control is a real button/select/input (44px targets).
+### Play
 
-- start() - boot the cached pack (or test ROM headless), start the 60fps
-  rAF loop, unlock audio. Returns the engine frame.
-- stop() - halt the loop and free the worker. Returns -1.
-- reset() - fresh spawn (frame 0), presented. Keeps loop state.
-- pause(bool?) - suspend/resume stepping (worker parks, free).
-  No arg toggles. Returns the paused flag.
-- setPad(mask) / press(frames, mask) - agent writes on the same
-  virtual-pad bus the thumbs use (L5); press holds the mask while
-  stepping and returns the engine frame.
-- frame() - advance exactly one frame with the live bus mask (pause first).
-  Returns {frame, hash}.
-- screenshot() - present the latest engine frame, return canvas PNG data URL.
-- save(slot?) / load(slot?) - replay save/load in the IDB saves store
-  (L2: pad-log fast-forward, exact by determinism). Default slot is the
-  persisted shell pref. Slots survive page reload.
-- stats() - {ok, frames, errors, upMs, audio, running, paused,
-  engineFrame, fps, scale, filter, volume, muted, slot}.
-- L2/L3/L4/L5 debug surface (kept for regression): bootL2/runL2/stepL2/
-  resetL2/saveL2/loadL2/l2info, videoPresent/videoMode/videoResize/
-  videoFps/videoDigest/videoFullscreen, audioUnlock/audioVolume/
-  audioMute/audioStats/audioPush, setPad/press/busMask.
+- Full game: overhead tank areas + side-view dungeon areas, doors, bosses,
+  powerups, pause, game-over/continue flow — all executing as compiled
+  game code in WebAssembly.
+- Video: WebGL renderer, 256x240 guest framebuffer, CRT overscan view,
+  scale modes (integer / fit / fill / stretch), nearest/bilinear filter,
+  fullscreen. Includes the hardware-faithful 8-sprites-per-scanline limit.
+- Audio: live NES APU event stream rendered to WebAudio (no samples).
+- Input: keyboard, touch controls, and Bluetooth controllers (first-class).
+- Replays: pad-log recordings with fast-forward, save/load slots that
+  survive reload (IndexedDB), screenshots, headless self-test.
+- `window.BM` shell for scripting/debugging: start/stop/reset/pause,
+  frame-step, pad injection, stats, save/load, PWA helpers.
 
-Prefs (localStorage bm-prefs-v1, survive reload): scale
-(integer/fit/fill/stretch), filter (nearest/bilinear), volume, muted,
-slot. Shell status line shows fps | frame | audio | scale/filter | vol |
-slot | RUNNING/PAUSED/stopped. Log view keeps the last 200 lines.
+### Enhancements mode (optional, default off)
 
-## PWA packaging (installable app)
+An opt-in menu for quality-of-life features. The stock game is untouched
+when it is off.
 
-- manifest.webmanifest (name, short_name, standalone display, icons)
-  plus sw.js (versioned app-shell + runtime cache, ROM bytes never
-  cached) make the repo installable from any static HTTPS host
-  (localhost counts as secure for testing).
-- Icons in src/icons/ are original block art, no game assets.
-- index.html links the manifest, sets the theme color + Apple touch
-  icon, registers sw.js on load, and shows an Install button when the
-  browser fires beforeinstallprompt (window.BM.install() / pwa()
-  for headless).
-- tools/serve.js serves .webmanifest as application/manifest+json
-  and keeps COOP/COEP so SharedArrayBuffer stays available.
-- Headless proof: index.html?headless=1&test=pwa (manifest fetch +
-  MIME, all icons 200, SW registered + active, BM.pwa surface, zero
-  console errors); L6 suite + save/reload pair re-verified green on
-  desktop + phone after the change.
-- Updating: bump VERSION in sw.js with every shipped change so
-  installed clients pick it up. Offline: shell + cached engine load
-  without network; the ROM pack lives in IndexedDB and survives;
-  first launch and fresh engine builds need network once.
+- Entrance saves: save at area/dungeon doorways, reload any time.
+- No lives pressure: lives/continues counters frozen while saving is on.
+- In-game pause menu: Continue, Load, Settings, Quit-to-title.
+- HUD minimap + full-level map with fog-of-war, door ticks, breakable
+  markers, and legend.
+- Live settings sync (scale/filter/volume/mute) between shell and engine.
+- Entrance-save slots stored per pack, plus export/import.
 
-## Android APK (install and play)
+### Level and asset editor (hash route `#/editor`)
 
-- sh android/apk_build.sh builds android/release/BM-Web.apk
-  (debug-signed, installable): a WebView wrapper (dev.bmweb.frontend)
-  that serves the staged game straight out of the APK via shouldInterceptRequest (no sockets) with the same
-  COOP/COEP headers as tools/serve.js, so SharedArrayBuffer and
-  IndexedDB behave like the tested setup. Socket-free by necessity (device blocks ServerSocket with EPERM); the service worker stays off inside the app via hostname guard.
-- No permissions: no network (localhost only), no storage (in-app
-  file picker feeds your ROM straight to the pack builder).
-- Needs SDK platform android-36 (default work/android-sdk, gitignored)
-  plus build/game.wasm. Supply your own ROM again in-app on first
-  launch; the pack persists in the app.
+A full pack editor that rebuilds the game's data tables from your ROM:
+
+- Map: Pan/Brush/Eraser/Picker/Inspect tools, zoom to 64px per block,
+  undo/redo, live block/combo previews, hierarchy explainer.
+- Enemies: WYSIWYG sprite markers on the map (observed OAM pictures, not
+  guesses), drag-to-move, add/delete with budget + trap validation, AI
+  behavior labels, per-area stat tables (HP/damage).
+- CHR: sprite/background bank picker per level, tile pixels, palettes.
+- Sound: area-music table, song browser, song-slot remapping, per-site
+  jingle/request overrides (read-only where the engine bakes immediates).
+- Packs save as overlay patch sets; export any pack as a hardware- and
+  emulator-compatible `.ips` file for use outside the browser.
+
+### PWA + Android APK
+
+- `manifest.webmanifest` + `sw.js` (versioned app shell, ROM bytes never
+  cached) make the page installable from any static HTTPS host.
+- `sh android/apk_build.sh` builds `android/release/BM-Web.apk`
+  (debug-signed, installable): a WebView wrapper (`dev.bmweb.frontend`)
+  serving the staged game out of the APK with the same COOP/COEP headers
+  as the dev server. No permissions, no network, no storage permission —
+  supply the ROM once in-app and the pack persists there.
+
+## Build from source
+
+Prerequisites: `clang` with `wasm32-unknown-unknown` target, `wasm-ld`
+(or `lld`), `node` 20+, `python3`. APK only: Android SDK with platform
+`android-36` (default `work/android-sdk`, gitignored).
+
+    # 1. Pin the engine (must match ENGINE_PIN exactly)
+    git -C ../recomp checkout "$(cat ENGINE_PIN)"
+
+    # 2. Build the wasm engine (default -O3; ship profile uses O_LEVEL=-O0 + wasm-opt)
+    sh tools/build_game.sh
+    # needs: build/game.wasm
+
+    # 3. Serve locally (COOP/COEP kept so SharedArrayBuffer works)
+    node tools/serve.js
+    # open http://127.0.0.1:8901/index.html — supply your ROM in-page
+
+Useful variants:
+
+- `O_LEVEL=-O0 sh tools/build_game.sh` — fast debug build.
+- `sh android/apk_build.sh` — APK into `android/release/BM-Web.apk`.
+- Pushing `master` triggers `.github/workflows/pages.yml`: rebuilds the
+  wasm in the cloud and deploys the playable page to GitHub Pages.
+
+## Tests
+
+Headless suites live in `tools/verify-*.mjs` (38 files: pack tables,
+spawns, stats, doors, physics, behavior, maps, menus, saves, sound).
+Most need only node; gameplay suites need the reference ROM via the local
+dev server alias (see `tools/serve.js`, device-only path, never shipped):
+
+    node tools/verify-pack-p3.mjs        # one suite
+    node tools/test_game.mjs <rom> [K]   # engine determinism + replay roundtrip
+    sh work/battery.sh                   # full browser battery (device)
+
+A layer/suite is DONE only when its checks pass green; see `PLAN.md` and
+`PLAN-EDITOR.md` section 6.4 for the full acceptance record.
+
+## Repo layout
+
+- `index.html`, `sw.js`, `manifest.webmanifest` — player shell + PWA.
+- `src/core/bm_api.c` — the ONE engine adapter (owned here; the vendored
+  engine compiles unmodified behind it). `src/core/host.js` — browser host.
+- `src/rom/` — loader + header/CRC. `src/pack/` — pure data-table libs
+  (one concern per file: enemies, stats, physics, doors, behavior, sound,
+  songs, tiles, world, minimap, overlay, ips, store…).
+- `src/ui/` — shell, editor, enhancements panel, prefs, tweaks, PWA.
+- `src/video/`, `src/audio/`, `src/input/` — renderer, APU player, pad bus.
+- `tools/` — build (`build_game.sh`, `patch_vendor.py`, `patch_hook7.py`,
+  `patch_tailcalls.py`), dev server (`serve.js`), all verify suites.
+- `android/` — APK wrapper + build script. `.github/workflows/pages.yml`
+  — cloud build + Pages deploy.
+- `ENGINE_PIN` — pinned `bm-recomp` commit (frontend + engine tested as a
+  pair; never bump without a green battery).
+- `SPEC.md` — interface + non-negotiables. `PLAN.md` — bottom-up build
+  plan L0–L7. `PLAN-EDITOR.md` — editor/RE research log (canonical record).
+- `work/` — local only (SDK, logs, profiles), gitignored. No ROMs, packs,
+  or build outputs are ever committed (except the release APK, which is
+  tracked so releases can attach it).

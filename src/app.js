@@ -4,6 +4,7 @@ import { buildPack } from "./pack/builder.js";
 import { validatePack } from "./pack/reader.js";
 import { savePack, loadPack, wipeAll, loadRomId } from "./pack/store.js";
 import { applyOverlay, validateCustomPack, newCustomId, packIdOf, packCrcOf } from "./pack/overlay.js";
+import { buildIps } from "./pack/ips.js";
 import { saveCustomPack, loadCustomPack, deleteCustomPack, listCustomPackIds } from "./pack/store.js";
 const bootMs = Date.now();
 let frames = 0;
@@ -2005,6 +2006,34 @@ if (packSel) {
       await saveJsonWithDialog(doc, "bm-pack-" + prefs.pack + ".json");
       shellLog("pack exported: " + prefs.pack);
     } catch (e) { shellLog("pack export err " + String((e && e.message) || e).slice(0, 80)); }
+  });
+  const packIpsBtn = document.getElementById("packIpsBtn");
+  if (packIpsBtn) packIpsBtn.addEventListener("click", async () => {
+    try {
+      if (!prefs.pack || prefs.pack === "stock") { shellLog("ips export: stock has no changes (switch to a custom pack first)"); return; }
+      const doc = await loadCustomPack(prefs.pack);
+      if (!doc) { shellLog("ips export: active pack missing"); return; }
+      const v = validateCustomPack(doc);
+      if (!v.ok) { shellLog("ips export rejected: " + v.errors.join(" ")); return; }
+      if (!v.clean || v.clean.length === 0) { shellLog("ips export: pack has no ROM patches"); return; }
+      const r = buildIps(v.clean);
+      if (!r.ok) { shellLog("ips export err " + r.errors.join(" ")); return; }
+      const siteCount = (doc.sites && typeof doc.sites === "object") ? Object.keys(doc.sites).length : 0;
+      if (siteCount > 0) shellLog("ips note: " + siteCount + " song-override site(s) left out (wasm-only, not ROM bytes)");
+      const blob = new Blob([r.bytes], { type: "application/octet-stream" });
+      let durl = null;
+      try {
+        durl = await new Promise(function (res2) {
+          const fr = new FileReader();
+          fr.onload = function () { let x = null; try { x = String(fr.result || ""); } catch (ee) {} res2(x); };
+          fr.onerror = function () { res2(null); };
+          try { fr.readAsDataURL(blob); } catch (ee2) { res2(null); }
+        });
+      } catch (e) { durl = null; }
+      const dl = await saveBlobWithDialog(blob, durl, "bm-pack-" + prefs.pack + ".ips", "application/octet-stream");
+      if (dl.via === "cancelled") shellLog("ips export cancelled");
+      else shellLog("ips exported: " + prefs.pack + " (" + v.clean.length + " patches, " + r.bytes.length + "B)" + (dl.name ? " -> " + dl.name : ""));
+    } catch (e) { shellLog("ips export err " + String((e && e.message) || e).slice(0, 80)); }
   });
   if (packDelBtn) packDelBtn.addEventListener("click", async () => {
     try {

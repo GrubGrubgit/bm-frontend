@@ -142,7 +142,7 @@ ok('walk runs clean (both hit gameplay)', !RB.trap && !RA.trap && outB[900].cur 
     for (let y = 0; y < 240; y++) for (let x = 0; x < 256; x++) {
       const o = (y * 256 + x) * 4;
       if (a[o] !== b[o] || a[o + 1] !== b[o + 1] || a[o + 2] !== b[o + 2]) {
-        if (x >= 203 && x <= 252 && y >= 3 && y <= 36) nIn++;
+        if (x >= 195 && x <= 244 && y >= 9 && y <= 42) nIn++;
         else { nOut++; if (detail === '') detail = 'f' + f + ' x' + x + ' y' + y; }
       }
     }
@@ -151,7 +151,7 @@ ok('walk runs clean (both hit gameplay)', !RB.trap && !RA.trap && outB[900].cur 
   }
   ok('A/B diffs confined to minimap box + box differs', confined, detail + ' inside=' + inside);
 }
-const HX0 = 204, HY0 = 4, HBW = 48, HBH = 32;
+const HX0 = 196, HY0 = 10, HBW = 48, HBH = 32;
 const C_BG = [5, 5, 18], C_RM = [64, 128, 232], C_GOLD = [248, 184, 0], C_GR = [117, 117, 117];
 const C_W = [252, 252, 252], C_R = [248, 56, 56];
 // Room-grid semantics on the natural walk (f=900): fills track visits,
@@ -335,7 +335,7 @@ function expectedBox(F, lv, rows) {
       const o = (y * 256 + x) * 4;
       if (b[o] !== c[o] || b[o + 1] !== c[o + 1] || b[o + 2] !== c[o + 2]) {
         diffOnOff++;
-        if (x < 203 || x > 252 || y < 3 || y > 36) outRect = false;
+        if (x < 195 || x > 244 || y < 9 || y > 42) outRect = false;
       }
     }
   } else { sameOffA = false; }

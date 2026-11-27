@@ -734,8 +734,8 @@ static int ev5_scx, ev5_scy, ev5_r2000, ev5_r2001, ev5_chr0, ev5_chr1, ev5_mmc;
 // Doors come from the level door tables via map_build (shared with the
 // E8-M4 pause full-map, which keeps its thumbnail style). Gate: enhanced
 // && gameplay && no modal (E2/E3/E5); map_show toggle (E8-M5).
-#define MAP_X0 204
-#define MAP_Y0 4
+#define MAP_X0 196
+#define MAP_Y0 10
 #define MAP_CW 6
 #define MAP_CH 4
 #define MAP_FW 5

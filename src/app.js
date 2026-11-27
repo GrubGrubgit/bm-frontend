@@ -583,12 +583,12 @@ if (qs.has("headless")) {
 // ---- L5: one virtual-pad bus (SPEC section 6 src/input, section 7). ----
 // Four named sources (keyboard/touch/gamepad/agent) OR into a single NES
 // mask ($01=A $02=B $04=Select $08=Start $10=Up $20=Down $40=Left $80=Right)
-// Touch pad lives in-flow in #touchCtn below the video (toggle via Touch pad checkbox).
+// Touch pad is a fixed bottom overlay (toggle + size/opacity in Settings).
 // that every engine step reads. Thumb controls are a fixed bottom overlay
 // (L6 skins it); keyboard is dev convenience; gamepad uses the standard
 // mapping with stick deadzone; agent drives the same bus headless.
 import { PadBus } from "./input/bus.js";
-import { attachKeyboard } from "./input/keyboard.js";
+import { attachKeyboard, setKeymap, getKeymap, codesForMask, resetKeymap } from "./input/keyboard.js";
 import { mountTouch } from "./input/touch.js";
 import { pollGamepad, attachGamepad } from "./input/gamepad.js";
 import { AgentPad } from "./input/agent.js";
@@ -691,7 +691,7 @@ if (qs.has("headless")) {
 // load are L2 properties this layer reuses, never reimplements.
 import { autoTrapReport, autoFaultReport, manualBugReport, buildBugReport, formatTrapBanner } from "./ui/report.js";
 import { makeMovie, makeMovieV2, parseMovie, downloadMovie, downloadPng, replayMovie, downloadJson, sameEngineForAnchor, romGateVerdict } from "./input/movie.js";
-import { loadPrefs, savePrefs, pushPrefsToEngine, pullEngineToPrefs } from "./ui/prefs.js";
+import { loadPrefs, savePrefs, pushPrefsToEngine, pullEngineToPrefs, NES_BUTTONS, DEFAULT_KEYMAP, DEFAULT_PADMAP } from "./ui/prefs.js";
 import { wireInstall } from "./ui/pwa.js";
 import { makeLog, fmtStatus, toast, wirePadToasts } from "./ui/shell.js";
 import { buildTweaksPanel, applyTweaks } from "./ui/tweaks.js";
@@ -715,6 +715,7 @@ const loadBtn = document.getElementById("loadBtn");
 const shotBtn = document.getElementById("shotBtn");
 const scaleSel = document.getElementById("scaleSel");
 const filterSel = document.getElementById("filterSel");
+const factorSel = document.getElementById("scaleFactorSel");
 const fsBtn = document.getElementById("fsBtn");
 const volumeInput = document.getElementById("volumeInput");
 const muteBtn = document.getElementById("muteBtn");
@@ -722,10 +723,19 @@ const playCtn = document.getElementById("playCtn");
 slotSel.value = String(prefs.slot);
 scaleSel.value = prefs.scale;
 filterSel.value = prefs.filter;
+if (factorSel) factorSel.value = prefs.scaleFactor || "auto";
 volumeInput.value = String(Math.round(prefs.volume * 100));
 muteBtn.textContent = prefs.muted ? "Unmute" : "Mute";
 pauseBtn.textContent = "Pause";
 function fitCanvas() {
+  if (prefs.scale === "integer" && prefs.scaleFactor && prefs.scaleFactor !== "auto") {
+    const f = parseInt(prefs.scaleFactor, 10) || 0;
+    if (f >= 1 && f <= 4) {
+      ensureVideo();
+      video.resize(240 * f, 224 * f, Math.min(2, window.devicePixelRatio || 1));
+      return;
+    }
+  }
   const w = (playCtn && playCtn.clientWidth) || 512;
   const h = Math.round(w * 224 / 240);
   ensureVideo();
@@ -1751,6 +1761,10 @@ scaleSel.addEventListener("change", () => {
   prefs.scale = scaleSel.value; savePrefs(prefs); applyVideoPrefs(); pushSettingsToEngine();
   shellLog("scale " + prefs.scale);
 });
+if (factorSel) factorSel.addEventListener("change", () => {
+  prefs.scaleFactor = factorSel.value; savePrefs(prefs); applyVideoPrefs();
+  shellLog("scale size " + prefs.scaleFactor);
+});
 filterSel.addEventListener("change", () => {
   prefs.filter = filterSel.value; savePrefs(prefs); applyVideoPrefs(); pushSettingsToEngine();
   shellLog("filter " + prefs.filter);
@@ -1781,6 +1795,16 @@ swapABInput.checked = !!prefs.swapAB;
 swapXYInput.checked = !!prefs.swapXY;
 padFlags.swapAB = !!prefs.swapAB;
 padFlags.swapXY = !!prefs.swapXY;
+try { setKeymap(prefs.keymap); } catch (e) {}
+padFlags.map = prefs.padmap;
+try {
+  if (prefs.touch === false) { if (touchUI) { try { touchUI.unmount(); } catch (eU) {} } touchUI = null; }
+  else if (touchUI && (prefs.touchSize !== 1 || prefs.touchOpacity !== 1)) {
+    try { touchUI.unmount(); } catch (eU2) {}
+    touchUI = mountTouch(padBus, document.getElementById("touchCtn") || undefined, { size: prefs.touchSize, opacity: prefs.touchOpacity });
+  }
+  if (touchUI) { try { document.body.style.paddingBottom = Math.round(230 * (Number(prefs.touchSize) || 1)) + "px"; } catch (eP) {} }
+} catch (eT) {}
 if (!qs.has("headless") && prefs.engine === "mesen") { l2host = mesenHost; agentPad.host = l2host; }
 engineSel.addEventListener("change", () => {
   const want = engineSel.value === "mesen" ? "mesen" : "wasm";
@@ -2051,27 +2075,161 @@ if (packSel) {
   });
   refreshPackSel().catch(() => {});
 }
+function remountTouchPad() {
+  try { if (touchUI) touchUI.unmount(); } catch (e) {}
+  touchUI = null;
+  try { document.body.style.paddingBottom = ""; } catch (e2) {}
+  if (prefs.touch === false) return null;
+  try {
+    touchUI = mountTouch(padBus, document.getElementById("touchCtn") || undefined, { size: prefs.touchSize, opacity: prefs.touchOpacity });
+    try { document.body.style.paddingBottom = Math.round(230 * (Number(prefs.touchSize) || 1)) + "px"; } catch (e3) {}
+  } catch (e4) { shellLog("touch err " + String((e4 && e4.message) || e4).slice(0, 60)); }
+  return touchUI;
+}
 const touchInput = document.getElementById("touchInput");
 if (touchInput) {
   touchInput.checked = prefs.touch !== false;
-  if (prefs.touch === false && touchUI) { try { touchUI.unmount(); } catch (e) {} touchUI = null; }
   touchInput.addEventListener("change", () => {
     prefs.touch = !!touchInput.checked;
     savePrefs(prefs);
-    if (prefs.touch === false) {
-      try { if (touchUI) touchUI.unmount(); } catch (e) {}
-      touchUI = null;
-      shellLog("touch pad off");
-    } else {
-      if (!touchUI) { try { touchUI = mountTouch(padBus, document.getElementById("touchCtn") || undefined); } catch (e) { shellLog("touch err " + String((e && e.message) || e).slice(0, 60)); } }
-      shellLog("touch pad on");
-    }
+    remountTouchPad();
+    shellLog(prefs.touch === false ? "touch pad off" : "touch pad on");
   });
 }
 swapXYInput.addEventListener("change", () => {
   prefs.swapXY = !!swapXYInput.checked; padFlags.swapXY = prefs.swapXY; savePrefs(prefs);
   shellLog("swap X/Y " + (prefs.swapXY ? "on" : "off"));
 });
+// ---- Settings: touch size/opacity + keyboard/gamepad remap UI ----
+const touchSizeInput = document.getElementById("touchSizeInput");
+const touchOpacityInput = document.getElementById("touchOpacityInput");
+if (touchSizeInput) {
+  try { touchSizeInput.value = String(prefs.touchSize || 1); } catch (e) {}
+  touchSizeInput.addEventListener("input", () => {
+    prefs.touchSize = Math.max(0.5, Math.min(2, Number(touchSizeInput.value) || 1));
+    savePrefs(prefs); remountTouchPad();
+  });
+}
+if (touchOpacityInput) {
+  try { touchOpacityInput.value = String(prefs.touchOpacity == null ? 1 : prefs.touchOpacity); } catch (e) {}
+  touchOpacityInput.addEventListener("input", () => {
+    prefs.touchOpacity = Math.max(0.2, Math.min(1, Number(touchOpacityInput.value))); 
+    if (!isFinite(prefs.touchOpacity)) prefs.touchOpacity = 1;
+    savePrefs(prefs); remountTouchPad();
+  });
+}
+function shortKeyName(code) {
+  return String(code).replace(/^Key/, "").replace(/^Arrow/, "").replace(/^Digit/, "");
+}
+function buildKeyRemap() {
+  const ctn = document.getElementById("keyRemapCtn");
+  if (!ctn) return;
+  ctn.textContent = "";
+  const head = document.createElement("div");
+  head.innerHTML = "<b>Keyboard</b> (click remap, then press a key)";
+  ctn.appendChild(head);
+  for (const b of NES_BUTTONS) {
+    const row = document.createElement("div");
+    row.className = "shellRow";
+    row.style.justifyContent = "flex-start";
+    const lab = document.createElement("span");
+    lab.style.minWidth = "64px"; lab.textContent = b.label;
+    const cur = document.createElement("span");
+    cur.style.minWidth = "140px";
+    try { cur.textContent = codesForMask(b.mask).map(shortKeyName).join(" + ") || "(unbound)"; } catch (e) { cur.textContent = "(unbound)"; }
+    const btn = document.createElement("button"); btn.textContent = "remap";
+    btn.addEventListener("click", () => {
+      btn.textContent = "press key...";
+      const h = (e) => {
+        e.preventDefault();
+        try {
+          const km = getKeymap();
+          for (const k of Object.keys(km)) if (k === e.code) delete km[k];
+          km[e.code] = b.mask;
+          setKeymap(km); prefs.keymap = getKeymap(); savePrefs(prefs);
+          shellLog("key " + b.label + " = " + e.code);
+        } catch (err) {}
+        buildKeyRemap();
+      };
+      window.addEventListener("keydown", h, { once: true, capture: true });
+    });
+    row.appendChild(lab); row.appendChild(cur); row.appendChild(btn);
+    ctn.appendChild(row);
+  }
+  const rst = document.createElement("button"); rst.textContent = "reset keys";
+  rst.addEventListener("click", () => {
+    try { resetKeymap(); prefs.keymap = getKeymap(); savePrefs(prefs); shellLog("keys reset"); } catch (e) {}
+    buildKeyRemap();
+  });
+  ctn.appendChild(rst);
+}
+function scanPadButton(timeoutMs) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      try {
+        const gps = (navigator.getGamepads ? navigator.getGamepads() : []) || [];
+        for (const g of gps) {
+          if (!g || !g.buttons) continue;
+          for (let i = 0; i < g.buttons.length && i < 16; i++) {
+            if (g.buttons[i] && g.buttons[i].pressed) { clearInterval(iv); resolve(i); return; }
+          }
+        }
+      } catch (e) {}
+      if (Date.now() - t0 > (timeoutMs || 6000)) { clearInterval(iv); resolve(-1); }
+    }, 100);
+  });
+}
+function buildPadRemap() {
+  const ctn = document.getElementById("padRemapCtn");
+  if (!ctn) return;
+  ctn.textContent = "";
+  const head = document.createElement("div");
+  head.innerHTML = "<b>Gamepad</b> (click remap, then press a pad button)";
+  ctn.appendChild(head);
+  const cur = (padFlags.map && typeof padFlags.map === "object") ? padFlags.map : DEFAULT_PADMAP;
+  for (const b of NES_BUTTONS) {
+    const row = document.createElement("div");
+    row.className = "shellRow";
+    row.style.justifyContent = "flex-start";
+    const lab = document.createElement("span");
+    lab.style.minWidth = "64px"; lab.textContent = b.label;
+    const val = document.createElement("span");
+    val.style.minWidth = "140px";
+    const lst = cur[b.key];
+    val.textContent = (lst && lst.length) ? lst.join("+") : "(unbound)";
+    const btn = document.createElement("button"); btn.textContent = "remap";
+    btn.addEventListener("click", () => {
+      btn.textContent = "press button..."; btn.disabled = true;
+      scanPadButton(8000).then((idx) => {
+        btn.disabled = false;
+        try {
+          if (idx >= 0) {
+            const nm = JSON.parse(JSON.stringify(padFlags.map || DEFAULT_PADMAP));
+            nm[b.key] = [idx];
+            padFlags.map = nm; prefs.padmap = JSON.parse(JSON.stringify(nm)); savePrefs(prefs);
+            shellLog("pad " + b.label + " = button " + idx);
+          } else shellLog("pad remap timed out (no button pressed)");
+        } catch (e) {}
+        buildPadRemap();
+      });
+    });
+    row.appendChild(lab); row.appendChild(val); row.appendChild(btn);
+    ctn.appendChild(row);
+  }
+  const rst = document.createElement("button"); rst.textContent = "reset pad";
+  rst.addEventListener("click", () => {
+    try {
+      const d = JSON.parse(JSON.stringify(DEFAULT_PADMAP));
+      padFlags.map = d; prefs.padmap = JSON.parse(JSON.stringify(d)); savePrefs(prefs);
+      shellLog("pad map reset");
+    } catch (e) {}
+    buildPadRemap();
+  });
+  ctn.appendChild(rst);
+}
+buildKeyRemap();
+buildPadRemap();
 try {
   buildTweaksPanel({
     ram: () => (wasmHost.inst && wasmHost.inst.exports && wasmHost.inst.exports.bm_ram_wr) ? wasmHost.inst.exports : null,
@@ -2104,7 +2262,7 @@ setInterval(() => {
     else shellStatusEl.textContent = fmtStatus(window.BM.stats()) + " | " + (window.__bmWww || "") + " bridge:" + jb;
   } catch (e) {}
 }, 500);
-shellLog("shell ready: start/reset/pause + slots + volume + scale/filter/fullscreen");
+shellLog("shell ready: packs, editor, saves, movies, settings");
 try {
     (async function () {
       var urls = ["PACKAGING.json"];

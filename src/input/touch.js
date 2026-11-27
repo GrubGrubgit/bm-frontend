@@ -5,20 +5,28 @@
 // on one thumb while rolling the cross with the other) is one mask,
 // .pressed highlight on the held button, guarded vibrate on trusted
 // (real-thumb) gestures only. Sizes are vw-capped so the row always fits.
-export function mountTouch(bus, parent) {
+export function mountTouch(bus, parent, opts) {
+  opts = opts || {};
+  var tsize = Number(opts.size);
+  if (!isFinite(tsize)) tsize = 1;
+  tsize = Math.max(0.5, Math.min(2, tsize));
+  var topa = (opts.opacity == null) ? 1 : Number(opts.opacity);
+  if (!isFinite(topa)) topa = 1;
+  topa = Math.max(0.2, Math.min(1, topa));
+  var AL = function (base) { return (Math.round(base * topa * 100) / 100).toFixed(2); };
   const st = document.createElement("style");
   st.textContent = "#touchPad .tBtn.pressed{background:rgba(200,200,80,0.75);}";
   document.head.appendChild(st);
   const root = document.createElement("div");
   root.id = "touchPad";
-  root.style.cssText = "position:static;left:auto;right:auto;bottom:auto;z-index:auto;" +
+  root.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:60;" +
     "display:flex;justify-content:space-between;align-items:flex-end;" +
-    "gap:min(2vw,10px);padding:14px 6px 26px;margin-top:10px;" +
-    "background:#0a0a0a;border-top:1px solid #333;" +
+    "gap:min(2vw,10px);padding:14px 6px calc(26px + env(safe-area-inset-bottom, 0px));" +
+    "background:rgba(10,10,10," + AL(1) + ");border-top:1px solid #333;" +
     "pointer-events:none;touch-action:none;user-select:none;-webkit-user-select:none;";
-  const CELL = "min(15vw,60px)";
+  const CELL = "min(" + (15 * tsize) + "vw," + Math.round(60 * tsize) + "px)";
   const face = "pointer-events:auto;touch-action:none;box-sizing:border-box;" +
-    "border:2px solid rgba(200,200,210,0.6);background:rgba(60,60,70,0.55);" +
+    "border:2px solid rgba(200,200,210," + AL(0.6) + ");background:rgba(60,60,70," + AL(0.55) + ");" +
     "color:#eee;-webkit-tap-highlight-color:transparent;padding:0;";
   const mkBtn = (name, label, bit, css) => {
     const el = document.createElement("button");
@@ -48,7 +56,7 @@ export function mountTouch(bus, parent) {
   dirs.down = mkBtn("down", "\u25BC", 32, dbtn + "border-radius:0 0 12px 12px;");
   const pivot = document.createElement("div");
   pivot.style.cssText = "width:" + CELL + ";height:" + CELL + ";margin:-0.5px;position:relative;" +
-    "background:rgba(60,60,70,0.9);border:2px solid rgba(200,200,210,0.6);box-sizing:border-box;" +
+    "background:rgba(60,60,70," + AL(0.9) + ");border:2px solid rgba(200,200,210," + AL(0.6) + ");box-sizing:border-box;" +
     "pointer-events:auto;";
   const nub = document.createElement("div");
   nub.style.cssText = "position:absolute;left:50%;top:50%;width:36%;height:36%;" +
@@ -63,11 +71,11 @@ export function mountTouch(bus, parent) {
   mid.style.cssText = "display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;flex:none;";
   const right = document.createElement("div");
   right.style.cssText = "display:flex;gap:10px;align-items:flex-end;pointer-events:none;flex:none;";
-  const BTN = "min(17vw,74px)";
+  const BTN = "min(" + (17 * tsize) + "vw," + Math.round(74 * tsize) + "px)";
   const els = {};
   const defs = [
-    ["select", "SEL", 4, "width:min(13vw,54px);height:40px;border-radius:20px;font:bold 12px monospace;", mid],
-    ["start", "STA", 8, "width:min(13vw,54px);height:40px;border-radius:20px;font:bold 12px monospace;", mid],
+    ["select", "SEL", 4, "width:min(" + (13 * tsize) + "vw," + Math.round(54 * tsize) + "px);height:40px;border-radius:20px;font:bold 12px monospace;", mid],
+    ["start", "STA", 8, "width:min(" + (13 * tsize) + "vw," + Math.round(54 * tsize) + "px);height:40px;border-radius:20px;font:bold 12px monospace;", mid],
     ["b", "B", 2, "width:" + BTN + ";height:" + BTN + ";border-radius:50%;font:bold 22px monospace;", right],
     ["a", "A", 1, "width:" + BTN + ";height:" + BTN + ";border-radius:50%;font:bold 22px monospace;", right]
   ];

@@ -43,8 +43,24 @@ a{color:#8cf}
 <div id="statusEl">boot…</div>
 <div id="shellStatus">shell: stopped</div>
 <div id="padToast" hidden></div>
-<h3>Game (L6 shell)</h3>
-<p style="font-size:14px">Movie records automatically while you play - tap Movie↓ to save it. Reset restarts instantly. Start begins play (tap = audio unlock). Movie up-arrow loads a replay: R Play/Pause/Restart/Stop control it (pause keeps a savestate and hands you manual control, Record captures a new take).</p>
+<div class="shellRow">
+<label>pack <select id="packSel"><option value="stock">stock</option></select></label>
+<button id="editorBtn">Editor</button>
+<button id="packImportBtn">Import</button>
+<button id="packDelBtn">Delete</button>
+<input id="packInput" type="file" accept=".json,application/json" hidden>
+</div>
+<h3>ROM loader (L1)</h3>
+<button type="button" id="pickBtn" style="display:block;width:100%;background:#243;padding:16px;text-align:center;border:2px dashed #6c6;color:#eee;cursor:pointer">tap to pick ROM</button><input id="romInput" type="file" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" aria-hidden="true" tabindex="-1">
+<div id="dropEl" style="margin-top:8px;padding:24px;text-align:center;border:2px dashed #666">…or drop ROM here</div>
+<div style="margin-top:8px"><button id="wipeBtn" style="padding:12px;font-size:16px">wipe cache</button></div>
+<details><summary>Pack info</summary>
+<pre id="metaEl" style="white-space:pre-wrap;background:#222;padding:8px;min-height:60px">no ROM yet</pre>
+</details>
+<pre id="probeEl" style="white-space:pre-wrap;background:#111;color:#8f8;padding:8px;min-height:20px">probe: pending...</pre>
+<h3>Video (L3)</h3>
+<div id="playCtn"><canvas id="gameCanvas" width="512" height="480" style="width:512px;height:480px"></canvas></div>
+<div id="touchCtn"></div>
 <div id="shellGrid">
 <button id="startBtn">Start</button>
 <button id="resetBtn">Reset</button>
@@ -56,10 +72,18 @@ a{color:#8cf}
 <button id="saveBtn">Save</button>
 <button id="loadBtn">Load</button>
 <button id="shotBtn">Shot</button>
-<button id="movieBtn">Movie↓</button>
 <button id="reportBtn">Report</button>
 <button id="fileAccessBtn">Files</button>
 <button id="folderBtn">Folder</button>
+</div>
+<div class="shellRow">
+<button id="fsBtn">Fullscreen</button>
+<button id="installBtn" hidden>Install</button>
+</div>
+<details id="moviesCtn"><summary>Movies and replays</summary>
+<p style="font-size:14px">Movie records automatically while you play - tap Movie↓ to save it. Reset restarts instantly. Start begins play (tap = audio unlock). Movie up-arrow loads a replay: R Play/Pause/Restart/Stop control it (pause keeps a savestate and hands you manual control, Record captures a new take).</p>
+<div class="shellRow">
+<button id="movieBtn">Movie↓</button>
 <button id="movieLoadBtn">Movie↑</button>
 <input id="movieInput" type="file" accept=".json,application/json" hidden>
 </div>
@@ -70,32 +94,30 @@ a{color:#8cf}
 <button id="rStopBtn">R Stop</button>
 <button id="recBtn">Record</button>
 </div>
-<div class="shellRow">
-<label>scale <select id="scaleSel"><option value="integer">Integer</option><option value="fit">Fit</option><option value="fill">Fill</option><option value="stretch">Stretch</option></select></label>
-<label>filter <select id="filterSel"><option value="nearest">Nearest</option><option value="bilinear">Bilinear</option></select></label>
-<button id="fsBtn">Fullscreen</button>
-<button id="installBtn" hidden>Install</button>
-
-</div>
-<div class="shellRow">
+</details>
+<details id="settingsCtn"><summary>Settings</summary>
+<div class="shellRow"><b>Audio</b>
 <label>vol <input id="volumeInput" type="range" min="0" max="100" value="80" style="width:140px"></label>
 <button id="muteBtn">Mute</button>
 </div>
-<div class="shellRow">
+<div class="shellRow"><b>Video</b>
+<label>scale <select id="scaleSel"><option value="integer">Integer</option><option value="fit">Fit</option><option value="fill">Fill</option><option value="stretch">Stretch</option></select></label>
+<label>size <select id="scaleFactorSel"><option value="auto">Auto</option><option value="1">1x</option><option value="2">2x</option><option value="3">3x</option><option value="4">4x</option></select></label>
+<label>filter <select id="filterSel"><option value="nearest">Nearest</option><option value="bilinear">Bilinear</option></select></label>
+</div>
+<div class="shellRow"><b>Controls</b>
 <label>engine <select id="engineSel"><option value="wasm">WASM port</option><option value="mesen">Mesen (accurate)</option></select></label>
 <label><input id="swapABInput" type="checkbox"> Swap A/B</label>
 <label><input id="swapXYInput" type="checkbox"> Swap X/Y</label>
+</div>
+<div id="keyRemapCtn"></div>
+<div id="padRemapCtn"></div>
+<div class="shellRow"><b>Touch</b>
 <label><input id="touchInput" type="checkbox"> Touch pad</label>
+<label>size <input id="touchSizeInput" type="range" min="0.75" max="1.5" step="0.25" value="1"></label>
+<label>opacity <input id="touchOpacityInput" type="range" min="0.2" max="1" step="0.1" value="1"></label>
 </div>
-<div class="shellRow">
-<label>pack <select id="packSel"><option value="stock">stock</option></select></label>
-<button id="editorBtn">Editor</button>
-<button id="packImportBtn">Import</button>
-<button id="packExportBtn">Export</button>
-<button id="packIpsBtn" title="IPS patch for real hardware/emulators (song-override sites are wasm-only and left out)">IPS↓</button>
-<button id="packDelBtn">Delete</button>
-<input id="packInput" type="file" accept=".json,application/json" hidden>
-</div>
+</details>
 <pre id="logEl">log…</pre>
 <div id="editorCtn" hidden>
 <hr>
@@ -149,19 +171,8 @@ a{color:#8cf}
 <div style='overflow:auto;max-height:20vh;border:1px solid #444'><table id='edTankTbl' style='font-size:12px;margin:0 auto'></table></div>
 <div class="shellRow"><span>type stats (P3c bank-6 / P3d bank-4 HP-damage, global per type)</span><span id="edStatInfo"></span></div>
 <div style="overflow:auto;max-height:30vh;border:1px solid #444"><table id="edStatTbl" style="font-size:12px;margin:0 auto"></table></div>
-<div class="shellRow"><label>pack name <input id="edPackName" type="text" size="24" placeholder="my level edit"></label><button id="edSaveBtn">Save as pack</button><span id="edStatus"></span></div>
+<div class="shellRow"><label>pack name <input id="edPackName" type="text" size="24" placeholder="my level edit"></label><button id="edSaveBtn">Save as pack</button><button id="packExportBtn">Export</button><button id="packIpsBtn" title="IPS patch for real hardware/emulators (song-override sites are wasm-only and left out)">IPS↓</button><span id="edStatus"></span></div>
 </div>
-<hr>
-<h3>ROM loader (L1)</h3>
-<button type="button" id="pickBtn" style="display:block;width:100%;background:#243;padding:16px;text-align:center;border:2px dashed #6c6;color:#eee;cursor:pointer">tap to pick ROM</button><input id="romInput" type="file" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" aria-hidden="true" tabindex="-1">
-<div id="dropEl" style="margin-top:8px;padding:24px;text-align:center;border:2px dashed #666">…or drop ROM here</div>
-<div style="margin-top:8px"><button id="wipeBtn" style="padding:12px;font-size:16px">wipe cache</button></div>
-<pre id="metaEl" style="white-space:pre-wrap;background:#222;padding:8px;min-height:60px">no ROM yet</pre>
-<pre id="probeEl" style="white-space:pre-wrap;background:#111;color:#8f8;padding:8px;min-height:20px">probe: pending...</pre>
-<h3>Video (L3)</h3>
-<div id="playCtn"><canvas id="gameCanvas" width="512" height="480" style="width:512px;height:480px"></canvas></div>
-<div id="touchCtn"></div>
-<div style="height:48px"></div>
 <script>
 // In-app origins (WebView wrapper) must NEVER be SW-controlled: the wrapper
 // serves COOP/COEP/CORP itself, and a stale SW breaks cross-origin isolation.

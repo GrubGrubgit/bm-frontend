@@ -2,11 +2,26 @@
 // is dev convenience; touch/Bluetooth are first-class). Arrows + WASD for
 // the d-pad, X = A, Z = B, Enter = Start, either Shift = Select. Repeat
 // events are ignored; blur clears (no stuck keys); game keys never scroll.
-const KEYMAP = {
+const KEYMAP_DEFAULT = {
   ArrowUp: 0x10, ArrowDown: 0x20, ArrowLeft: 0x40, ArrowRight: 0x80,
   KeyW: 0x10, KeyS: 0x20, KeyA: 0x40, KeyD: 0x80,
   KeyX: 0x01, KeyZ: 0x02, Enter: 0x08, ShiftLeft: 0x04, ShiftRight: 0x04
 };
+const KEYMAP = Object.assign({}, KEYMAP_DEFAULT);
+export function getKeymap() { return Object.assign({}, KEYMAP); }
+export function setKeymap(obj) {
+  if (!obj || typeof obj !== "object") return getKeymap();
+  for (const k of Object.keys(KEYMAP)) delete KEYMAP[k];
+  for (const k of Object.keys(obj)) {
+    const m = obj[k] | 0;
+    if (typeof k === "string" && k && (m === 1 || m === 2 || m === 4 || m === 8 || m === 16 || m === 32 || m === 64 || m === 128)) KEYMAP[k] = m;
+  }
+  return getKeymap();
+}
+export function resetKeymap() { return setKeymap(KEYMAP_DEFAULT); }
+export function codesForMask(mask) {
+  return Object.keys(KEYMAP).filter(function (k) { return KEYMAP[k] === mask; });
+}
 export function attachKeyboard(bus) {
   const down = new Set();
   const recompute = () => {

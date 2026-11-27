@@ -123,7 +123,15 @@ const stock = buildPack(rom, "ref.nes").pack;
   ok("live d19 visible-as 7c", !!d19 && d19.tiles.length === 4 && d19.tiles[0].t === 0xd8);
   const d32 = actorSpriteFor(false, 32);
   ok("live d32 visible-as 91", !!d32 && d32.tiles.length === 12 && d32.tiles[0].t === 0xb6);
-  ok("live summary", liveSpriteSummary(true, 14).indexOf("$cf") >= 0 && liveSpriteSummary(true, 32).indexOf("invisible") >= 0 && liveSpriteSummary(false, 4).indexOf("unobserved") >= 0 && liveSpriteSummary(true, 70).indexOf("no actor") >= 0 && liveSpriteSummary(true, 10).indexOf("3c") >= 0 && liveSpriteSummary(false, 19).indexOf("7c") >= 0);
+  ok("live summary", liveSpriteSummary(true, 14).indexOf("$cf") >= 0 && liveSpriteSummary(true, 32).indexOf("invisible") >= 0 && liveSpriteSummary(true, 70).indexOf("no actor") >= 0 && liveSpriteSummary(true, 10).indexOf("3c") >= 0 && liveSpriteSummary(false, 19).indexOf("7c") >= 0);
+  const d5e = actorSpriteFor(false, 4);
+  ok("live d4 7spr c5d2", !!d5e && d5e.tiles.length === 7 && has(d5e, 0xc5) && has(d5e, 0xd2) && d5e.sub === 1 && d5e.w === 24 && d5e.h === 24);
+  const d10 = actorSpriteFor(false, 53);
+  ok("live d53 walker", !!d10 && d10.tiles.length === 6 && has(d10, 0x15) && has(d10, 0x40) && d10.sub === 0 && d10.w === 24);
+  const d03 = actorSpriteFor(false, 57);
+  ok("live d57 walker", !!d03 && d03.tiles.length === 6 && has(d03, 0x20) && has(d03, 0x50) && d03.sub === 0 && d03.h === 16);
+  ok("live t4-t53-t57 summary", liveSpriteSummary(false, 4).indexOf("$c5") >= 0 && liveSpriteSummary(false, 53).indexOf("$11") >= 0 && liveSpriteSummary(false, 57).indexOf("6spr") >= 0);
+  ok("live table complete", (() => { for (let t = 0; t < 128; t++) { if (actorFor(true, t) != null && actorSpriteFor(true, t) === undefined) return false; if (actorFor(false, t) != null && actorSpriteFor(false, t) === undefined) return false; } return true; })());
   ok("live actor ids", actorFor(true, 14) === 0x45 && actorFor(true, 33) === 0x23 && actorFor(false, 0) === 0x55 && actorFor(false, 33) === 0x35);
 }
 

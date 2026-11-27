@@ -240,6 +240,26 @@ export const ACTOR_SPRITES = {
   0x74: { tank: { sub: 0, w: 8, h: 16, tiles: [
     { t: 0x11, a: 0x0c, dx: 0, dy: 0 } ],
     note: 't48 splits: $5f swarm (c7/d7 core + c9/cb/d9/db) alongside' } },
+  0x03: { dun: { sub: 0, w: 24, h: 16, tiles: [
+    { t: 0x20, a: 0x40, dx: 0, dy: 0 }, { t: 0x10, a: 0x40, dx: 8, dy: 0 },
+    { t: 0x15, a: 0x40, dx: 16, dy: 0 }, { t: 0x30, a: 0x10, dx: 0, dy: 8 },
+    { t: 0x0c, a: 0x40, dx: 8, dy: 8 }, { t: 0x50, a: 0x10, dx: 16, dy: 8 } ],
+    note: 't57 walker; bottom-right cell alternates $50/$40 ~10f; X-flip variants seen (B/C/D instances); frames TBD' } },
+  0x10: { dun: { sub: 0, w: 24, h: 24, tiles: [
+    { t: 0x15, a: 0x00, dx: 0, dy: 7 }, { t: 0x10, a: 0x00, dx: 8, dy: 7 },
+    { t: 0x20, a: 0x10, dx: 16, dy: 7 }, { t: 0x30, a: 0x10, dx: 0, dy: 16 },
+    { t: 0x0c, a: 0x00, dx: 8, dy: 15 }, { t: 0x40, a: 0x10, dx: 16, dy: 16 } ],
+    note: 't53 walker (frame B $50; same 3x2 component as $03); bottom-right alternates $50/$40 ~10f; bottom-left attr flips $10/$50; flip variant {50,0c,30}; static behind-BG 3x3 $19 block (attrs $20/$30, invisible on HW) excluded; converts $10->$11 ~f980; head roams -1px/f from spawn (dy7/dy15 = screen rounding)' } },
+  0x03: { dun: { sub: 0, w: 24, h: 16, tiles: [
+    { t: 0x20, a: 0x40, dx: 0, dy: 0 }, { t: 0x10, a: 0x40, dx: 8, dy: 0 },
+    { t: 0x15, a: 0x40, dx: 16, dy: 0 }, { t: 0x30, a: 0x10, dx: 0, dy: 8 },
+    { t: 0x0c, a: 0x40, dx: 8, dy: 8 }, { t: 0x50, a: 0x10, dx: 16, dy: 8 } ],
+    note: 't57 walker; bottom-right cell alternates $50/$40 ~10f; X-flip variants seen (B/C/D instances); frames TBD' } },
+  0x10: { dun: { sub: 0, w: 24, h: 24, tiles: [
+    { t: 0x15, a: 0x00, dx: 0, dy: 7 }, { t: 0x10, a: 0x00, dx: 8, dy: 7 },
+    { t: 0x20, a: 0x10, dx: 16, dy: 7 }, { t: 0x30, a: 0x10, dx: 0, dy: 16 },
+    { t: 0x0c, a: 0x00, dx: 8, dy: 15 }, { t: 0x40, a: 0x10, dx: 16, dy: 16 } ],
+    note: 't53 walker (frame B $50; same 3x2 component as $03); bottom-right alternates $50/$40 ~10f; bottom-left attr flips $10/$50; flip variant {50,0c,30}; static behind-BG 3x3 $19 block (attrs $20/$30, invisible on HW) excluded; converts $10->$11 ~f980; head roams -1px/f from spawn (dy7/dy15 = screen rounding)' } },
   0x55: { dun: { sub: 1, w: 16, h: 8, tiles: [
     { t: 0xd2, a: 0x5d, dx: 0, dy: 0 }, { t: 0xc2, a: 0x5d, dx: 8, dy: 0 } ],
     note: 'frame $c2/$d2; also $c0/$d0' } },
@@ -254,6 +274,18 @@ export const ACTOR_SPRITES = {
     { t: 0xcc, a: 0x0c, dx: 8, dy: 8 }, { t: 0xda, a: 0x0c, dx: 16, dy: 8 },
     { t: 0xdc, a: 0x0c, dx: 24, dy: 8 }, { t: 0xea, a: 0x0c, dx: 32, dy: 8 } ],
     note: 'frame corners $c1/$d1/$c2/$d2; record also spawns $63 pairs' } },
+  0x5e: { dun: { sub: 1, w: 24, h: 24, tiles: [
+    { t: 0xc5, a: 0x11, dx: 0, dy: 8 },
+    { t: 0xc0, a: 0x0d, dx: 8, dy: 0 }, { t: 0xc1, a: 0x0d, dx: 8, dy: 8 },
+    { t: 0xc2, a: 0x0d, dx: 8, dy: 16 }, { t: 0xd0, a: 0x0d, dx: 16, dy: 0 },
+    { t: 0xd1, a: 0x0d, dx: 16, dy: 8 }, { t: 0xd2, a: 0x0d, dx: 16, dy: 16 } ],
+    note: 't4 (B6 native 12 recs) + converts to $02; X-flip variant d-col left c5 right (B6 attrs $4d/$51)' } },
+  0x5e: { dun: { sub: 1, w: 24, h: 24, tiles: [
+    { t: 0xc5, a: 0x11, dx: 0, dy: 8 },
+    { t: 0xc0, a: 0x0d, dx: 8, dy: 0 }, { t: 0xc1, a: 0x0d, dx: 8, dy: 8 },
+    { t: 0xc2, a: 0x0d, dx: 8, dy: 16 }, { t: 0xd0, a: 0x0d, dx: 16, dy: 0 },
+    { t: 0xd1, a: 0x0d, dx: 16, dy: 8 }, { t: 0xd2, a: 0x0d, dx: 16, dy: 16 } ],
+    note: 't4 (B6 native 12 recs) + converts to $02; X-flip variant d-col left c5 right (B6 attrs $4d/$51)' } },
   0x60: { dun: { sub: 1, w: 16, h: 24, tiles: [
     { t: 0xab, a: 0x0d, dx: 0, dy: 0 }, { t: 0xbb, a: 0x0d, dx: 8, dy: 0 },
     { t: 0xac, a: 0x0d, dx: 0, dy: 8 }, { t: 0xbc, a: 0x0d, dx: 8, dy: 8 },

@@ -141,45 +141,208 @@ export function spriteFor(type) {
 // BG bank); dungeon entries are 8x8 from sprite chr0. Probes:
 // probe-oam.mjs (stock drive) + probe-sweep.mjs + probe-sweep2.mjs
 // (cooked all-same-type packs, still + drive, all dynamics x2).
+// Live OAM-observed actor sprites (PROVEN headless 2026-11-27 + 2026-11-28 sweep).
+// Staged SPR_A/SPR_B bytes (CA89 slot-fill into $0150) are spawn-time only --
+// behaviors overwrite OAM every frame (tank $45 staged $44 but shows $4c+$ad-$cf;
+// dungeon $55 staged $54 but shows $c2/$d2; live subpalettes mostly 1-2, some 0).
+// Markers MUST use this table. Key = actor id; value = per-mode spec ({tank,
+// dun} -- same id can look different per mode: $27 tank pair+$4c vs dun 2x2;
+// $63 tank boss pair sub2 vs dun c1/d1 pairs sub1; $4f tank $4e single vs dun
+// invisible). Missing key = live appearance UNOBSERVED (marker shows an honest
+// dot); explicit null = proven to emit no OAM in that mode (honest dot + note).
+// tiles[] = widest observed frame; a = OAM attr (provenance; the marker renders
+// with spec.sub); dx/dy = px offsets from the cluster min; w/h = composite px
+// (tank 8x16: each OAM tile renders a pair, so OAM-row dy step 16, h = maxDy+16;
+// dun 8x8: dy step 8, h = maxDy+8). Probes: probe-oam (stock drive) +
+// probe-sweep/sweep2 (cooked still+drive, all dynamics x2) + sweep-ovh/dun/ext
+// (cooked same-type per unobserved actor, still+drive to f2300, native-area
+// re-probes for area-gated t23/t19/t20) -- OAM via bm_oam_ptr, slots via $0400.
 export const ACTOR_SPRITES = {
-  0x23: { mode: 'tank', sub: 1, w: 16, h: 16, tiles: [
-    { t: 0x80, a: 0x01, dx: 0, dy: 0 }, { t: 0x90, a: 0x01, dx: 8, dy: 0 } ] },
-  0x31: { mode: 'tank', sub: 1, w: 16, h: 16, tiles: [
+  0x02: { tank: null,
+    dun: { sub: 1, w: 16, h: 16, tiles: [
+      { t: 0xf9, a: 0x8d, dx: 0, dy: 0 }, { t: 0xe9, a: 0x8d, dx: 8, dy: 0 },
+      { t: 0xfb, a: 0x9d, dx: 0, dy: 8 }, { t: 0xeb, a: 0x9d, dx: 8, dy: 8 } ],
+      note: 'shared with $59 frame B; state-dependent' } },
+  0x23: { tank: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0x80, a: 0x01, dx: 0, dy: 0 }, { t: 0x90, a: 0x01, dx: 8, dy: 0 } ] } },
+  0x27: { tank: { sub: 1, w: 16, h: 34, tiles: [
+    { t: 0xb7, a: 0x5d, dx: 0, dy: 0 }, { t: 0xa7, a: 0x5d, dx: 8, dy: 0 },
+    { t: 0x4c, a: 0x01, dx: 4, dy: 18 } ],
+    note: 'trailer $4c ~18px below the pair' },
+    dun: { sub: 1, w: 16, h: 16, tiles: [
+      { t: 0x8e, a: 0x01, dx: 0, dy: 0 }, { t: 0x9e, a: 0x01, dx: 8, dy: 0 },
+      { t: 0x8f, a: 0x01, dx: 0, dy: 8 }, { t: 0x9f, a: 0x01, dx: 8, dy: 8 } ] } },
+  0x29: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0x8e, a: 0x01, dx: 0, dy: 0 }, { t: 0x9e, a: 0x01, dx: 8, dy: 0 },
+    { t: 0x8f, a: 0x01, dx: 0, dy: 8 }, { t: 0x9f, a: 0x01, dx: 8, dy: 8 } ] } },
+  0x2a: { tank: { sub: 2, w: 24, h: 32, tiles: [
+    { t: 0xe5, a: 0x02, dx: 0, dy: 0 }, { t: 0xd5, a: 0x02, dx: 8, dy: 0 },
+    { t: 0xe5, a: 0x42, dx: 16, dy: 0 }, { t: 0xe7, a: 0x1e, dx: 0, dy: 16 },
+    { t: 0xf7, a: 0x1e, dx: 8, dy: 16 }, { t: 0xe7, a: 0x5e, dx: 16, dy: 16 } ],
+    note: '3x2; spawns $4d children (single $4e, no marker)' } },
+  0x31: { tank: { sub: 1, w: 16, h: 16, tiles: [
     { t: 0xc7, a: 0x1d, dx: 0, dy: 0 }, { t: 0xd7, a: 0x1d, dx: 8, dy: 0 } ],
-    note: 'frame A; frame B is $c5/$d5' },
-  0x45: { mode: 'tank', sub: 1, w: 24, h: 59, tiles: [
+    note: 'frame A; frame B is $c5/$d5' } },
+  0x33: { tank: null },
+  0x38: { tank: { sub: 1, w: 24, h: 32, tiles: [
+    { t: 0xe9, a: 0x01, dx: 0, dy: 0 }, { t: 0xd9, a: 0x01, dx: 8, dy: 0 },
+    { t: 0xe9, a: 0x41, dx: 16, dy: 0 }, { t: 0xeb, a: 0x1d, dx: 0, dy: 16 },
+    { t: 0xfb, a: 0x1d, dx: 8, dy: 16 }, { t: 0xeb, a: 0x5d, dx: 16, dy: 16 } ],
+    note: 'frame B top-mid $f9; spawns $4f children (single $4e)' } },
+  0x3a: { tank: { sub: 1, w: 24, h: 32, tiles: [
+    { t: 0xc9, a: 0x4d, dx: 0, dy: 0 }, { t: 0xd9, a: 0x0d, dx: 8, dy: 0 },
+    { t: 0xc9, a: 0x0d, dx: 16, dy: 0 }, { t: 0xcb, a: 0x5d, dx: 0, dy: 16 },
+    { t: 0xdb, a: 0x1d, dx: 8, dy: 16 }, { t: 0xcb, a: 0x1d, dx: 16, dy: 16 } ],
+    note: 'frame B $a9/$b9/$ab/$bb; spawns $51 children (single $4e)' } },
+  0x3c: { tank: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xa7, a: 0x9d, dx: 0, dy: 0 }, { t: 0xb7, a: 0x9d, dx: 8, dy: 0 } ],
+    note: 'frame B $a5/$b5; shown for t10 ($02 slots stay dark)' } },
+  0x3e: { tank: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xa7, a: 0x9d, dx: 0, dy: 0 }, { t: 0xb7, a: 0x9d, dx: 8, dy: 0 } ],
+    note: 'frame B $a5/$b5' } },
+  0x40: { tank: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xa3, a: 0x01, dx: 0, dy: 0 }, { t: 0xc3, a: 0x11, dx: 8, dy: 0 } ] } },
+  0x42: { tank: { sub: 1, w: 24, h: 32, tiles: [
+    { t: 0xa9, a: 0x01, dx: 0, dy: 0 }, { t: 0xc9, a: 0x01, dx: 8, dy: 0 },
+    { t: 0xa9, a: 0x41, dx: 16, dy: 0 }, { t: 0xab, a: 0x1d, dx: 0, dy: 16 },
+    { t: 0xbb, a: 0x1d, dx: 8, dy: 16 }, { t: 0xab, a: 0x5d, dx: 16, dy: 16 } ] } },
+  0x45: { tank: { sub: 1, w: 24, h: 59, tiles: [
     { t: 0xad, a: 0x1d, dx: 0, dy: 0 }, { t: 0xbd, a: 0x1d, dx: 8, dy: 0 },
     { t: 0xcd, a: 0x1d, dx: 16, dy: 0 }, { t: 0xaf, a: 0x1d, dx: 0, dy: 16 },
     { t: 0xbf, a: 0x1d, dx: 8, dy: 16 }, { t: 0xcf, a: 0x1d, dx: 16, dy: 16 },
     { t: 0x4c, a: 0x01, dx: 8, dy: 43 } ],
-    note: 'frame B; frame A is $dd-$ff; $4c trails 19-43px below the body' },
-  0x5b: null,
-  0x63: { mode: 'tank', sub: 2, w: 16, h: 16, tiles: [
+    note: 'frame B; frame A is $dd-$ff; $4c trails 19-43px below the body' } },
+  0x47: { tank: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xc7, a: 0x1c, dx: 0, dy: 0 }, { t: 0xd7, a: 0x1c, dx: 8, dy: 0 } ],
+    note: 'frame B $c5/$d5' } },
+  0x4f: { tank: { sub: 0, w: 8, h: 16, tiles: [
+    { t: 0x4e, a: 0x00, dx: 0, dy: 0 } ],
+    note: 'transient single; gone by f1150' },
+    dun: null },
+  0x5b: { tank: null },
+  0x5d: { tank: null },
+  0x63: { tank: { sub: 2, w: 16, h: 16, tiles: [
     { t: 0xa7, a: 0x02, dx: 0, dy: 0 }, { t: 0xb7, a: 0x02, dx: 8, dy: 0 } ],
     note: 'boss: 11 such pairs spread wide; marker shows one' },
-  0x55: { mode: 'dun', sub: 1, w: 16, h: 8, tiles: [
+    dun: { sub: 1, w: 16, h: 8, tiles: [
+      { t: 0xc1, a: 0x1c, dx: 0, dy: 0 }, { t: 0xd1, a: 0x1c, dx: 8, dy: 0 } ],
+      note: 'alt pair $c0/$d0; 3 slots per record' } },
+  0x6a: { tank: { sub: 1, w: 24, h: 16, tiles: [
+    { t: 0xa1, a: 0x01, dx: 0, dy: 0 }, { t: 0xb1, a: 0x01, dx: 8, dy: 0 },
+    { t: 0xc1, a: 0x01, dx: 16, dy: 0 } ] } },
+  0x6c: { tank: { sub: 2, w: 8, h: 16, tiles: [
+    { t: 0x7d, a: 0x02, dx: 0, dy: 0 } ] } },
+  0x70: { tank: { sub: 2, w: 16, h: 32, tiles: [
+    { t: 0xcd, a: 0x02, dx: 0, dy: 0 }, { t: 0xdd, a: 0x02, dx: 8, dy: 0 },
+    { t: 0x6f, a: 0x02, dx: 0, dy: 16 }, { t: 0x7f, a: 0x02, dx: 8, dy: 16 } ] } },
+  0x72: { tank: { sub: 2, w: 16, h: 16, tiles: [
+    { t: 0xe7, a: 0x02, dx: 0, dy: 0 }, { t: 0xf7, a: 0x02, dx: 8, dy: 0 } ] } },
+  0x74: { tank: { sub: 0, w: 8, h: 16, tiles: [
+    { t: 0x11, a: 0x0c, dx: 0, dy: 0 } ],
+    note: 't48 splits: $5f swarm (c7/d7 core + c9/cb/d9/db) alongside' } },
+  0x55: { dun: { sub: 1, w: 16, h: 8, tiles: [
     { t: 0xd2, a: 0x5d, dx: 0, dy: 0 }, { t: 0xc2, a: 0x5d, dx: 8, dy: 0 } ],
-    note: 'frame $c2/$d2; also $c0/$d0' },
-  0x59: { mode: 'dun', sub: 1, w: 16, h: 16, tiles: [
+    note: 'frame $c2/$d2; also $c0/$d0' } },
+  0x59: { dun: { sub: 1, w: 16, h: 16, tiles: [
     { t: 0xee, a: 0x81, dx: 0, dy: 0 }, { t: 0xfc, a: 0x81, dx: 8, dy: 0 },
     { t: 0xef, a: 0x81, dx: 0, dy: 8 }, { t: 0xfd, a: 0x91, dx: 8, dy: 8 } ],
-    note: 'frame A; frame B is $e9/$f9/$eb/$fb' },
-  0x02: { mode: 'dun', sub: 1, w: 16, h: 16, tiles: [
-    { t: 0xf9, a: 0x8d, dx: 0, dy: 0 }, { t: 0xe9, a: 0x8d, dx: 8, dy: 0 },
-    { t: 0xfb, a: 0x9d, dx: 0, dy: 8 }, { t: 0xeb, a: 0x9d, dx: 8, dy: 8 } ],
-    note: 'shared with $59 frame B; state-dependent' },
-  0x60: { mode: 'dun', sub: 1, w: 16, h: 24, tiles: [
+    note: 'frame A; frame B is $e9/$f9/$eb/$fb' } },
+  0x5c: { dun: { sub: 0, w: 40, h: 16, tiles: [
+    { t: 0xc9, a: 0x0c, dx: 0, dy: 0 }, { t: 0xcb, a: 0x0c, dx: 8, dy: 0 },
+    { t: 0xd9, a: 0x0c, dx: 16, dy: 0 }, { t: 0xdb, a: 0x0c, dx: 24, dy: 0 },
+    { t: 0xe9, a: 0x0c, dx: 32, dy: 0 }, { t: 0xca, a: 0x0c, dx: 0, dy: 8 },
+    { t: 0xcc, a: 0x0c, dx: 8, dy: 8 }, { t: 0xda, a: 0x0c, dx: 16, dy: 8 },
+    { t: 0xdc, a: 0x0c, dx: 24, dy: 8 }, { t: 0xea, a: 0x0c, dx: 32, dy: 8 } ],
+    note: 'frame corners $c1/$d1/$c2/$d2; record also spawns $63 pairs' } },
+  0x60: { dun: { sub: 1, w: 16, h: 24, tiles: [
     { t: 0xab, a: 0x0d, dx: 0, dy: 0 }, { t: 0xbb, a: 0x0d, dx: 8, dy: 0 },
     { t: 0xac, a: 0x0d, dx: 0, dy: 8 }, { t: 0xbc, a: 0x0d, dx: 8, dy: 8 },
-    { t: 0xae, a: 0x1d, dx: 0, dy: 16 }, { t: 0xbe, a: 0x1d, dx: 8, dy: 16 } ] },
-  0x35: { mode: 'dun', sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xae, a: 0x1d, dx: 0, dy: 16 }, { t: 0xbe, a: 0x1d, dx: 8, dy: 16 } ] } },
+  0x65: { dun: { sub: 1, w: 16, h: 8, tiles: [
+    { t: 0xc9, a: 0x5d, dx: 0, dy: 0 }, { t: 0xd9, a: 0x5d, dx: 8, dy: 0 } ] } },
+  0x67: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xe2, a: 0x8d, dx: 0, dy: 0 }, { t: 0xf2, a: 0x8d, dx: 8, dy: 0 },
+    { t: 0xe0, a: 0x8d, dx: 0, dy: 8 }, { t: 0xf0, a: 0x8d, dx: 8, dy: 8 } ],
+    note: 'frame B $e1/$f1; spawns $4b 2x2 ($35-$38, sub0)' } },
+  0x6b: { dun: { sub: 1, w: 24, h: 16, tiles: [
+    { t: 0xc5, a: 0x0d, dx: 0, dy: 0 }, { t: 0xd5, a: 0x0d, dx: 8, dy: 0 },
+    { t: 0xe5, a: 0x0d, dx: 16, dy: 0 }, { t: 0xc6, a: 0x1d, dx: 0, dy: 8 },
+    { t: 0xd6, a: 0x1d, dx: 8, dy: 8 }, { t: 0xe6, a: 0x1d, dx: 16, dy: 8 } ],
+    note: 'converts to $02' } },
+  0x6d: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xa4, a: 0x0d, dx: 0, dy: 0 }, { t: 0xb4, a: 0x0d, dx: 8, dy: 0 },
+    { t: 0xa5, a: 0x1d, dx: 0, dy: 8 }, { t: 0xb5, a: 0x1d, dx: 8, dy: 8 } ] } },
+  0x6f: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xa8, a: 0x4d, dx: 0, dy: 0 }, { t: 0xb8, a: 0x4d, dx: 8, dy: 0 },
+    { t: 0xaa, a: 0x41, dx: 0, dy: 8 }, { t: 0xb9, a: 0x51, dx: 8, dy: 8 } ],
+    note: 'alt corner $ba; converts to $02' } },
+  0x71: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xc3, a: 0x0d, dx: 0, dy: 0 }, { t: 0xd3, a: 0x0d, dx: 8, dy: 0 },
+    { t: 0xc4, a: 0x1d, dx: 0, dy: 8 }, { t: 0xd4, a: 0x1d, dx: 8, dy: 8 } ],
+    note: 'alt top-right $e4; converts to $02' } },
+  0x73: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xa2, a: 0x9d, dx: 0, dy: 0 }, { t: 0xb2, a: 0x9d, dx: 8, dy: 0 },
+    { t: 0xa2, a: 0x0d, dx: 0, dy: 8 }, { t: 0xb2, a: 0x0d, dx: 8, dy: 8 } ],
+    note: 'converts to $02' } },
+  0x77: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xa8, a: 0x4d, dx: 0, dy: 0 }, { t: 0xb8, a: 0x4d, dx: 8, dy: 0 },
+    { t: 0xa9, a: 0x5d, dx: 0, dy: 8 }, { t: 0xb9, a: 0x5d, dx: 8, dy: 8 } ],
+    note: 'converts to $02' } },
+  0x79: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xa0, a: 0x4d, dx: 0, dy: 0 }, { t: 0xb0, a: 0x4d, dx: 8, dy: 0 },
+    { t: 0xa0, a: 0xdd, dx: 0, dy: 8 }, { t: 0xb0, a: 0xdd, dx: 8, dy: 8 } ],
+    note: 'converts to $02' } },
+  0x7b: { dun: { sub: 1, w: 16, h: 24, tiles: [
+    { t: 0xab, a: 0x0d, dx: 0, dy: 0 }, { t: 0xbb, a: 0x0d, dx: 8, dy: 0 },
+    { t: 0xac, a: 0x0d, dx: 0, dy: 8 }, { t: 0xbc, a: 0x0d, dx: 8, dy: 8 },
+    { t: 0xad, a: 0x1d, dx: 0, dy: 16 }, { t: 0xbd, a: 0x1d, dx: 8, dy: 16 } ],
+    note: 'converts to $02' } },
+  0x7c: { dun: { sub: 0, w: 16, h: 16, tiles: [
+    { t: 0xd8, a: 0x0c, dx: 0, dy: 0 }, { t: 0xc8, a: 0x0c, dx: 8, dy: 0 },
+    { t: 0xd7, a: 0x0c, dx: 0, dy: 8 }, { t: 0xc7, a: 0x0c, dx: 8, dy: 8 } ],
+    note: 't19 child: shown as the t19 marker (record $4f has no OAM)' } },
+  0x7d: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xd8, a: 0xdd, dx: 0, dy: 0 }, { t: 0xc8, a: 0xdd, dx: 8, dy: 0 },
+    { t: 0xd7, a: 0xdd, dx: 0, dy: 8 }, { t: 0xc7, a: 0xdd, dx: 8, dy: 8 } ],
+    note: 't20 child: shown as the t20 marker (record $51 has no OAM)' } },
+  0x81: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xf6, a: 0x5d, dx: 0, dy: 0 }, { t: 0xe6, a: 0x5d, dx: 8, dy: 0 },
+    { t: 0xf7, a: 0x5d, dx: 0, dy: 8 }, { t: 0xe7, a: 0x5d, dx: 8, dy: 8 } ],
+    note: 'frame B $e4/$e5/$f4/$f5; converts to $02' } },
+  0x83: { dun: { sub: 1, w: 16, h: 8, tiles: [
+    { t: 0xc6, a: 0x41, dx: 0, dy: 0 }, { t: 0xd6, a: 0x51, dx: 8, dy: 0 } ],
+    note: 'alt right $d5; area-8 dormant, area-12 native' } },
+  0x86: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xe4, a: 0x1d, dx: 0, dy: 0 }, { t: 0xf4, a: 0x1d, dx: 8, dy: 0 },
+    { t: 0xe5, a: 0x1d, dx: 0, dy: 8 }, { t: 0xf5, a: 0x1d, dx: 8, dy: 8 } ],
+    note: 'frame B $e0/$e1/$f0/$f1; converts to $02' } },
+  0x89: { dun: { sub: 1, w: 24, h: 16, tiles: [
+    { t: 0xeb, a: 0x01, dx: 0, dy: 0 }, { t: 0xfb, a: 0x01, dx: 8, dy: 0 },
+    { t: 0xed, a: 0x11, dx: 16, dy: 0 }, { t: 0xec, a: 0x01, dx: 0, dy: 8 },
+    { t: 0xfc, a: 0x01, dx: 8, dy: 8 }, { t: 0xee, a: 0x01, dx: 16, dy: 8 } ],
+    note: 'converts to $02' } },
+  0x8b: { dun: { sub: 1, w: 16, h: 16, tiles: [
+    { t: 0xbc, a: 0x4d, dx: 0, dy: 0 }, { t: 0xac, a: 0x4d, dx: 8, dy: 0 },
+    { t: 0xbe, a: 0x5d, dx: 0, dy: 8 }, { t: 0xae, a: 0x5d, dx: 8, dy: 8 } ],
+    note: 'frame B bottom $af/$bf; converts to $02' } },
+  0x8e: { dun: { sub: 0, w: 16, h: 16, tiles: [
+    { t: 0xe9, a: 0x0c, dx: 0, dy: 0 }, { t: 0xf9, a: 0x0c, dx: 8, dy: 0 },
+    { t: 0xeb, a: 0x1c, dx: 0, dy: 8 }, { t: 0xfb, a: 0x1c, dx: 8, dy: 8 } ],
+    note: 'alt form $ee/$fc/$ef/$fd; brief $8f pre-form; converts to $02' } },
+  0x91: { dun: { sub: 2, w: 16, h: 48, tiles: [
+    { t: 0xb6, a: 0x42, dx: 0, dy: 0 }, { t: 0xc6, a: 0x42, dx: 8, dy: 0 },
+    { t: 0xb7, a: 0x42, dx: 0, dy: 8 }, { t: 0xc7, a: 0x42, dx: 8, dy: 8 },
+    { t: 0xb8, a: 0x42, dx: 0, dy: 16 }, { t: 0xc8, a: 0x42, dx: 8, dy: 16 },
+    { t: 0xb9, a: 0x42, dx: 0, dy: 24 }, { t: 0xc9, a: 0x42, dx: 8, dy: 24 },
+    { t: 0xbc, a: 0x42, dx: 0, dy: 32 }, { t: 0xcc, a: 0x42, dx: 8, dy: 32 },
+    { t: 0xbd, a: 0x42, dx: 0, dy: 40 }, { t: 0xcd, a: 0x42, dx: 8, dy: 40 } ],
+    note: 't32 column: shown as the t32 marker (record unmapped in area-9 RE)' } },
+  0x25: { dun: null },
+  0x35: { dun: { sub: 1, w: 16, h: 16, tiles: [
     { t: 0x60, a: 0x01, dx: 0, dy: 0 }, { t: 0x70, a: 0x01, dx: 8, dy: 0 },
-    { t: 0x61, a: 0x01, dx: 0, dy: 8 }, { t: 0x71, a: 0x01, dx: 8, dy: 8 } ] },
+    { t: 0x61, a: 0x01, dx: 0, dy: 8 }, { t: 0x71, a: 0x01, dx: 8, dy: 8 } ] } },
 };
-export const ACTOR_SPRITE_NOTES = {
-  0x5b: 'egg invisible until hatch (emits no OAM as $5b)',
-  0x5a: 'live layout unobserved (8-sprite, state-dependent)',
-};
+
 export function actorFor(isTank, type) {
   const t = type | 0;
   if (t < 0 || t > 127) return null;
@@ -192,25 +355,57 @@ export function actorFor(isTank, type) {
   if (t in TYPE_ACTOR) return TYPE_ACTOR[t];
   return null;
 }
+export const ACTOR_SPRITE_NOTES = {
+  0x5b: 'egg invisible until hatch (emits no OAM as $5b)',
+  0x5a: 'live layout unobserved (8-sprite, state-dependent)',
+  0x33: 't6 spawner: emits no OAM (still + drive to f2300); transient $34 (e7/f7 or e5/f5 pair)',
+  0x5d: 't47: slots present, no OAM in still (2 snaps)',
+  0x02: 't10 $02 slots emit no OAM (to f2300 + drive); marker shows the $3c pair (band-dependent)',
+  0x4f: 'dungeon t19: $4f emits no OAM (f950-1550); visible as $7c children (marker shows $7c)',
+  0x51: 'dungeon t20: $51 emits no OAM (f950-1550); visible as $7d children (marker shows $7d)',
+  0x25: 'dungeon t42: slots present, no OAM f950-1550',
+};
+// Record types whose marker shows a DIFFERENT actor than actorFor names
+// (all headless-proven 2026-11-28): the named actor stably emits no OAM but
+// its slots stably show the visible form (spawner/child or band-dependent).
+// Dungeon t32 B0-only (area 8); t19/t20 verified in native areas too (B6 area
+// 14, B2 area 10). Overhead t10: $02 never shows to f2300+drive, $3c pair stable.
+export const VISIBLE_AS = {
+  tank: { 10: 0x3c },
+  dun: { 19: 0x7c, 20: 0x7d, 32: 0x91 },
+};
 export function actorSpriteFor(isTank, type) {
-  const a = actorFor(isTank, type);
+  const mode = isTank ? 'tank' : 'dun';
+  const t = type | 0;
+  const vmap = VISIBLE_AS[mode];
+  const a = vmap && t in vmap ? vmap[t] : actorFor(isTank, t);
   if (a == null) return undefined;
-  if (!(a in ACTOR_SPRITES)) return undefined;
-  const s = ACTOR_SPRITES[a];
-  if (s !== null && s !== undefined && s.mode !== (isTank ? 'tank' : 'dun')) return undefined;
-  return s;
+  const e = ACTOR_SPRITES[a];
+  if (!e) return undefined;
+  const s = e[mode];
+  return s === undefined ? undefined : s;
 }
 export function liveSpriteSummary(isTank, type) {
-  const a = actorFor(isTank, type);
+  const mode = isTank ? 'tank' : 'dun';
+  const t = type | 0;
+  const vmap = VISIBLE_AS[mode];
+  const va = vmap && t in vmap ? vmap[t] : null;
+  const a = va == null ? actorFor(isTank, t) : va;
   if (a == null) return 'no actor (unmapped type)';
-  const s = actorSpriteFor(isTank, type);
+  const s = actorSpriteFor(isTank, t);
   if (s === undefined) {
     const n = ACTOR_SPRITE_NOTES[a];
     return 'actor $' + a.toString(16) + ' live unobserved' + (n ? ' (' + n + ')' : '');
   }
   if (s === null) return ACTOR_SPRITE_NOTES[a] || ('actor $' + a.toString(16) + ' emits no OAM');
   const tiles = s.tiles.map(function (e) { return '$' + e.t.toString(16); }).join(',');
-  return s.tiles.length + 'spr ' + tiles + ' sub' + s.sub + ' ' + s.w + 'x' + s.h;
+  let r = s.tiles.length + 'spr ' + tiles + ' sub' + s.sub + ' ' + s.w + 'x' + s.h;
+  if (va != null) {
+    const ra = actorFor(isTank, t);
+    r += ra == null ? ' (record unmapped; shown: $' + va.toString(16) + ')' : ' (record $' + ra.toString(16) + ' has no OAM; shown: $' + va.toString(16) + ')';
+  }
+  if (s.note) r += ' [' + s.note + ']';
+  return r;
 }
 
 

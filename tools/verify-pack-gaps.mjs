@@ -115,8 +115,15 @@ const stock = buildPack(rom, "ref.nes").pack;
   const d60 = actorSpriteFor(false, 5);
   ok("live d5 ab-ac-ae", !!d60 && d60.tiles.length === 6 && has(d60, 0xab) && has(d60, 0xbe));
   ok("live unmapped undefined", actorSpriteFor(true, 70) === undefined && actorSpriteFor(false, 70) === undefined);
-  ok("live range+mode undef", actorSpriteFor(true, -1) === undefined && actorSpriteFor(true, 10) === undefined);
-  ok("live summary", liveSpriteSummary(true, 14).indexOf("$cf") >= 0 && liveSpriteSummary(true, 32).indexOf("invisible") >= 0 && liveSpriteSummary(true, 1).indexOf("unobserved") >= 0 && liveSpriteSummary(true, 70).indexOf("no actor") >= 0);
+  ok("live range undef", actorSpriteFor(true, -1) === undefined && actorSpriteFor(false, 200) === undefined);
+  const s10 = actorSpriteFor(true, 10);
+  ok("live t10 visible-as 3c", !!s10 && s10.tiles.length === 2 && s10.tiles[0].t === 0xa7 && s10.tiles[1].t === 0xb7 && s10.sub === 1);
+  ok("live null spawners", actorSpriteFor(true, 6) === null && actorSpriteFor(false, 42) === null);
+  const d19 = actorSpriteFor(false, 19);
+  ok("live d19 visible-as 7c", !!d19 && d19.tiles.length === 4 && d19.tiles[0].t === 0xd8);
+  const d32 = actorSpriteFor(false, 32);
+  ok("live d32 visible-as 91", !!d32 && d32.tiles.length === 12 && d32.tiles[0].t === 0xb6);
+  ok("live summary", liveSpriteSummary(true, 14).indexOf("$cf") >= 0 && liveSpriteSummary(true, 32).indexOf("invisible") >= 0 && liveSpriteSummary(false, 4).indexOf("unobserved") >= 0 && liveSpriteSummary(true, 70).indexOf("no actor") >= 0 && liveSpriteSummary(true, 10).indexOf("3c") >= 0 && liveSpriteSummary(false, 19).indexOf("7c") >= 0);
   ok("live actor ids", actorFor(true, 14) === 0x45 && actorFor(true, 33) === 0x23 && actorFor(false, 0) === 0x55 && actorFor(false, 33) === 0x35);
 }
 

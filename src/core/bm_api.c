@@ -186,6 +186,10 @@ static void render(void) {
       bg_opaque[y * 256 + x] = pix_on ? 1 : 0;
     }
   }
+  /* NES 8-sprites-per-scanline limit (HW-faithful, 2026-11-28): on each
+     scanline only the first 8 sprites in OAM order with Y in range are
+     drawn; later ones drop. The game never reads $2002 sprite bits, so
+     only the draw cutoff is emulated (no flag effects). */
   if (spr_en) {
     int s;
     for (s = 63; s >= 0; s--) {
@@ -214,6 +218,15 @@ static void render(void) {
         lo = chr[off + (rr & 7)]; hi = chr[off + (rr & 7) + 8];
         yy = oy + 1 + r;
         if (yy < 0 || yy >= 240) continue;
+        {
+          int t, cnt8 = 0;
+          for (t = 0; t < s; t++) {
+            int oy2 = oam[t * 4];
+            if (oy2 >= 0xEF) continue;
+            if (yy >= oy2 + 1 && yy < oy2 + 1 + hh && ++cnt8 >= 8) break;
+          }
+          if (cnt8 >= 8) continue;
+        }
         for (q = 0; q < 8; q++) {
           int cc = fx ? (7 - q) : q;
           int v = ((lo >> (7 - cc)) & 1) | ((((hi >> (7 - cc)) & 1) << 1));

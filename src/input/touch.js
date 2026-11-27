@@ -22,7 +22,6 @@ export function mountTouch(bus, parent, opts) {
   root.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:60;" +
     "display:flex;justify-content:space-between;align-items:flex-end;" +
     "gap:min(2vw,10px);padding:14px 6px calc(26px + env(safe-area-inset-bottom, 0px));" +
-    "background:rgba(10,10,10," + AL(1) + ");border-top:1px solid #333;" +
     "pointer-events:none;touch-action:none;user-select:none;-webkit-user-select:none;";
   const CELL = "min(" + (15 * tsize) + "vw," + Math.round(60 * tsize) + "px)";
   const face = "pointer-events:auto;touch-action:none;box-sizing:border-box;" +

@@ -11,6 +11,14 @@ import { saveEntrance, loadEntrance, saveVisits, loadVisits } from '../pack/stor
 import { visitsHash } from '../pack/minimap.js';
 const LS_KEY = 'bm-enhance-v1';
 const MASTER_KEY = 'bm-enhance-master-v1';
+const MAP_KEY = 'bm-enhance-map-v1';
+function loadMapShow() {
+  try { var o = JSON.parse(localStorage.getItem(MAP_KEY) || 'null'); if (o && ('show' in o)) return !!o.show; } catch (e) {}
+  return true;
+}
+function storeMapShow(v) {
+  try { localStorage.setItem(MAP_KEY, JSON.stringify({ show: !!v })); } catch (e) {}
+}
 const SAVE_MAGIC = 0x424D5356;
 function loadFlag() {
   try { return !!JSON.parse(localStorage.getItem(LS_KEY) || '{}').enabled; }
@@ -60,22 +68,22 @@ export function buildEnhancePanel(env) {
   const anchor = document.getElementById('logEl');
   if (!anchor) { log('enhance: logEl missing'); return () => {}; }
   const st = {
-    enabled: loadFlag(), master: loadMaster(),
-    pushedMaster: -1, pushedSaving: -1, enableInp: null,
+    enabled: loadFlag(), master: loadMaster(), mapShow: loadMapShow(),
+    pushedMaster: -1, pushedSaving: -1, pushedMap: -1, enableInp: null, mapInp: null, mapStat: null,
     listEl: null, packKey: null, refreshing: false,
     visitCache: null, visitCur: -2, visitTimer: 240, visitDirty: false, wasPregame: null, visitHash: null, syncSeq: 0,
   };
   const det = document.createElement('details');
   det.id = 'enhanceCtn';
   const sum = document.createElement('summary');
-  sum.textContent = 'Enhancements (entrance saves, wasm engine only)';
+  sum.textContent = 'Enhancements (entrance saves, maps, wasm engine only)';
   sum.style.cssText = 'cursor:pointer;padding:8px;background:#223;font-size:16px';
   det.appendChild(sum);
   const mr = row(det);
   checkBox(mr, 'enhanced mode (master toggle for engine enhancements)', st.master, (v) => {
     st.master = v; storeMaster(v);
     log('enhance: enhanced mode ' + (v ? 'on' : 'off'));
-    if (st.enableInp) st.enableInp.disabled = !v;
+    if (st.enableInp) st.enableInp.disabled = !v; if (st.mapInp) st.mapInp.disabled = !v;
     try { const h = env.host(); if (h && h.inst) { const ex = h.inst.exports; if (ex.bm_enhanced_set) { ex.bm_enhanced_set(v ? 1 : 0); st.pushedMaster = v ? 1 : 0; } } } catch (e) {}
   });
   const r = row(det);
@@ -85,6 +93,18 @@ export function buildEnhancePanel(env) {
     try { const h = env.host(); if (h && h.inst) { const ex = h.inst.exports; if (ex.bm_saving_set) { ex.bm_saving_set(v ? 1 : 0); st.pushedSaving = v ? 1 : 0; } } } catch (e) {}
   });
   if (!st.master && st.enableInp) st.enableInp.disabled = true;
+  const mapR = row(det);
+  st.mapInp = checkBox(mapR, 'show minimap HUD while playing (full map: pause menu MAP row)', st.mapShow, (v) => {
+    st.mapShow = v; storeMapShow(v);
+    log('enhance: minimap ' + (v ? 'shown' : 'hidden'));
+    try { const h = env.host(); if (h && h.inst) { const ex = h.inst.exports; if (ex.bm_map_show_set) { ex.bm_map_show_set(v ? 1 : 0); st.pushedMap = v ? 1 : 0; } } } catch (e) {}
+  });
+  if (!st.master && st.mapInp) st.mapInp.disabled = true;
+  st.mapStat = document.createElement('div');
+  st.mapStat.style.cssText = 'font-size:12px;color:#9c9';
+  st.mapStat.id = 'mapStat';
+  st.mapStat.textContent = 'map: start the game for live status';
+  det.appendChild(st.mapStat);
   const wr = row(det);
   const wlab = document.createElement('span');
   wlab.textContent = 'widescreen mode (later): ';
@@ -253,10 +273,26 @@ export function buildEnhancePanel(env) {
       }
     } finally { st.refreshing = false; }
   }
+  function updateMapStat(ex, bb) {
+    if (!st.mapStat) return;
+    try {
+      var lv = 0, seen = 0;
+      if (ex && ex.bm_ram_rd && bb) {
+        var area = 0;
+        try { area = ex.bm_ram_rd(20) & 15; } catch (eR3) {}
+        lv = area < 8 ? area + 9 : area - 7;
+        for (var i = 0; i < 8; i++) { var b = bb[(lv - 1) * 8 + i]; for (var k = 0; k < 8; k++) if (b & (1 << k)) seen++; }
+      }
+      var hud = 'n/a';
+      try { if (ex && ex.bm_map_show_get) hud = ex.bm_map_show_get() ? 'on' : 'off'; } catch (eS) {}
+      st.mapStat.textContent = 'map L' + lv + ': ' + seen + '/64 seen - HUD ' + hud + ' - full map: Start-pause, Select, MAP row';
+    } catch (e) {}
+  }
   function apply(ex) {
     try {
       try { if (ex.bm_enhanced_set && st.pushedMaster !== (st.master ? 1 : 0)) { ex.bm_enhanced_set(st.master ? 1 : 0); st.pushedMaster = st.master ? 1 : 0; } } catch (e) {}
       try { if (ex.bm_saving_set && st.pushedSaving !== (st.enabled ? 1 : 0)) { ex.bm_saving_set(st.enabled ? 1 : 0); st.pushedSaving = st.enabled ? 1 : 0; } } catch (e) {}
+      try { if (ex.bm_map_show_set && st.pushedMap !== (st.mapShow ? 1 : 0)) { ex.bm_map_show_set(st.mapShow ? 1 : 0); st.pushedMap = st.mapShow ? 1 : 0; } } catch (e) {}
       let key = 'stock::unknown';
       try { const t = env.packTag(); key = String(t.pack) + '::' + String(t.packCrc); } catch (e) {}
       if (key !== st.packKey) { st.packKey = key; refreshList().catch(() => {}); syncVisits('pack'); try { if (ex && ex.bm_map_invalidate) ex.bm_map_invalidate(); } catch (eI) {} }
@@ -267,7 +303,7 @@ export function buildEnhancePanel(env) {
           var pregame = (dd === 0 && ce === 0);
           if (st.wasPregame === true && !pregame) syncVisits('edge');
           st.wasPregame = pregame;
-          if (pregame) st.visitTimer = 240;
+          if (pregame) { st.visitTimer = 240; updateMapStat(ex, null); }
           else {
             st.visitTimer--;
             if (st.visitTimer <= 0) {
@@ -276,6 +312,7 @@ export function buildEnhancePanel(env) {
               if (bb) {
                 var hh = visitsHash(bb);
                 if (hh !== st.visitHash) { st.visitHash = hh; st.visitCache = bb; syncVisits('timer'); }
+              updateMapStat(ex, bb);
               }
             }
           }

@@ -211,6 +211,44 @@ ok('walk runs clean (both hit gameplay)', !RB.trap && !RA.trap && outB[900].cur 
   ok('modal: gameplay 1 pre-prompt, ev5 hides (vis 0)', !R.trap && r990.vis === 1 && r1100.vis === 0, R.trap || ('990=' + r990.vis + ' 1100=' + r1100.vis + ' ev5end=' + ev5));
 }
 // Shell: no rendering left (sync/persistence only), invalidate wired.
+// E8-M5: minimap HUD toggle (default on; off == enhanced-off video exactly).
+{
+  const onF = (ex, f) => { if (f === 200) ex.bm_enhanced_set(1); if (f === 300) ex.bm_warp_raw(9); if (f >= 400 && f < 1200) ex.bm_set_pad(128); };
+  const offF = (ex, f) => { onF(ex, f); if (f === 500) ex.bm_map_show_set(0); };
+  const D0 = await bootOnly(); loadPack(D0);
+  ok('map_show default on at boot', D0.bm_map_show_get() === 1, 'got=' + D0.bm_map_show_get());
+  D0.bm_map_show_set(0);
+  const g0 = D0.bm_map_show_get() === 0; D0.bm_map_show_set(1);
+  ok('map_show set/get round-trip', g0 && D0.bm_map_show_get() === 1, '');
+  const outOn = {}, outOff = {};
+  const RN = await drive({ span: 1300, rec: true, taps: WALK, frames: [900], out: outOn, onFrame: onF });
+  const RF = await drive({ span: 1300, rec: true, taps: WALK, frames: [900], out: outOff, onFrame: offF });
+  let sameOffA = true, diffOnOff = 0, outRect = true;
+  if (!RN.trap && !RF.trap && outOn[900] && outOff[900] && outA[900]) {
+    const a = outA[900].bytes, b = outOn[900].bytes, c = outOff[900].bytes;
+    for (let y = 0; y < 240 && sameOffA; y++) for (let x = 0; x < 256; x++) {
+      const o = (y * 256 + x) * 4;
+      if (c[o] !== a[o] || c[o + 1] !== a[o + 1] || c[o + 2] !== a[o + 2]) { sameOffA = false; break; }
+    }
+    for (let y = 0; y < 240; y++) for (let x = 0; x < 256; x++) {
+      const o = (y * 256 + x) * 4;
+      if (b[o] !== c[o] || b[o + 1] !== c[o + 1] || b[o + 2] !== c[o + 2]) {
+        diffOnOff++;
+        if (x < 187 || x > 254 || y < 3 || y > 69) outRect = false;
+      }
+    }
+  } else { sameOffA = false; }
+  ok('map off == enhanced-off video (suppression complete)', !RN.trap && !RF.trap && sameOffA, RN.trap || RF.trap);
+  ok('map on/off diff confined to HUD rect + non-empty', !RN.trap && !RF.trap && outRect && diffOnOff > 500, 'diff=' + diffOnOff + ' rect=' + outRect);
+  const K1 = await drive({ span: 1300, rec: true, taps: WALK, onFrame: offF });
+  const K2 = await drive({ span: 1300, rec: true, taps: WALK, onFrame: offF });
+  let bad = 0;
+  for (let i = 0; i < K1.rec.length; i++) if (!K1.rec[i] || !K2.rec[i] || K1.rec[i].vb !== K2.rec[i].vb) bad++;
+  ok('map-off determinism x2', !K1.trap && !K2.trap && K1.rec.length > 50 && bad === 0, (K1.trap || K2.trap) || ('bad=' + bad));
+  const enh2 = readFileSync(PROJ + '/frontend/src/ui/enhance.js', 'utf8');
+  const has2 = (s) => enh2.indexOf(s) >= 0;
+  ok('shell: map toggle wired (persist/show/status)', has2('MAP_KEY') && has2('bm_map_show_set') && has2('show minimap') && has2('mapStat'), '');
+}
 {
   const enh = readFileSync(PROJ + '/frontend/src/ui/enhance.js', 'utf8');
   const has = (s) => enh.indexOf(s) >= 0;

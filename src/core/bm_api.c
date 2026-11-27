@@ -314,6 +314,13 @@ void bm_set_pad(int m) { game_pad = (uint8_t)(m & 0xFF); }
 static int enhanced_mode = 0;
 void bm_enhanced_set(int v) { enhanced_mode = v ? 1 : 0; }
 int bm_enhanced_get(void) { return enhanced_mode; }
+// ---- E8-M5 minimap HUD toggle (shell Enhancements menu) ----
+// Engine config like enhanced_mode: excluded from blobs, sticky across
+// bm_boot, default on. Gates only the HUD blit; the pause full-map stays
+// available. Default-on keeps every existing video golden bit-identical.
+static int map_show = 1;
+void bm_map_show_set(int v) { map_show = v ? 1 : 0; }
+int bm_map_show_get(void) { return map_show; }
 
 int bm_audio_read(int dst_ptr, int max) {
   uint8_t *dst = (uint8_t *)(intptr_t)dst_ptr;
@@ -870,6 +877,7 @@ static void map_put(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
 static void map_blit(void) {
   int area, lv, sx, sy, maxsy, rows, x, y, i;
   if (!map_gate()) return;
+  if (!map_show) return;
   area = ram[0x14] & 15;
   lv = area < 8 ? area + 9 : area - 7;
   if (lv < 1 || lv > 16) return;

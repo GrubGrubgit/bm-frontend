@@ -1,5 +1,6 @@
-// E8-M3 engine HUD minimap (in-canvas framebuf post-process; the shell
-// overlay is gone -- all enhancements live in the engine).
+// E8-M3 engine HUD minimap: abstract room grid (Metroid-style).
+// Fixed 48x32 box top-right: 6x4 cell per screen, 5x3 visited fill,
+// dark unvisited, gold door notches, 2x2 blinking player dot.
 // Run: node tools/verify-map-e8m3.mjs (from frontend/)
 import { readFileSync } from 'fs';
 import { buildPack } from '../src/pack/builder.js';
@@ -114,7 +115,7 @@ async function drive(o) {
       const vp = ex.bm_video_ptr();
       const vbp = ex.bm_visit_ptr();
       o.frames[n] = null;
-      o.out[n] = { f: n, cur: ex.bm_visit_cur(), vis: ex.bm_map_visible(), bytes: Array.from(mem.slice(vp, vp + 256 * 240 * 4)), vb: Array.from(mem.slice(vbp, vbp + 128)) };
+      o.out[n] = { f: n, fno: ex.bm_frame_no(), be: ex.bm_ram_rd(0xBE), cur: ex.bm_visit_cur(), vis: ex.bm_map_visible(), bytes: Array.from(mem.slice(vp, vp + 256 * 240 * 4)), vb: Array.from(mem.slice(vbp, vbp + 128)) };
     }
     if (n >= o.span) throw new Error('STOP');
   } } })).instance;
@@ -141,51 +142,118 @@ ok('walk runs clean (both hit gameplay)', !RB.trap && !RA.trap && outB[900].cur 
     for (let y = 0; y < 240; y++) for (let x = 0; x < 256; x++) {
       const o = (y * 256 + x) * 4;
       if (a[o] !== b[o] || a[o + 1] !== b[o + 1] || a[o + 2] !== b[o + 2]) {
-        if (x >= 187 && x <= 254 && y >= 3 && y <= 69) nIn++;
+        if (x >= 203 && x <= 252 && y >= 3 && y <= 36) nIn++;
         else { nOut++; if (detail === '') detail = 'f' + f + ' x' + x + ' y' + y; }
       }
     }
     inside += nIn;
-    if (nOut > 0 || nIn < 500) confined = false;
+    if (nOut > 0 || nIn < 200) confined = false;
   }
-  ok('A/B diffs confined to minimap rect + rect differs', confined, detail + ' inside=' + inside);
+  ok('A/B diffs confined to minimap box + box differs', confined, detail + ' inside=' + inside);
 }
-// Byte-exact expected rect at f=900 (thumb + fog + ticks + dot + border).
+const HX0 = 204, HY0 = 4, HBW = 48, HBH = 32;
+const C_BG = [5, 5, 18], C_RM = [64, 128, 232], C_GOLD = [248, 184, 0], C_GR = [117, 117, 117];
+const C_W = [252, 252, 252], C_R = [248, 56, 56];
+// Room-grid semantics on the natural walk (f=900): fills track visits,
+// unvisited cells stay dark, dot shows the blink phase color.
 {
   const F = outB[900];
   const d = decodeCur(F.cur);
-  const th = jsThumb(stock, d.lv);
-  const X0 = 188, Y0 = 4, rows = th.rows;
+  const rows = mm.levels[d.lv].rows;
+  const maxsy = (rows + 3) >> 2;
+  const bit = (sx, sy) => { const q = F.vb[((d.lv - 1) * 8) + (((sy * 8 + sx) >> 3))]; return (q >> ((sy * 8 + sx) & 7)) & 1; };
+  const dotX = HX0 + d.sx * 6 + 2, dotY = HY0 + d.sy * 4 + 1;
+  const frozen = F.be === 0;
+  const blink = (F.fno >> 4) & 1;
+  const dotC = frozen ? C_R : (blink ? C_W : C_R);
+  const inDot = (x, y) => x >= dotX && x <= dotX + 1 && y >= dotY && y <= dotY + 1;
+  let bad = 0, detail = '', nW = 0, nR = 0;
+  for (let y = HY0; y < HY0 + HBH; y++) for (let x = HX0; x < HX0 + HBW; x++) {
+    const o = (y * 256 + x) * 4;
+    if (F.bytes[o] === 252 && F.bytes[o + 1] === 252 && F.bytes[o + 2] === 252) nW++;
+    if (F.bytes[o] === 248 && F.bytes[o + 1] === 56 && F.bytes[o + 2] === 56) nR++;
+  }
+  const expW = dotC === C_W ? 4 : 0;
+  if (nW !== expW || nR !== (4 - expW)) { bad++; detail = 'dot W=' + nW + ' R=' + nR + ' blink=' + blink + ' be=' + F.be; }
+  for (let sy = 0; sy < 8 && bad < 5; sy++) for (let sx = 0; sx < 8 && bad < 5; sx++) {
+    const vis = sy < maxsy && bit(sx, sy);
+    for (let dy = 0; dy < 3 && bad < 5; dy++) for (let dx = 0; dx < 5; dx++) {
+      const x = HX0 + sx * 6 + dx, y = HY0 + sy * 4 + dy;
+      const o = (y * 256 + x) * 4;
+      const r = F.bytes[o], g = F.bytes[o + 1], b = F.bytes[o + 2];
+      if (inDot(x, y)) {
+        if (r !== dotC[0] || g !== dotC[1] || b !== dotC[2]) { bad++; detail = 'dotpx ' + x + ',' + y; }
+      } else if (vis) {
+        if (r !== 64 || g !== 128 || b !== 232) { bad++; detail = 'fill ' + x + ',' + y + '=' + r + ',' + g + ',' + b; }
+      } else {
+        if (r !== 5 || g !== 5 || b !== 18) { bad++; detail = 'unvis ' + x + ',' + y + '=' + r + ',' + g + ',' + b; }
+      }
+      if (bad >= 5) break;
+    }
+  }
+  ok('walk: fills track visits, unvisited dark, dot blink phase', bad === 0, detail);
+}
+// Staged byte-exact box (fills + notches + border + dot), JS mirror of map_blit.
+function expectedBox(F, lv, rows) {
+  const maxsy = (rows + 3) >> 2;
   const exp = {};
-  const setP = (x, y, r, g, b) => { exp[y * 256 + x] = [r, g, b]; };
-  for (let x = X0 - 1; x <= X0 + 64; x++) { setP(x, Y0 - 1, 117, 117, 117); setP(x, Y0 + rows * 2, 117, 117, 117); }
-  for (let y = Y0 - 1; y <= Y0 + rows * 2; y++) { setP(X0 - 1, y, 117, 117, 117); setP(X0 + 64, y, 117, 117, 117); }
-  for (let y = 0; y < rows * 2; y++) for (let x = 0; x < 64; x++) {
-    const bit = (F.vb[((d.lv - 1) * 8) + (((y >> 3) * 8 + (x >> 3)) >> 3)] >> (((y >> 3) * 8 + (x >> 3)) & 7)) & 1;
-    const idx = th.bytes[y * 64 + x];
-    const c = ENP[idx];
-    if (bit) setP(X0 + x, Y0 + y, c[0], c[1], c[2]);
-    else setP(X0 + x, Y0 + y, c[0] >> 2, c[1] >> 2, c[2] >> 2);
+  const setP = (x, y, c) => { exp[y * 256 + x] = c; };
+  for (let x = HX0 - 1; x <= HX0 + HBW; x++) { setP(x, HY0 - 1, C_GR); setP(x, HY0 + HBH, C_GR); }
+  for (let y = HY0 - 1; y <= HY0 + HBH; y++) { setP(HX0 - 1, y, C_GR); setP(HX0 + HBW, y, C_GR); }
+  for (let y = 0; y < HBH; y++) for (let x = 0; x < HBW; x++) setP(HX0 + x, HY0 + y, C_BG);
+  const bit = (sx, sy) => { const q = F.vb[((lv - 1) * 8) + (((sy * 8 + sx) >> 3))]; return (q >> ((sy * 8 + sx) & 7)) & 1; };
+  for (let sy = 0; sy < maxsy; sy++) for (let sx = 0; sx < 8; sx++) {
+    if (!bit(sx, sy)) continue;
+    for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 5; dx++) setP(HX0 + sx * 6 + dx, HY0 + sy * 4 + dy, C_RM);
   }
   for (const s of w.sides) {
-    if (s.level !== d.lv) continue;
-    if (s.by >= rows) continue;
-    const dx = X0 + s.bx * 2, dy = Y0 + s.by * 2;
-    setP(dx, dy, 248, 184, 0); setP(dx + 1, dy, 248, 184, 0); setP(dx, dy + 1, 248, 184, 0); setP(dx + 1, dy + 1, 248, 184, 0);
+    if (s.level !== lv || s.by >= rows) continue;
+    const osx = s.bx >> 2, osy = s.by >> 2, ox = s.bx & 3, oy = s.by & 3;
+    if (osx < 0 || osx > 7 || osy < 0 || osy >= maxsy) continue;
+    if (!bit(osx, osy)) continue;
+    const dn = oy, ds = 3 - oy, dw = ox, de = 3 - ox;
+    let edge = 0, m = dn;
+    if (ds < m) { m = ds; edge = 1; }
+    if (dw < m) { m = dw; edge = 2; }
+    if (de < m) { m = de; edge = 3; }
+    const nx = HX0 + osx * 6, ny = HY0 + osy * 4;
+    if (edge === 0) for (let k = 1; k <= 3; k++) setP(nx + k, ny - 1, C_GOLD);
+    else if (edge === 1) for (let k = 1; k <= 3; k++) setP(nx + k, ny + 3, C_GOLD);
+    else if (edge === 2) for (let k = 0; k <= 2; k++) setP(nx - 1, ny + k, C_GOLD);
+    else for (let k = 0; k <= 2; k++) setP(nx + 5, ny + k, C_GOLD);
   }
-  const cx = X0 + d.sx * 8 + 4, cy = Y0 + d.sy * 8 + 4;
-  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) setP(cx + dx, cy + dy, 167, 0, 0);
-  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) setP(cx + dx, cy + dy, 252, 252, 252);
-  let bad = 0, first = '';
-  for (const k of Object.keys(exp)) {
-    const o = k * 4;
-    const e = exp[k];
-    if (F.bytes[o] !== e[0] || F.bytes[o + 1] !== e[1] || F.bytes[o + 2] !== e[2]) { bad++; if (first === '') first = 'k' + k + ' got=' + F.bytes[o] + ',' + F.bytes[o + 1] + ',' + F.bytes[o + 2] + ' exp=' + e.join(','); }
-  }
-  ok('expected rect byte-exact (fog+dot+ticks+border)', bad === 0, 'bad=' + bad + ' ' + first);
-  const co = (cy * 256 + cx) * 4;
-  ok('player dot center white', F.bytes[co] === 252 && F.bytes[co + 1] === 252 && F.bytes[co + 2] === 252);
+  const d = decodeCur(F.cur);
+  const blink = (F.fno >> 4) & 1;
+  const dot = F.be === 0 ? C_R : (blink ? C_W : C_R);
+  const cx0 = HX0 + d.sx * 6 + 2, cy0 = HY0 + d.sy * 4 + 1;
+  setP(cx0, cy0, dot); setP(cx0 + 1, cy0, dot); setP(cx0, cy0 + 1, dot); setP(cx0 + 1, cy0 + 1, dot);
+  return exp;
 }
+{
+  const outS = {};
+  const RS = await drive({ span: 500, rec: false, taps: [{ at: 61, pad: 8 }], frames: [410], out: outS,
+    onFrame: (ex, f) => {
+      if (f === 200) ex.bm_enhanced_set(1);
+      if (f === 300) ex.bm_warp_raw(9);
+      if (f === 400) {
+        const cells = [[4, 4], [1, 5], [1, 6], [7, 0], [4, 2], [5, 3], [2, 1]];
+        for (const c of cells) ex.bm_visit_set(2, c[0], c[1], 1);
+      }
+    } });
+  let bad = 0, first = '';
+  if (!RS.trap && outS[410]) {
+    const F = outS[410];
+    const d = decodeCur(F.cur);
+    const exp = expectedBox(F, d.lv, mm.levels[d.lv].rows);
+    for (const k of Object.keys(exp)) {
+      const o = k * 4, e = exp[k];
+      if (F.bytes[o] !== e[0] || F.bytes[o + 1] !== e[1] || F.bytes[o + 2] !== e[2]) { bad++; if (first === '') first = 'k' + k + ' got=' + F.bytes[o] + ',' + F.bytes[o + 1] + ',' + F.bytes[o + 2] + ' exp=' + e.join(','); }
+    }
+    if (Object.keys(exp).length !== 1700) { bad++; first = 'expkeys=' + Object.keys(exp).length; }
+  } else { bad++; first = RS.trap || 'no frame'; }
+  ok('staged byte-exact box (fills+notches+border+dot)', bad === 0, 'bad=' + bad + ' ' + first);
+}
+
 {
   const mk = () => drive({ span: 1300, rec: true, taps: WALK, onFrame: walkOn(true) });
   const K1 = await mk(), K2 = await mk();
@@ -267,7 +335,7 @@ ok('walk runs clean (both hit gameplay)', !RB.trap && !RA.trap && outB[900].cur 
       const o = (y * 256 + x) * 4;
       if (b[o] !== c[o] || b[o + 1] !== c[o + 1] || b[o + 2] !== c[o + 2]) {
         diffOnOff++;
-        if (x < 187 || x > 254 || y < 3 || y > 69) outRect = false;
+        if (x < 203 || x > 252 || y < 3 || y > 36) outRect = false;
       }
     }
   } else { sameOffA = false; }

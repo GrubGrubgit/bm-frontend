@@ -723,22 +723,29 @@ static int ev5_be0run = 0;
 static int ev5_down_inj = 0;
 static uint8_t ev5_vram[1024], ev5_pal[32], ev5_oam[256];
 static int ev5_scx, ev5_scy, ev5_r2000, ev5_r2001, ev5_chr0, ev5_chr1, ev5_mmc;
-// ---- E8-M3 engine-side HUD minimap (in-canvas, framebuf post-process) ----
-// All enhancements live in the engine: this blits into framebuf AFTER
-// render() in nmi_frame (never vram/ram/pal: the game picture, PPU state
-// and freeze/thaw blobs are untouched). Contents: 2px/block level
-// thumbnails parsed from the prg level tables in C (same layout as
-// src/pack/levels.js), fog-of-war from visit_bits (unvisited screens
-// dimmed to 1/4, sub-map rows void black), gold door ticks at block
-// precision, white/red player dot at the current screen center, 1px
-// border. Gate: enhanced_mode && gameplay && no modal menu (E2/E3/E5).
-// Thumbnails cache per level, built lazily on first display; cleared on
-// engine_reset_to_title (fresh boot + quit-to-title) and on demand via
-// bm_map_invalidate (shell pack switches). Pure function of prg/chr +
-// visit state: fully deterministic, included in video hashes on both
-// sides of every comparison, so all golden reconvergence proofs hold.
-#define MAP_X0 188
+// ---- E8-M3 engine-side HUD minimap: abstract room grid (Metroid-style) ----
+// Blits into framebuf AFTER render() in nmi_frame (never vram/ram/pal).
+// Fixed 48x32 box top-right: one 6x4 cell per screen (8 cols x up to 8
+// rows), 5x3 room fill for visited screens, dark unvisited (unexplored
+// screens stay hidden, never dimmed thumbnails), gold door notches on
+// cell borders for exits of visited rooms, 2x2 player dot blinking
+// white/red at ~4Hz (frame_no bit 4: deterministic, in every video hash;
+// frozen solid-red while stock-paused (BE==0) so pause-freeze proofs hold).
+// Doors come from the level door tables via map_build (shared with the
+// E8-M4 pause full-map, which keeps its thumbnail style). Gate: enhanced
+// && gameplay && no modal (E2/E3/E5); map_show toggle (E8-M5).
+#define MAP_X0 204
 #define MAP_Y0 4
+#define MAP_CW 6
+#define MAP_CH 4
+#define MAP_FW 5
+#define MAP_FH 3
+#define MAP_BG_R 5
+#define MAP_BG_G 5
+#define MAP_BG_B 18
+#define MAP_RM_R 64
+#define MAP_RM_G 128
+#define MAP_RM_B 232
 static uint8_t map_px[16][4096];
 static uint8_t map_rows[16];
 static uint8_t map_valid[16];
@@ -878,6 +885,7 @@ static void map_put(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
 }
 static void map_blit(void) {
   int area, lv, sx, sy, maxsy, rows, x, y, i;
+  int blink;
   if (!map_gate()) return;
   if (!map_show) return;
   area = ram[0x14] & 15;
@@ -888,33 +896,49 @@ static void map_blit(void) {
   sx = (scx + 128) >> 8; if (sx < 0) sx = 0; if (sx > 7) sx = 7;
   sy = (scy + 120) >> 8; if (sy < 0) sy = 0;
   maxsy = (rows + 3) >> 2; if (sy >= maxsy) sy = maxsy - 1;
-  for (x = MAP_X0 - 1; x <= MAP_X0 + 64; x++) {
+  for (x = MAP_X0 - 1; x <= MAP_X0 + 48; x++) {
     map_put(x, MAP_Y0 - 1, 117, 117, 117);
-    map_put(x, MAP_Y0 + rows * 2, 117, 117, 117);
+    map_put(x, MAP_Y0 + 32, 117, 117, 117);
   }
-  for (y = MAP_Y0 - 1; y <= MAP_Y0 + rows * 2; y++) {
+  for (y = MAP_Y0 - 1; y <= MAP_Y0 + 32; y++) {
     map_put(MAP_X0 - 1, y, 117, 117, 117);
-    map_put(MAP_X0 + 64, y, 117, 117, 117);
+    map_put(MAP_X0 + 48, y, 117, 117, 117);
   }
-  for (y = 0; y < rows * 2; y++) for (x = 0; x < 64; x++) {
-    int sxx = x >> 3, syy = y >> 3;
-    int bit = (visit_bits[lv - 1][((syy * 8 + sxx) >> 3)] >> ((syy * 8 + sxx) & 7)) & 1;
-    uint8_t idx = map_px[lv - 1][y * 64 + x];
-    if (bit) map_put(MAP_X0 + x, MAP_Y0 + y, NESPAL[idx][0], NESPAL[idx][1], NESPAL[idx][2]);
-    else map_put(MAP_X0 + x, MAP_Y0 + y, (uint8_t)(NESPAL[idx][0] >> 2), (uint8_t)(NESPAL[idx][1] >> 2), (uint8_t)(NESPAL[idx][2] >> 2));
+  for (y = 0; y < 32; y++) for (x = 0; x < 48; x++)
+    map_put(MAP_X0 + x, MAP_Y0 + y, MAP_BG_R, MAP_BG_G, MAP_BG_B);
+  for (y = 0; y < maxsy; y++) for (x = 0; x < 8; x++) {
+    int bit, cx0, cy0, dx, dy;
+    bit = (visit_bits[lv - 1][((y * 8 + x) >> 3)] >> ((y * 8 + x) & 7)) & 1;
+    if (!bit) continue;
+    cx0 = MAP_X0 + x * MAP_CW; cy0 = MAP_Y0 + y * MAP_CH;
+    for (dy = 0; dy < MAP_FH; dy++) for (dx = 0; dx < MAP_FW; dx++)
+      map_put(cx0 + dx, cy0 + dy, MAP_RM_R, MAP_RM_G, MAP_RM_B);
   }
   for (i = 0; i < map_door_n[lv - 1]; i++) {
-    int dx = MAP_X0 + map_door_bx[lv - 1][i] * 2;
-    int dy = MAP_Y0 + map_door_by[lv - 1][i] * 2;
-    map_put(dx, dy, 248, 184, 0); map_put(dx + 1, dy, 248, 184, 0);
-    map_put(dx, dy + 1, 248, 184, 0); map_put(dx + 1, dy + 1, 248, 184, 0);
+    int bx = map_door_bx[lv - 1][i], by = map_door_by[lv - 1][i];
+    int osx = bx >> 2, osy = by >> 2, ox = bx & 3, oy = by & 3;
+    int edge = 0, m, dn, ds, dw, de, k, nx, ny;
+    if (osx < 0 || osx > 7 || osy < 0 || osy >= maxsy) continue;
+    if (!(((visit_bits[lv - 1][((osy * 8 + osx) >> 3)] >> ((osy * 8 + osx) & 7)) & 1))) continue;
+    dn = oy; ds = 3 - oy; dw = ox; de = 3 - ox; m = dn;
+    if (ds < m) { m = ds; edge = 1; }
+    if (dw < m) { m = dw; edge = 2; }
+    if (de < m) { m = de; edge = 3; }
+    nx = MAP_X0 + osx * MAP_CW; ny = MAP_Y0 + osy * MAP_CH;
+    if (edge == 0) { for (k = 1; k <= 3; k++) map_put(nx + k, ny - 1, 248, 184, 0); }
+    else if (edge == 1) { for (k = 1; k <= 3; k++) map_put(nx + k, ny + 3, 248, 184, 0); }
+    else if (edge == 2) { for (k = 0; k <= 2; k++) map_put(nx - 1, ny + k, 248, 184, 0); }
+    else { for (k = 0; k <= 2; k++) map_put(nx + 5, ny + k, 248, 184, 0); }
   }
+  blink = (ram[0xBE] == 0) ? 0 : ((frame_no >> 4) & 1);
   {
-    int cx = MAP_X0 + sx * 8 + 4, cy = MAP_Y0 + sy * 8 + 4, dx, dy;
-    for (dy = -2; dy <= 2; dy++) for (dx = -2; dx <= 2; dx++) map_put(cx + dx, cy + dy, 167, 0, 0);
-    for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) map_put(cx + dx, cy + dy, 252, 252, 252);
+    int cx0 = MAP_X0 + sx * MAP_CW + 2, cy0 = MAP_Y0 + sy * MAP_CH + 1;
+    uint8_t dr = blink ? 252 : 248, dg = blink ? 252 : 56, db = blink ? 252 : 56;
+    map_put(cx0, cy0, dr, dg, db); map_put(cx0 + 1, cy0, dr, dg, db);
+    map_put(cx0, cy0 + 1, dr, dg, db); map_put(cx0 + 1, cy0 + 1, dr, dg, db);
   }
 }
+
 static void map_blit_full(void) {
   int X0 = 64, Y0 = 8, W = 128, H, lv, rows, tx, ty, i;
   int area, clv, sx, sy, maxsy;

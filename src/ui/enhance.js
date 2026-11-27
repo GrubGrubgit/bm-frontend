@@ -286,6 +286,7 @@ export function buildEnhancePanel(env) {
       var hud = 'n/a';
       try { if (ex && ex.bm_map_show_get) hud = ex.bm_map_show_get() ? 'on' : 'off'; } catch (eS) {}
       st.mapStat.textContent = 'map L' + lv + ': ' + seen + '/64 seen - HUD ' + hud + ' - full map: Start-pause, Select, MAP row';
+      try { if (ex && ex.bm_map_show_get) { var m = !!ex.bm_map_show_get(); if (m !== st.mapShow) { st.mapShow = m; storeMapShow(m); if (st.mapInp) st.mapInp.checked = m; } } } catch (eM) {}
     } catch (e) {}
   }
   function apply(ex) {

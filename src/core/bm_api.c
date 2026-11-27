@@ -939,9 +939,38 @@ static void map_blit(void) {
   }
 }
 
+// ---- E8-M4 pause full-map: abstract room grid (matches the E8-M3 HUD minimap) ----
+// Fixed centered 8-col grid, 12x8 cells (2x minimap), visited fills (64,128,232),
+// dark unvisited (5,5,18) never pre-revealed, gold intra-level door notches /
+// white cross-area entrance notches on visited-room borders (nearest-edge rule,
+// same as the HUD), cyan breakable-cell borders (tank lv<=8 combo attr bit7+bit6),
+// 4x4 player dot (frozen red while stock-paused, BE==0, so pause-freeze proofs hold).
+// Level cycling skips unentered levels (zero visit bits); current level always
+// selectable. Grid is vertically centered above the vram legend (rows 18+, y>=144)
+// and horizontally centered (X0=80): fully inside the visible frame.
+#define FM_X0 80
+#define FM_CW 12
+#define FM_CH 8
+static int map_level_seen(int lv) {
+  int i;
+  if (lv < 1 || lv > 16) return 0;
+  for (i = 0; i < 8; i++) if (visit_bits[lv - 1][i]) return 1;
+  return 0;
+}
+static void pmenu_map_step(int d) {
+  int area = ram[0x14] & 15;
+  int clv = area < 8 ? area + 9 : area - 7;
+  int lv = pmenu_map_lv, guard;
+  for (guard = 0; guard < 16; guard++) {
+    lv += d;
+    if (lv < 1) lv = 16;
+    if (lv > 16) lv = 1;
+    if (lv == clv || map_level_seen(lv)) { pmenu_map_lv = lv; return; }
+  }
+}
 static void map_blit_full(void) {
-  int X0 = 64, Y0 = 8, W = 128, H, lv, rows, tx, ty, i;
-  int area, clv, sx, sy, maxsy;
+  int Y0, maxsy, lv, rows, x, y, i;
+  int area, clv, sx, sy;
   if (!enhanced_mode) return;
   if (pmenu_phase != 4) return;
   if (!pmenu_gameplay()) return;
@@ -949,56 +978,70 @@ static void map_blit_full(void) {
   if (lv < 1 || lv > 16) return;
   if (!map_valid[lv - 1] && !map_build(lv)) return;
   rows = map_rows[lv - 1];
-  H = rows * 4;
-  for (tx = X0 - 1; tx <= X0 + W; tx++) {
-    map_put(tx, Y0 - 1, 117, 117, 117);
-    map_put(tx, Y0 + H, 117, 117, 117);
+  maxsy = (rows + 3) >> 2;
+  Y0 = (140 - maxsy * FM_CH) / 2;
+  for (x = FM_X0 - 1; x <= FM_X0 + 96; x++) {
+    map_put(x, Y0 - 1, 117, 117, 117);
+    map_put(x, Y0 + maxsy * FM_CH, 117, 117, 117);
   }
-  for (ty = Y0 - 1; ty <= Y0 + H; ty++) {
-    map_put(X0 - 1, ty, 117, 117, 117);
-    map_put(X0 + W, ty, 117, 117, 117);
+  for (y = Y0 - 1; y <= Y0 + maxsy * FM_CH; y++) {
+    map_put(FM_X0 - 1, y, 117, 117, 117);
+    map_put(FM_X0 + 96, y, 117, 117, 117);
   }
-  for (ty = 0; ty < rows * 2; ty++) for (tx = 0; tx < 64; tx++) {
-    int sxx = tx >> 3, syy = ty >> 3;
-    int bit = (visit_bits[lv - 1][((syy * 8 + sxx) >> 3)] >> ((syy * 8 + sxx) & 7)) & 1;
-    uint8_t idx = map_px[lv - 1][ty * 64 + tx];
-    uint8_t rr = NESPAL[idx][0], gg = NESPAL[idx][1], bb = NESPAL[idx][2];
-    int px = X0 + tx * 2, py = Y0 + ty * 2;
-    if (!bit) { rr >>= 2; gg >>= 2; bb >>= 2; }
-    map_put(px, py, rr, gg, bb); map_put(px + 1, py, rr, gg, bb);
-    map_put(px, py + 1, rr, gg, bb); map_put(px + 1, py + 1, rr, gg, bb);
+  for (y = 0; y < maxsy * FM_CH; y++) for (x = 0; x < 96; x++)
+    map_put(FM_X0 + x, Y0 + y, MAP_BG_R, MAP_BG_G, MAP_BG_B);
+  for (y = 0; y < maxsy; y++) for (x = 0; x < 8; x++) {
+    int bit, cx0, cy0, dx, dy;
+    bit = (visit_bits[lv - 1][((y * 8 + x) >> 3)] >> ((y * 8 + x) & 7)) & 1;
+    if (!bit) continue;
+    cx0 = FM_X0 + x * FM_CW; cy0 = Y0 + y * FM_CH;
+    for (dy = 0; dy < 6; dy++) for (dx = 0; dx < 10; dx++)
+      map_put(cx0 + 1 + dx, cy0 + 1 + dy, MAP_RM_R, MAP_RM_G, MAP_RM_B);
   }
   for (i = 0; i < map_door_n[lv - 1]; i++) {
-    int dx = X0 + map_door_bx[lv - 1][i] * 4, dy = Y0 + map_door_by[lv - 1][i] * 4;
-    int exf = map_door_ent[lv - 1][i];
-    int qx, qy;
-    for (qy = 0; qy < 4; qy++) for (qx = 0; qx < 4; qx++) {
-      if (exf) map_put(dx + qx, dy + qy, 252, 252, 252);
-      else map_put(dx + qx, dy + qy, 248, 184, 0);
-    }
+    int bx = map_door_bx[lv - 1][i], by = map_door_by[lv - 1][i];
+    int osx = bx >> 2, osy = by >> 2, ox = bx & 3, oy = by & 3;
+    int edge = 0, m, dn, ds, dw, de, k, nx, ny;
+    uint8_t cr, cg, cb;
+    if (osx < 0 || osx > 7 || osy < 0 || osy >= maxsy) continue;
+    if (!(((visit_bits[lv - 1][((osy * 8 + osx) >> 3)] >> ((osy * 8 + osx) & 7)) & 1))) continue;
+    dn = oy; ds = 3 - oy; dw = ox; de = 3 - ox; m = dn;
+    if (ds < m) { m = ds; edge = 1; }
+    if (dw < m) { m = dw; edge = 2; }
+    if (de < m) { m = de; edge = 3; }
+    if (map_door_ent[lv - 1][i]) { cr = 252; cg = 252; cb = 252; }
+    else { cr = 248; cg = 184; cb = 0; }
+    nx = FM_X0 + osx * FM_CW; ny = Y0 + osy * FM_CH;
+    if (edge == 0) { for (k = 3; k <= 8; k++) map_put(nx + k, ny - 1, cr, cg, cb); }
+    else if (edge == 1) { for (k = 3; k <= 8; k++) map_put(nx + k, ny + FM_CH - 1, cr, cg, cb); }
+    else if (edge == 2) { for (k = 2; k <= 5; k++) map_put(nx - 1, ny + k, cr, cg, cb); }
+    else { for (k = 2; k <= 5; k++) map_put(nx + FM_CW, ny + k, cr, cg, cb); }
   }
-  for (i = 0; i < rows * 32; i++) {
-    if ((map_brk[lv - 1][i >> 3] >> (i & 7)) & 1) {
-      int dx = X0 + (i % 32) * 4, dy = Y0 + (i / 32) * 4;
-      int kk;
-      for (kk = 0; kk < 4; kk++) {
-        map_put(dx + kk, dy, 0, 232, 216); map_put(dx + kk, dy + 3, 0, 232, 216);
-        map_put(dx, dy + kk, 0, 232, 216); map_put(dx + 3, dy + kk, 0, 232, 216);
-      }
+  for (y = 0; y < maxsy; y++) for (x = 0; x < 8; x++) {
+    int any = 0, bxx, byy, cx0, cy0, k;
+    for (byy = 0; byy < 4 && !any; byy++) for (bxx = 0; bxx < 4; bxx++) {
+      int bi = (y * 4 + byy) * 32 + x * 4 + bxx;
+      if (bi < rows * 32 && ((map_brk[lv - 1][bi >> 3] >> (bi & 7)) & 1)) { any = 1; break; }
     }
+    if (!any) continue;
+    cx0 = FM_X0 + x * FM_CW; cy0 = Y0 + y * FM_CH;
+    for (k = 0; k < FM_CW; k++) { map_put(cx0 + k, cy0, 0, 232, 216); map_put(cx0 + k, cy0 + FM_CH - 1, 0, 232, 216); }
+    for (k = 0; k < FM_CH; k++) { map_put(cx0, cy0 + k, 0, 232, 216); map_put(cx0 + FM_CW - 1, cy0 + k, 0, 232, 216); }
   }
   area = ram[0x14] & 15;
   clv = area < 8 ? area + 9 : area - 7;
   if (clv == lv) {
-    int cx, cy, dx, dy;
+    int cx0, cy0, dx, dy;
+    int blink = (ram[0xBE] == 0) ? 0 : ((frame_no >> 4) & 1);
+    uint8_t dr = blink ? 252 : 248, dg = blink ? 252 : 56, db = blink ? 252 : 56;
     sx = (scx + 128) >> 8; if (sx < 0) sx = 0; if (sx > 7) sx = 7;
     sy = (scy + 120) >> 8; if (sy < 0) sy = 0;
-    maxsy = (rows + 3) >> 2; if (sy >= maxsy) sy = maxsy - 1;
-    cx = X0 + sx * 16 + 8; cy = Y0 + sy * 16 + 8;
-    for (dy = -2; dy <= 2; dy++) for (dx = -2; dx <= 2; dx++) map_put(cx + dx, cy + dy, 167, 0, 0);
-    for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) map_put(cx + dx, cy + dy, 252, 252, 252);
+    if (sy >= maxsy) sy = maxsy - 1;
+    cx0 = FM_X0 + sx * FM_CW + 4; cy0 = Y0 + sy * FM_CH + 2;
+    for (dy = 0; dy < 4; dy++) for (dx = 0; dx < 4; dx++) map_put(cx0 + dx, cy0 + dy, dr, dg, db);
   }
 }
+
 void bm_map_invalidate(void) { int i; for (i = 0; i < 16; i++) map_valid[i] = 0; }
 int bm_map_thumb_hash(int lv) {
   uint32_t h = 2166136261u;
@@ -1230,6 +1273,7 @@ static void menu_adjust_at(int cur, int dir) {
   else if (cur == 1) bm_setting_set(1, setting_mute ? 0 : 1);
   else if (cur == 2) { int v = setting_scale + dir; if (v < 0) v = 3; if (v > 3) v = 0; bm_setting_set(2, v); }
   else if (cur == 3) bm_setting_set(3, setting_filter ? 0 : 1);
+  else if (cur == 4) bm_map_show_set(map_show ? 0 : 1);
 }
 // F1: race-free open inside pad_fn. The game polls the pad in the main slice
 // BEFORE NMI entry, while menu_tick runs at NMI entry AFTER the host sets the
@@ -1398,15 +1442,15 @@ void menu_tick(void) {
           }
         }
       } else if (pmenu_phase == 3) {
-        if (e & 32) pmenu_cursor = (pmenu_cursor + 1) % 5;
-        if (e & 16) pmenu_cursor = (pmenu_cursor + 4) % 5;
+        if (e & 32) pmenu_cursor = (pmenu_cursor + 1) % 6;
+        if (e & 16) pmenu_cursor = (pmenu_cursor + 5) % 6;
         if (e & 64) menu_adjust_at(pmenu_cursor, -1);
         if (e & 128) menu_adjust_at(pmenu_cursor, 1);
         if (e & 2) { pmenu_phase = 1; pmenu_cursor = 0; }
-        else if (e & (8 | 1)) { if (pmenu_cursor == 4) { pmenu_phase = 1; pmenu_cursor = 0; } }
+        else if (e & (8 | 1)) { if (pmenu_cursor == 5) { pmenu_phase = 1; pmenu_cursor = 0; } }
       } else if (pmenu_phase == 4) {
-        if (e & (64 | 16)) { pmenu_map_lv--; if (pmenu_map_lv < 1) pmenu_map_lv = 16; }
-        if (e & (128 | 32)) { pmenu_map_lv++; if (pmenu_map_lv > 16) pmenu_map_lv = 1; }
+        if (e & (64 | 16)) pmenu_map_step(-1);
+        if (e & (128 | 32)) pmenu_map_step(1);
         if (e & 2) { pmenu_phase = 1; pmenu_cursor = 1; }
         else if (e & (8 | 1)) { pmenu_phase = 1; pmenu_cursor = 1; }
       }
@@ -1454,12 +1498,12 @@ void menu_tick(void) {
       }
     }
   } else if (menu_phase == 3) {
-    if (e & 32) menu_cursor = (menu_cursor + 1) % 5;
-    if (e & 16) menu_cursor = (menu_cursor + 4) % 5;
+    if (e & 32) menu_cursor = (menu_cursor + 1) % 6;
+    if (e & 16) menu_cursor = (menu_cursor + 5) % 6;
     if (e & 64) menu_adjust_at(menu_cursor, -1);
     if (e & 128) menu_adjust_at(menu_cursor, 1);
     if (e & 2) { menu_phase = 1; menu_cursor = 0; }
-    else if (e & (8 | 1)) { if (menu_cursor == 4) { menu_phase = 1; menu_cursor = 0; } }
+    else if (e & (8 | 1)) { if (menu_cursor == 5) { menu_phase = 1; menu_cursor = 0; } }
   }
   menu_prevpad = gp; pmenu_prevpad = gp;
 }
@@ -1503,7 +1547,10 @@ static void menu_draw_settings_at(int cur) {
   menu_text(14, 10, "FILTER ");
   menu_text(14, 17, setting_filter ? "BILINEAR" : "NEAREST");
   vram[16 * 32 + 8] = (uint8_t)(cur == 4 ? 1 : 0);
-  menu_text(16, 10, "BACK");
+  menu_text(16, 10, "MAP ");
+  menu_text(16, 14, map_show ? "ON" : "OFF");
+  vram[18 * 32 + 8] = (uint8_t)(cur == 5 ? 1 : 0);
+  menu_text(18, 10, "BACK");
 }
 void menu_draw(void) {
   int i;

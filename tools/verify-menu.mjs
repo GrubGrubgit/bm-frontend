@@ -207,8 +207,8 @@ let menuBlob = null;
 // so the boot is single-shot guarded and the inner run coasts to STOP.
 {
  let booted = false;
- const R = await drive({ span: 700,
- taps: [{ at: 120, pad: 8 }, { at: 200, pad: 32 }, { at: 240, pad: 1 }, { at: 280, pad: 128 }, { at: 300, pad: 32 }, { at: 320, pad: 128 }, { at: 340, pad: 32 }, { at: 360, pad: 128 }, { at: 380, pad: 32 }, { at: 400, pad: 128 }, { at: 420, pad: 32 }, { at: 440, pad: 1 }],
+ const R = await drive({ span: 740,
+ taps: [{ at: 120, pad: 8 }, { at: 200, pad: 32 }, { at: 240, pad: 1 }, { at: 280, pad: 128 }, { at: 300, pad: 32 }, { at: 320, pad: 128 }, { at: 340, pad: 32 }, { at: 360, pad: 128 }, { at: 380, pad: 32 }, { at: 400, pad: 128 }, { at: 420, pad: 32 }, { at: 440, pad: 1 }, { at: 460, pad: 32 }, { at: 480, pad: 1 }],
  onFrame: (ex, f, log) => {
  if (booted) {
  if (f === 11) log.push('sticky=' + ex.bm_setting_get(0) + ',' + ex.bm_setting_get(1) + ',' + ex.bm_setting_get(2) + ',' + ex.bm_setting_get(3));
@@ -217,8 +217,8 @@ let menuBlob = null;
  if (f === 10) { ex.bm_enhanced_set(1); ex.bm_saving_set(0); }
  if (f === 260) log.push('sub=' + findRow(blobOf(ex), 'SETTINGS'));
  if (f === 300) log.push('vol=' + ex.bm_setting_get(0));
- if (f === 470) log.push('pre=' + ex.bm_setting_get(0) + ',' + ex.bm_setting_get(1) + ',' + ex.bm_setting_get(2) + ',' + ex.bm_setting_get(3) + ' main=' + findRow(blobOf(ex), 'BLASTER MASTER'));
- if (f === 500) { booted = true; ex.bm_boot(); }
+ if (f === 510) log.push('pre=' + ex.bm_setting_get(0) + ',' + ex.bm_setting_get(1) + ',' + ex.bm_setting_get(2) + ',' + ex.bm_setting_get(3) + ' main=' + findRow(blobOf(ex), 'BLASTER MASTER'));
+ if (f === 540) { booted = true; ex.bm_boot(); }
  } });
  ok('SETTINGS adjusts all four, BACK returns, sticky across boot', !R.trap && R.log.indexOf('sub=4') >= 0 && R.log.indexOf('vol=9') >= 0 && R.log.some((x) => x === 'pre=9,1,1,1 main=4') && R.log.indexOf('sticky=9,1,1,1') >= 0, R.trap || R.log.join(' | '));
 }

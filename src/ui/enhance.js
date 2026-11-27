@@ -69,7 +69,7 @@ export function buildEnhancePanel(env) {
   if (!anchor) { log('enhance: logEl missing'); return () => {}; }
   const st = {
     enabled: loadFlag(), master: loadMaster(), mapShow: loadMapShow(),
-    pushedMaster: -1, pushedSaving: -1, pushedMap: -1, enableInp: null, mapInp: null, mapStat: null,
+    pushedMaster: -1, pushedSaving: -1, pushedMap: -1, pushInst: null, enableInp: null, mapInp: null, mapStat: null,
     listEl: null, packKey: null, refreshing: false,
     visitCache: null, visitCur: -2, visitTimer: 240, visitDirty: false, wasPregame: null, visitHash: null, syncSeq: 0,
   };
@@ -285,12 +285,24 @@ export function buildEnhancePanel(env) {
       }
       var hud = 'n/a';
       try { if (ex && ex.bm_map_show_get) hud = ex.bm_map_show_get() ? 'on' : 'off'; } catch (eS) {}
-      st.mapStat.textContent = 'map L' + lv + ': ' + seen + '/64 seen - HUD ' + hud + ' - full map: Start-pause, Select, MAP row';
+      var enhSt = '?', savSt = '?';
+      try { if (ex && ex.bm_enhanced_get) enhSt = ex.bm_enhanced_get() ? 'on' : 'OFF'; } catch (eE) {}
+      try { if (ex && ex.bm_saving_get) savSt = ex.bm_saving_get() ? 'on' : 'off'; } catch (eSv) {}
+      st.mapStat.textContent = 'enhanced ' + enhSt + ' - saves ' + savSt + ' - map L' + lv + ': ' + seen + '/64 seen - HUD ' + hud + ' - full map: Start-pause, Select, MAP row';
       try { if (ex && ex.bm_map_show_get) { var m = !!ex.bm_map_show_get(); if (m !== st.mapShow) { st.mapShow = m; storeMapShow(m); if (st.mapInp) st.mapInp.checked = m; } } } catch (eM) {}
     } catch (e) {}
   }
   function apply(ex) {
     try {
+      try {
+        var hi = null;
+        try { var hh = env.host(); hi = (hh && hh.inst) || null; } catch (eH) { hi = null; }
+        if (hi !== st.pushInst) {
+          st.pushInst = hi;
+          st.pushedMaster = -1; st.pushedSaving = -1; st.pushedMap = -1;
+          try { log('enhance: fresh engine, re-applied (enhanced ' + (st.master ? 'on' : 'off') + ', saves ' + (st.enabled ? 'on' : 'off') + ', map ' + (st.mapShow ? 'shown' : 'hidden') + ')'); } catch (eL) {}
+        }
+      } catch (eI) {}
       try { if (ex.bm_enhanced_set && st.pushedMaster !== (st.master ? 1 : 0)) { ex.bm_enhanced_set(st.master ? 1 : 0); st.pushedMaster = st.master ? 1 : 0; } } catch (e) {}
       try { if (ex.bm_saving_set && st.pushedSaving !== (st.enabled ? 1 : 0)) { ex.bm_saving_set(st.enabled ? 1 : 0); st.pushedSaving = st.enabled ? 1 : 0; } } catch (e) {}
       try { if (ex.bm_map_show_set && st.pushedMap !== (st.mapShow ? 1 : 0)) { ex.bm_map_show_set(st.mapShow ? 1 : 0); st.pushedMap = st.mapShow ? 1 : 0; } } catch (e) {}

@@ -675,11 +675,27 @@ static void pmenu_restore_render(void) {
 // Screens are 8x8 per level max (screensX=8 always); bit (sy*8+sx).
 static uint8_t visit_bits[16][8];
 static const uint8_t visit_rows[16] = { 32, 32, 32, 32, 32, 32, 32, 32, 25, 32, 32, 32, 29, 32, 32, 32 };
+// E8-MAPFIX 2026-11-28: player world position to map cell.
+// Level frame is the 32x32-block map (block 64px, cell 4x4 blocks).
+// X = (R403:R402)/16 px, Y = (R405:R404)/16 px, both proven absolute
+// headless (teleport-accepted, ground/wall-covarying).
+// Old code used PPU fine-scroll (scx/scy), which wraps per nametable.
+static int abs_cell(int *sx, int *sy) {
+  int x = (ram[0x403] << 8) | ram[0x402];
+  int y = (ram[0x405] << 8) | ram[0x404];
+  int cx, cy;
+  *sx = 0; *sy = 0;
+  if (x == 0 || y == 0) return 0;
+  cx = x >> 12; if (cx < 0) cx = 0; if (cx > 7) cx = 7;
+  cy = y >> 12; if (cy < 0) cy = 0; if (cy > 7) cy = 7;
+  *sx = cx; *sy = cy;
+  return 1;
+}
 static void visit_mark(void) {
   int area = ram[0x14] & 15;
   int lv = area < 8 ? area + 9 : area - 7;
-  int sx = (scx + 128) >> 8; if (sx < 0) sx = 0; if (sx > 7) sx = 7;
-  int sy = (scy + 120) >> 8; if (sy < 0) sy = 0;
+  int sx, sy;
+  if (!abs_cell(&sx, &sy)) return;
   int maxsy = (visit_rows[lv - 1] + 3) >> 2;
   if (sy >= maxsy) sy = maxsy - 1;
   visit_bits[lv - 1][((sy * 8 + sx) >> 3)] |= (uint8_t)(1 << ((sy * 8 + sx) & 7));
@@ -701,8 +717,7 @@ int bm_visit_cur(void) {
   if (ram[0xDD] == 0 && ram[0x37E] == 0) return -1;
   area = ram[0x14] & 15;
   lv = area < 8 ? area + 9 : area - 7;
-  sx = (scx + 128) >> 8; if (sx < 0) sx = 0; if (sx > 7) sx = 7;
-  sy = (scy + 120) >> 8; if (sy < 0) sy = 0;
+  if (!abs_cell(&sx, &sy)) return -1;
   maxsy = (visit_rows[lv - 1] + 3) >> 2;
   if (sy >= maxsy) sy = maxsy - 1;
   return (lv - 1) * 64 + sy * 8 + sx;
@@ -893,9 +908,9 @@ static void map_blit(void) {
   if (lv < 1 || lv > 16) return;
   if (!map_valid[lv - 1] && !map_build(lv)) return;
   rows = map_rows[lv - 1];
-  sx = (scx + 128) >> 8; if (sx < 0) sx = 0; if (sx > 7) sx = 7;
-  sy = (scy + 120) >> 8; if (sy < 0) sy = 0;
-  maxsy = (rows + 3) >> 2; if (sy >= maxsy) sy = maxsy - 1;
+  { int cell_ok = abs_cell(&sx, &sy);
+    maxsy = (rows + 3) >> 2; if (sy >= maxsy) sy = maxsy - 1;
+    if (!cell_ok) { sx = -1; sy = -1; } }
   for (x = MAP_X0 - 1; x <= MAP_X0 + 48; x++) {
     map_put(x, MAP_Y0 - 1, 117, 117, 117);
     map_put(x, MAP_Y0 + 32, 117, 117, 117);
@@ -931,7 +946,7 @@ static void map_blit(void) {
     else { for (k = 0; k <= 2; k++) map_put(nx + 5, ny + k, 248, 184, 0); }
   }
   blink = (ram[0xBE] == 0) ? 0 : ((frame_no >> 4) & 1);
-  {
+  if (sx >= 0 && sy >= 0) {
     int cx0 = MAP_X0 + sx * MAP_CW + 2, cy0 = MAP_Y0 + sy * MAP_CH + 1;
     uint8_t dr = blink ? 252 : 248, dg = blink ? 252 : 56, db = blink ? 252 : 56;
     map_put(cx0, cy0, dr, dg, db); map_put(cx0 + 1, cy0, dr, dg, db);
@@ -1034,9 +1049,9 @@ static void map_blit_full(void) {
     int cx0, cy0, dx, dy;
     int blink = (ram[0xBE] == 0) ? 0 : ((frame_no >> 4) & 1);
     uint8_t dr = blink ? 252 : 248, dg = blink ? 252 : 56, db = blink ? 252 : 56;
-    sx = (scx + 128) >> 8; if (sx < 0) sx = 0; if (sx > 7) sx = 7;
-    sy = (scy + 120) >> 8; if (sy < 0) sy = 0;
+    if (!abs_cell(&sx, &sy)) { sx = -1; sy = -1; }
     if (sy >= maxsy) sy = maxsy - 1;
+    if (sx < 0 || sy < 0) return;
     cx0 = FM_X0 + sx * FM_CW + 4; cy0 = Y0 + sy * FM_CH + 2;
     for (dy = 0; dy < 4; dy++) for (dx = 0; dx < 4; dx++) map_put(cx0 + dx, cy0 + dy, dr, dg, db);
   }

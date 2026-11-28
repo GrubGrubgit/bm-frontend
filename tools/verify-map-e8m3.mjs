@@ -231,18 +231,18 @@ function expectedBox(F, lv, rows) {
 }
 {
   const outS = {};
-  const RS = await drive({ span: 500, rec: false, taps: [{ at: 61, pad: 8 }], frames: [410], out: outS,
+  const RS = await drive({ span: 700, rec: false, taps: [{ at: 61, pad: 8 }], frames: [600], out: outS,
     onFrame: (ex, f) => {
       if (f === 200) ex.bm_enhanced_set(1);
       if (f === 300) ex.bm_warp_raw(9);
-      if (f === 400) {
+      if (f === 500) {
         const cells = [[4, 4], [1, 5], [1, 6], [7, 0], [4, 2], [5, 3], [2, 1]];
         for (const c of cells) ex.bm_visit_set(2, c[0], c[1], 1);
       }
     } });
   let bad = 0, first = '';
-  if (!RS.trap && outS[410]) {
-    const F = outS[410];
+  if (!RS.trap && outS[600]) {
+    const F = outS[600];
     const d = decodeCur(F.cur);
     const exp = expectedBox(F, d.lv, mm.levels[d.lv].rows);
     for (const k of Object.keys(exp)) {

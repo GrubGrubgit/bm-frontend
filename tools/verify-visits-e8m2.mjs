@@ -76,7 +76,7 @@ async function walkRun(extraTaps) {
   const marked = [];
   for (let lv = 1; lv <= 16; lv++) for (let s = 0; s < 64; s++) if ((bits[(lv - 1) * 8 + (s >> 3)] >> (s & 7)) & 1) marked.push(lv + ':' + (s % 8) + ',' + ((s / 8) | 0));
   const l2 = marked.filter((m) => m[0] === '2');
-  ok('C walk marks L2 screens (2+ incl sx0+sx1)', !R.trap && l2.length >= 2 && l2.some((m) => m[2] === '0') && l2.some((m) => m[2] === '1'), R.trap || marked.join(' '));
+  ok('C walk marks L2 path 4,4->5,4 (no init artifact)', !R.trap && l2.length === 2 && l2.indexOf('2:4,4') >= 0 && l2.indexOf('2:5,4') >= 0, R.trap || marked.join(' '));
   const last = R.rec[R.rec.length - 1];
   ok('C cur valid in gameplay', !R.trap && last.cur >= 0, R.trap || ('cur=' + last.cur));
 }
